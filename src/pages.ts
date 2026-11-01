@@ -68,7 +68,7 @@ import {
 import { extractOgImage, sanitizeHtml } from './sanitize'
 import { hasValidUnlock, isProtected, PP_COOKIE, PP_CSS, passwordFormHtml, protectedDescription } from './protect'
 import { normalizeMinTier } from './points'
-import { canReadTiers, effectiveTier, parseMemberTiers, type MemberTierDef } from './tiers'
+import { canReadTiers, effectiveTier, parseMemberTiers, upgradeTarget, type MemberTierDef } from './tiers'
 import { applyCommentGate, commentGateContext } from './commentgate'
 import { renderPostContentHtml } from './hooks'
 import { getTheme, THEMES } from './themes/registry'
@@ -1281,7 +1281,12 @@ export async function renderMember(c: C): Promise<Response> {
     if (row) {
       const fan = fanLevel(row.points, row.active_days ?? 0)
       // 生效档位（src/tiers.ts）：过期即时降级基础档；卡上带有效期与公告（会员 3.0 预备）
-      const eff = effectiveTier(parseMemberTiers(settings.memberTiers), row.tier, row.tier_expires_at)
+      const defs = parseMemberTiers(settings.memberTiers)
+      const eff = effectiveTier(defs, row.tier, row.tier_expires_at)
+      // 升级入口（2026-11 第五批）：目标档 = 优质会员；已在该档及以上就整块不出
+      const target = upgradeTarget(defs)
+      const canUpgrade = !!target && eff.rank < (target.rank ?? 1)
+      const redeemCost = Math.trunc(Number(settings.premiumPointsCost || 0))
       member = {
         nickname: (row.display_name || row.username).slice(0, 24),
         tier: row.tier,
@@ -1302,6 +1307,9 @@ export async function renderMember(c: C): Promise<Response> {
         tierExpiresAt: row.tier_expires_at ?? null,
         tierExpired: eff.expired,
         tierDowngradedFrom: eff.downgradedFrom,
+        upgradeTargetName: canUpgrade ? target!.name : undefined,
+        upgradeCost: canUpgrade && redeemCost > 0 ? redeemCost : undefined,
+        paidNote: canUpgrade && settings.premiumPaidNote?.trim() ? settings.premiumPaidNote.trim() : undefined,
         notice: settings.memberNotice?.trim() || undefined,
         activity: await memberActivity(c.env.DB, row.id),
       }

@@ -3248,6 +3248,32 @@
         })
     })
 
+  // 积分兑换优质会员（2026-11 会员第五批）：POST /api/member/redeem-premium。
+  // 一次兑换永久有效，所以成功后就整页刷新让档位徽标换成新档；失败只写 tip 不动按钮
+  var memRedeemBtn = document.querySelector('[data-member-redeem]')
+  if (memRedeemBtn)
+    memRedeemBtn.addEventListener('click', function () {
+      if (memRedeemBtn.disabled) return
+      var tip = document.querySelector('[data-member-redeem-tip]')
+      var label = memRedeemBtn.textContent
+      if (!confirm(T('确认用积分兑换会员？兑换后积分不退。'))) return
+      memRedeemBtn.disabled = true
+      memRedeemBtn.textContent = T('兑换中…')
+      postJSON('/api/member/redeem-premium', {})
+        .then(function (d) {
+          memRedeemBtn.textContent = T('兑换成功')
+          if (tip) tip.textContent = T('已升级为「') + d.tierName + T('」，剩余积分 ') + d.points
+          setTimeout(function () {
+            reloadFresh()
+          }, 1200)
+        })
+        .catch(function (err) {
+          if (tip) tip.textContent = err.message || T('兑换失败，请重试')
+          memRedeemBtn.textContent = label
+          memRedeemBtn.disabled = false
+        })
+    })
+
   var memLogout = document.querySelector('[data-member-logout]')
   if (memLogout)
     memLogout.addEventListener('click', function () {

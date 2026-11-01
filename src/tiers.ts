@@ -206,3 +206,12 @@ export function canReadTiers(
   const eff = effectiveTier(defs, member.tier, member.tier_expires_at, now)
   return eff.rank >= need
 }
+
+/**
+ * 「升级」的目标档（2026-11 会员第五批：优质会员的三条来路——邀请码 / 积分兑换 / 付费）：
+ * 固定取 premium（优质会员）；站长把这档删掉或改名时兜底到第二档，再没有就 null（不提供升级入口）。
+ * 语义是「升到优质这一层」，不该被自定义 key 绑死——站长想改叫「白银会员」也照样成立。
+ */
+export function upgradeTarget(defs: MemberTierDef[]): MemberTierDef | null {
+  return tierByKey(defs, 'premium') ?? defs[1] ?? null
+}

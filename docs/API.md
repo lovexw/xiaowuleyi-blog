@@ -87,7 +87,7 @@ Body `{"delta": 1}` 或 `{"delta": -1}`，返回 `{"ok":true,"likes":7}`。计�
 - `link` 是蜜罐字段，正常客户端永远传空字符串/不传；限流同 IP 10 分钟 5 次
 - 用户名 2-24 位字母/数字/`_`/`-`，密码 8-64 位；用户名占用或校验失败 400
 - `nickname` 选填（中英文均可，剥控制字符后 ≤24 字符，仅展示不做唯一约束）；注册填写**不占用** 30 天修改窗口
-- `inviteCode` 选填：后台生成的一次性邀请码（大小写/空格/连字符都容忍）。有效则注册后**直接获得该码指定的档位**（有效期按该档默认天数），码即核销；无效/已用/过期 400。**站点关闭「开放注册」时它是唯一入口**（无码 403）
+- `inviteCode` 选填：后台生成的邀请码（大小写/空格/连字符都容忍）。有效则注册后**直接获得该码指定的档位**（有效期按该档默认天数），码即核销一次；**无效/次数用尽/过期 400**。码可分「一码一人 / 限 N 次 / 不限次」，抢最后一个名额时只有一位能成功（失败方 409，且不留半成品会员）。**站点关闭「开放注册」时它是唯一入口**（无码或码不可用 403）
 - 成功即登录：`{ok:true, member:{nickname,tier,tierName,points,...}}` 并签发 `xw_member_session` Cookie（HttpOnly，30 天，与管理员会话完全独立）
 
 ### POST /api/member/login
@@ -107,6 +107,14 @@ Body `{"delta": 1}` 或 `{"delta": -1}`，返回 `{"ok":true,"likes":7}`。计�
 - **游客也可选填** `qq`（评论头像 C2 扩展）：三路评论接口的 body 都收 `qq` 字段——校验 `^[1-9][0-9]{4,10}$`，**格式不对按没填处理**（不拦评论）；合法则服务端抓取腾讯头像转存 R2（同号历史头像直接复用，不重复抓取）。qq 号本体任何接口都不返回，评论行只带 `avatar`（站内 `/images/` 地址）
 - 微博评论 JSON（`GET /api/public/weibo/:id/comments`）与文章 / 留言板评论渲染新增 `member_avatar`（会员头像）与 `avatar`（游客自填 QQ 抓取的站内头像）字段，前端按 会员 → 作者站点头像 → 游客 → 昵称首字块 取值
 - 评论头像位优先级：会员 `member_avatar` → 作者评论（`is_admin=1`）用 `adminAvatar`（站点头像，与微博卡同源）→ 昵称首字块
+
+### POST /api/member/redeem-premium
+用积分兑换**优质会员**（需登录；会员功能关闭时 404）。无 body。价格取 `settings.premiumPointsCost`，**`0` = 未开放**（直接 400「积分兑换暂未开放」）。
+
+- 成功 → `{ok:true, points: 剩余积分, tier, tierName, tierExpiresAt}`：扣分与升档同一批完成（余额不足整笔不生效，积分一分不动），档位来源记 `points`，优质会员是永久档（`tierExpiresAt: null`）
+- **一次性**：同一会员只能兑换一次（积分账本的 `(member_id, reason='redeemTier', ref_id=1)` 部分唯一索引做幂等键），重复调用 400「你已经兑换过了」
+- 已是该档及以上（含咖啡会员）→ 400「你已经是「优质会员」，无需兑换」，不白扣分；**已过期而降级的会员可以兑换**（档位判定一律走 `effectiveTier`）
+- 积分不够 400「积分不够，还差 N 分」；未登录 401；按 IP 5 次/分钟限流
 
 ### POST /api/member/password
 修改密码（需登录；会员功能关闭时 404）。Body：`{ "currentPassword": "当前密码", "newPassword": "新密码" }`。
@@ -402,19 +410,22 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
 已注册主题列表 `{themes:[{id,name,description,colors,appearance}]}`，`colors` 为后台皮肤卡预览色板（`[背景, 强调条, 卡面, 卡面2, 卡面3]`，未设置时为 `null`）；`appearance` 是该主题支持的外观变量元信息（角色/默认值/变量名清单/字号基线/圆角旋钮 `{var,default,lgFactor}`/字体预设，B9；后台实时预览用变量名构造同款覆盖样式）。
 
 ### GET /api/admin/members?page=1&q=
-会员列表（后台「会员」页数据源）：`{items:[{id, username, email, display_name, avatar, tier, points, status, created_at, updated_at, last_login_at}], total, page, totalPages}`（不含 password_hash/salt）；`q` 模糊匹配用户名 / 邮箱，20 条/页。
+会员列表（后台「会员」页数据源）：`{items:[{id, username, email, display_name, avatar, tier, tier_expires_at, tier_source, points, status, created_at, updated_at, last_login_at}], total, page, totalPages}`（不含 password_hash/salt）；`tier_source` 是档位来源标注（register / invite / points / paid / manual），**只作运营展示，不参与权限判定**；`q` 模糊匹配用户名 / 邮箱，20 条/页。
 
 ### PUT /api/admin/members/:id
-改档位 / 封禁，**缺键即保留**（只传要改的键）：`{ "tier": "档位key（须在 settings.memberTiers 定义里）", "tierExpiresAt": "2027-10-21|null" }` 或 `{ "status": "active|banned" }` → `{ok:true}`；`status:"banned"` 同时清空该会员全部会话（即刻踢下线），历史评论保留。未知档位 400，会员不存在 404。限时档到期后**不会消失**，按该档的 fallback 降级（默认降一档）。
+改档位 / 封禁，**缺键即保留**（只传要改的键）：`{ "tier": "档位key（须在 settings.memberTiers 定义里）", "tierExpiresAt": "2027-10-21|null", "tierSource": "paid" }` 或 `{ "status": "active|banned" }` → `{ok:true}`；`tierSource` 白名单 register / invite / points / paid / manual（其余一律记 manual），只作展示；`status:"banned"` 同时清空该会员全部会话（即刻踢下线），历史评论保留。未知档位 400，会员不存在 404。限时档到期后**不会消失**，按该档的 fallback 降级（默认降一档）。
 
-### GET /api/admin/invites?page=1&status=unused|used|all
-注册邀请码列表（后台「会员 → 邀请码」）：`{items:[{id, code, tier, note, created_at, expires_at, used_at, used_by, used_by_name}], total, page, totalPages, unused, used, tiers}`（`tiers` 是当前档位定义，生成表单的下拉直接用它）；20 条/页，新的在前。
+### GET /api/admin/invites?page=1&status=usable|usedup|expired|all
+注册邀请码列表（后台「会员 → 邀请码」）：`{items:[{id, code, tier, note, max_uses, used_count, created_at, expires_at, used_at, used_by, used_by_name}], total, page, totalPages, usable, usedup, expired, tiers}`（`tiers` 是当前档位定义，生成表单的下拉直接用它；三个计数直接喂筛选按钮）；20 条/页，新的在前。三态口径与 `src/invite.ts` 的 `inviteStatus` 一致：**已用完优先于已过期**（`max_uses > 0 && used_count >= max_uses` 先判），`max_uses = 0`（不限）的码永远不会进 usedup。
 
 ### POST /api/admin/invites
-生成邀请码：`{ "tier": "premium", "count": 1, "days": 0, "note": "选填备注" }` → `{ok:true, codes:["ABCD2345"], count, tier, tierName, expiresAt}`。`count` 1-50，`days` 是**码自身**的有效期（0 = 不过期），`note` ≤60 字；档位必须在定义里（脏值 400）。
+生成邀请码：`{ "tier": "premium", "count": 1, "maxUses": 1, "days": 0, "note": "选填备注" }` → `{ok:true, codes:["ABCD2345"], count, tier, tierName, expiresAt, maxUses}`。`count` 1-50；`maxUses` = 每码可用次数（1 = 一码一人，0 = 不限，2-1000 = 限量，脏值 400）；`days` 是**码自身**的有效期（0 = 不过期），`note` ≤60 字；档位必须在定义里（脏值 400）。
+
+### GET /api/admin/invites/:id/uses
+某个码的核销明细（后台「明细」按钮）：`{invite, uses:[{id, invite_id, code, member_id, member_name, tier, created_at}], tiers}`，按时间倒序取最近 100 条。一码多人时靠它回查「谁凭这个码进来的」。
 
 ### DELETE /api/admin/invites/:id
-撤销未使用的邀请码 → `{ok:true}`；**已核销的返回 409**（那是「谁凭哪个码进来的」的账，要能回查）。
+撤销**从未被使用过**的邀请码 → `{ok:true}`；**已经有人用过的返回 409**（那是「谁凭哪个码进来的」的账，要能回查）。
 
 ## 外部接口（Token 鉴权，供 Telegram 机器人 / 第三方工具调用）
 

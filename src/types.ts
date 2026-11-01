@@ -34,6 +34,8 @@ export interface MemberRow {
   tier: MemberTier
   /** 档位有效期（毫秒）；NULL = 永久/不失效。过期在读侧即时降级为基础档（src/tiers.ts effectiveTier） */
   tier_expires_at?: number | null
+  /** 档位来源（只做运营标注，不参与权限判定）：register / invite / points / paid / manual，空 = 历史数据 */
+  tier_source?: string
   points: number
   status: 'active' | 'banned'
   created_at: number

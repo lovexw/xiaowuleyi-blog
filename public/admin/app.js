@@ -2032,6 +2032,9 @@ async function viewTrash() {
 /** 会员管理页：列表 / 搜用户名邮箱 / 改档位 / 封禁解封（API 形状见 DEVPLAN-2026-10-07 附录 A5） */
 const MEMBER_TIER_LABEL = { normal: '注册会员', premium: '优质会员', coffee: '咖啡会员', top: '付费会员（旧）' }
 
+/** 档位来源的展示名（members.tier_source）：只做运营标注，不参与任何权限判定 */
+const TIER_SOURCE_LABEL = { register: '注册自带', invite: '邀请码', points: '积分兑换', paid: '付费', manual: '手动授予' }
+
 /** 邀请码展示形态（与 src/invite.ts 的 formatInviteCode 同口径：ABCD1234 → ABCD-1234）。
  *  后台是纯前端模块，拿不到服务端模块，这里保留一份极小的镜像 */
 function formatInviteCode(code) {
@@ -2055,9 +2058,10 @@ async function viewMembers() {
   const tab = tabRaw === 'settings' || tabRaw === 'invites' ? tabRaw : 'list'
   const page = parseInt(q.get('page') || '1', 10)
   const kw = (q.get('q') || '').trim()
-  const status = q.get('status') === 'used' ? 'used' : q.get('status') === 'unused' ? 'unused' : 'all'
+  const st = q.get('status')
+  const status = st === 'usable' || st === 'usedup' || st === 'expired' ? st : 'all'
 
-  let d = { items: [], total: 0, page: 1, totalPages: 1, tiers: [], unused: 0, used: 0 }
+  let d = { items: [], total: 0, page: 1, totalPages: 1, tiers: [], usable: 0, usedup: 0, expired: 0 }
   try {
     if (tab === 'settings') {
       // 与设置页共用 state.settings 缓存：保存后侧栏等依赖设置的 UI 立即生效
@@ -2089,6 +2093,8 @@ async function viewMembers() {
       <div class="post-main">
         <div class="post-title">${esc(m.username)}${tierChip(m)}${m.status === 'banned' ? '<span class="chip chip-gray">已封禁</span>' : ''}</div>
         <div class="post-meta"><span>积分 ${m.points}</span>${m.email ? `<span>·</span><span>${esc(m.email)}</span>` : ''}${
+        m.tier_source ? `<span>·</span><span>来源 ${esc(TIER_SOURCE_LABEL[m.tier_source] || m.tier_source)}</span>` : ''
+      }${
         m.tier_expires_at && !(tierDef(m.tier) || { permanent: m.tier === 'normal' }).permanent
           ? `<span>·</span><span>${m.tier_expires_at <= now ? '已于' : '有效期至'} ${fmtDateShort(m.tier_expires_at)}</span>`
           : ''
@@ -2178,8 +2184,8 @@ async function viewMembers() {
 /** 会员页三个 tab 的副标题（page-head 文案随 tab 变） */
 const MEMBERS_TAB_SUB = {
   list: '站内注册的会员 · 评论与每日登录攒积分',
-  settings: '会员体系总开关、档位定义与注册规则',
-  invites: '一次性邀请码：凭码注册直接获得指定档位',
+  settings: '会员体系总开关、档位定义、优质会员的三条来路',
+  invites: '邀请码：一人一码 / 限量 N 次 / 不限次数，凭码注册直接拿到指定档位',
 }
 
 /** 会员设置面板（2026-11 从「设置 → 互动」整体迁入）：开关 + 档位定义 + 注册验证。
@@ -2211,6 +2217,17 @@ function memberSettingsPane(s) {
         <input class="input" id="st-turnstileSiteKey" placeholder="0x4AAAA…（Site Key，公开）" autocomplete="off" value="${esc(s.turnstileSiteKey || '')}" style="margin-bottom:8px;">
         <input class="input" id="st-turnstileSecret" placeholder="0x4AAAA…（Secret Key，保密）" autocomplete="off" value="${esc(s.turnstileSecret || '')}">
       </div>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:20px;">
+    <div class="form-section"><h3>优质会员的三条来路</h3>
+      <div class="sec-desc"><b>邀请码</b>在「邀请码」页签发；<b>积分兑换</b>与<b>付费</b>在这里配置。三条来路互不冲突，都只是「把某个会员升到优质这一档」的不同入口</div>
+      <div class="form-row">
+        <div class="form-item" style="max-width:220px;"><label>积分兑换价格</label><input class="input" id="st-premiumPointsCost" type="number" min="0" max="1000000" value="${esc(s.premiumPointsCost || '0')}"><div class="sec-desc" style="margin-top:4px;"><b>0 = 未开放</b>（前台不出现兑换入口）。填个数即刻开通，不用另开开关</div></div>
+        <div class="form-item" style="flex:1;min-width:260px;"><label>付费说明（选填）</label><input class="input" id="st-premiumPaidNote" maxlength="200" placeholder="如：加微信 xxx 转账 ¥99/年，24 小时内开通" value="${esc(s.premiumPaidNote || '')}"><div class="sec-desc" style="margin-top:4px;">本站没有在线支付通道：读者线下付款后你在这里把他的档位改成优质会员即可。这段文案显示在会员中心的升级卡里，告诉读者怎么找你</div></div>
+      </div>
+      <div class="sec-desc" style="margin-top:6px;">兑换是<b>一次性</b>的（一次兑换永久有效，同一会员不能重复兑换）；兑换扣分与升档同一批完成，余额不够整笔不生效</div>
     </div>
   </div>
 
@@ -2253,6 +2270,8 @@ function bindMemberSettings() {
       rankTopN: g('st-rankTopN').value || '10',
       memberNotice: g('st-memberNotice').value.trim(),
       commentGateTier: g('st-commentGateTier').value || '0',
+      premiumPointsCost: g('st-premiumPointsCost').value.trim() || '0',
+      premiumPaidNote: g('st-premiumPaidNote').value.trim(),
       // 档位定义整份提交：服务端 cleanMemberTiers 校验（含 fallback 必须更低），脏值 400 不静默降级
       memberTiers: JSON.stringify(memberTierDraft),
       turnstileSiteKey: g('st-turnstileSiteKey').value.trim(),
@@ -2273,41 +2292,48 @@ function bindMemberSettings() {
   })
 }
 
-/** 邀请码面板：生成表单 + 列表（未使用 / 已使用 / 已过期三态由 expires_at 现算） */
+/** 邀请码面板：生成表单 + 列表（可用 / 已用完 / 已过期三态由 inviteStatus 同口径现算） */
 function invitesPane(d, status) {
   const now = Date.now()
   const tierName = (key) => memberTierName(d.tiers, key)
   const filter = (v, label) => `<button class="btn btn-sm${status === v ? '' : ' btn-ghost'}" data-inv-status="${v}" type="button">${label}</button>`
   const rows = (d.items || [])
     .map((c) => {
-      const expired = c.expires_at && c.expires_at <= now && !c.used_at
-      const stateChip = c.used_at
-        ? `<span class="chip chip-green">已使用</span>`
+      const max = Number(c.max_uses ?? 1)
+      const used = Number(c.used_count ?? (c.used_at ? 1 : 0))
+      const usedup = max > 0 && used >= max
+      const expired = !usedup && c.expires_at && c.expires_at <= now
+      const stateChip = usedup
+        ? `<span class="chip chip-gray">已用完</span>`
         : expired
           ? `<span class="chip chip-gray">已过期</span>`
-          : `<span class="chip chip-warn">未使用</span>`
-      const meta = c.used_at
-        ? `由 ${esc(c.used_by_name || '（已删会员）')} 于 ${fmtDateTime(c.used_at)} 使用`
+          : `<span class="chip chip-warn">可用</span>`
+      // 次数：不限量写「不限」，限量写「已用 x/y」，一码一人写「已用/未用」——站长一眼看出这码还能不能发
+      const quota = max === 0 ? `不限次数 · 已用 ${used} 次` : `已用 ${used}/${max} 次`
+      const meta = used
+        ? `${esc(c.used_by_name || '（已删会员）')} 于 ${fmtDateTime(c.used_at)} ${max === 1 ? '使用' : '最近使用'}${c.expires_at ? `　·　${c.expires_at <= now ? '已于' : '有效期至'} ${fmtDateShort(c.expires_at)}` : ''}`
         : c.expires_at
           ? `${c.expires_at <= now ? '已于' : '有效期至'} ${fmtDateShort(c.expires_at)}`
           : '长期有效'
       return `<div class="post-row" data-id="${c.id}" data-code="${esc(c.code)}">
       <div class="post-main">
-        <div class="post-title"><code style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${esc(formatInviteCode(c.code))}</code> ${stateChip}<span class="chip chip-gray">${esc(tierName(c.tier))}</span></div>
+        <div class="post-title"><code style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${esc(formatInviteCode(c.code))}</code> ${stateChip}<span class="chip chip-gray">${esc(tierName(c.tier))}</span><span class="chip chip-gray">${esc(quota)}</span></div>
         <div class="post-meta"><span>${meta}</span>${c.note ? `<span>·</span><span>${esc(c.note)}</span>` : ''}<span>·</span><span>${fmtDateTime(c.created_at)} 生成</span></div>
       </div>
       <div class="post-ops">
         <button class="btn btn-ghost btn-sm" data-inv-copy type="button">复制</button>
-        ${c.used_at ? '' : '<button class="btn btn-ghost btn-sm btn-danger" data-inv-del type="button">撤销</button>'}
+        ${used ? '<button class="btn btn-ghost btn-sm" data-inv-uses type="button">明细</button>' : ''}
+        ${used ? '' : '<button class="btn btn-ghost btn-sm btn-danger" data-inv-del type="button">撤销</button>'}
       </div>
     </div>`
     })
     .join('')
   return `<div class="panel" style="padding:20px;">
-    <div class="form-section"><h3>生成邀请码</h3><div class="sec-desc">一次性：一码一人，用完即废。持码注册的人直接拿到所选档位，不用你再手动改档位。前台注册表单可以填码；「开放注册」关掉时，邀请码就是唯一的注册入口</div>
+    <div class="form-section"><h3>生成邀请码</h3><div class="sec-desc">持码注册的人直接拿到所选档位，不用你再手动改档位。前台注册表单可以填码；「开放注册」关掉时，邀请码就是唯一的注册入口。<b>次数与有效期是两个独立维度</b>：发 10 个「一人一码的码」和发 1 个「限 10 次的码」都能表达，按场合选</div>
       <div class="form-row">
         <div class="form-item" style="max-width:200px;"><label>授予档位</label><select class="input" id="inv-tier">${(d.tiers || []).map((t) => `<option value="${esc(t.key)}"${t.key === 'premium' ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
         <div class="form-item" style="max-width:120px;"><label>数量</label><input class="input" id="inv-count" type="number" min="1" max="50" value="1"></div>
+        <div class="form-item" style="max-width:140px;"><label>每码可用次数</label><input class="input" id="inv-max" type="number" min="0" max="1000" value="1"><div class="sec-desc" style="margin-top:4px;">1 = 一码一人；0 = 不限；N = 限 N 次</div></div>
         <div class="form-item" style="max-width:150px;"><label>码有效期（天）</label><input class="input" id="inv-days" type="number" min="0" max="3650" value="0"><div class="sec-desc" style="margin-top:4px;">0 = 不过期</div></div>
         <div class="form-item" style="flex:1;min-width:180px;"><label>备注（选填）</label><input class="input" id="inv-note" maxlength="60" placeholder="如：小红书引流第 1 批"></div>
         <div class="form-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn btn-primary" id="btn-inv-gen" type="button">生成</button></div>
@@ -2317,9 +2343,10 @@ function invitesPane(d, status) {
 
   <div class="toolbar">
     <div style="display:flex;gap:6px;">
-      ${filter('all', `全部（${(d.unused || 0) + (d.used || 0)}）`)}
-      ${filter('unused', `未使用（${d.unused || 0}）`)}
-      ${filter('used', `已使用（${d.used || 0}）`)}
+      ${filter('all', `全部（${(d.usable || 0) + (d.usedup || 0) + (d.expired || 0)}）`)}
+      ${filter('usable', `可用（${d.usable || 0}）`)}
+      ${filter('usedup', `已用完（${d.usedup || 0}）`)}
+      ${filter('expired', `已过期（${d.expired || 0}）`)}
     </div>
   </div>
   <div class="panel">${rows || '<div class="empty-box">还没有邀请码——上面生成一批吧</div>'}</div>
@@ -2347,11 +2374,13 @@ function bindInvites(d, status) {
     const btn = e.currentTarget
     const count = parseInt(document.getElementById('inv-count').value, 10) || 1
     const days = parseInt(document.getElementById('inv-days').value, 10) || 0
+    const rawMax = document.getElementById('inv-max').value.trim()
+    const maxUses = rawMax === '' ? 1 : parseInt(rawMax, 10)
     btn.disabled = true
     try {
       const r = await api('/admin/invites', {
         method: 'POST',
-        body: { tier: document.getElementById('inv-tier').value, count, days, note: document.getElementById('inv-note').value.trim() },
+        body: { tier: document.getElementById('inv-tier').value, count, days, maxUses, note: document.getElementById('inv-note').value.trim() },
       })
       // 一次生成多个时把码整批摊开：站长要批量复制去发，逐条列表里翻太难受
       showInviteCodes(r)
@@ -2374,10 +2403,23 @@ function bindInvites(d, status) {
           .then(() => toast('已复制'))
           .catch(() => toast('复制失败，请手动选中', true))
       })
+    const usesBtn = row.querySelector('[data-inv-uses]')
+    if (usesBtn)
+      usesBtn.addEventListener('click', async () => {
+        usesBtn.disabled = true
+        try {
+          const r = await api(`/admin/invites/${id}/uses`)
+          showInviteUses(r)
+        } catch (err) {
+          toast(err.message, true)
+        } finally {
+          usesBtn.disabled = false
+        }
+      })
     const delBtn = row.querySelector('[data-inv-del]')
     if (delBtn)
       delBtn.addEventListener('click', async () => {
-        if (!(await confirmBox(`撤销邀请码 ${formatInviteCode(code)}？撤销后这个码再也用不了（已使用的码不能撤销）。`))) return
+        if (!(await confirmBox(`撤销邀请码 ${formatInviteCode(code)}？撤销后这个码再也用不了（已经有人用过的码不能撤销）。`))) return
         delBtn.disabled = true
         try {
           await api(`/admin/invites/${id}`, { method: 'DELETE' })
@@ -2391,12 +2433,37 @@ function bindInvites(d, status) {
   })
 }
 
+/** 核销明细（一码多人时的对账依据）：谁、什么时候、拿到了什么档位 */
+function showInviteUses(r) {
+  const inv = r.invite || {}
+  const max = Number(inv.max_uses ?? 1)
+  const list = (r.uses || [])
+    .map(
+      (u) => `<div class="post-row" style="padding:8px 0;">
+      <div class="post-main">
+        <div class="post-title" style="font-size:13px;">${esc(u.member_name || '（已删会员）')}</div>
+        <div class="post-meta"><span>${fmtDateTime(u.created_at)}</span>${u.tier ? `<span>·</span><span>${esc(memberTierName(r.tiers || [], u.tier) || u.tier)}</span>` : ''}</div>
+      </div>
+    </div>`
+    )
+    .join('')
+  const m = modal(`<div class="modal-head"><span>${esc(formatInviteCode(inv.code || ''))} 的核销记录</span><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <p class="sec-desc" style="margin:0 0 10px;">${max === 0 ? '不限次数' : `限 ${max} 次`}　已用 ${Number(inv.used_count ?? 0)} 次</p>
+      ${list || '<div class="empty-box">还没有人用过这个码</div>'}
+    </div>
+    <div class="modal-foot"><button class="btn btn-primary" data-close>关闭</button></div>`)
+  return m
+}
+
 /** 新生成的邀请码整批展示（含一键复制全部） */
 function showInviteCodes(r) {
   const text = r.codes.map(formatInviteCode).join('\n')
+  const max = Number(r.maxUses ?? 1)
+  const quota = max === 0 ? '不限次数' : max === 1 ? '一码一人' : `每码限 ${max} 次`
   const m = modal(`<div class="modal-head"><span>已生成 ${r.count} 个邀请码</span><button class="modal-close" data-close>×</button></div>
     <div class="modal-body">
-      <p class="sec-desc" style="margin:0 0 10px;">档位：<b>${esc(r.tierName)}</b>　${r.expiresAt ? `码有效期至 ${fmtDateShort(r.expiresAt)}` : '码长期有效'}　一码一人，用完即废</p>
+      <p class="sec-desc" style="margin:0 0 10px;">档位：<b>${esc(r.tierName)}</b>　${r.expiresAt ? `码有效期至 ${fmtDateShort(r.expiresAt)}` : '码长期有效'}　${esc(quota)}</p>
       <textarea class="textarea" id="inv-out" rows="${Math.min(12, Math.max(3, r.codes.length))}" readonly style="font-family:ui-monospace,monospace;">${esc(text)}</textarea>
       <div class="sec-desc" style="margin-top:8px;">关掉这个窗口后仍可在列表里复制单个码</div>
     </div>
@@ -2420,6 +2487,7 @@ function memberTierModal(member, tiers) {
     return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`
   }
   const currentExpire = member.tier_expires_at ? fmtDateShort(member.tier_expires_at) : ''
+  const source = member.tier_source || 'manual'
   const m = modal(`<div class="modal-head"><span>分配档位 — ${esc(member.username)}</span><button class="modal-close" data-close>×</button></div>
     <div class="modal-body">
       <label class="auth-field"><label>会员档位</label>
@@ -2429,8 +2497,27 @@ function memberTierModal(member, tiers) {
       </label>
       <label class="auth-field" style="margin-top:10px;" id="mb-expire-row"><label>有效期至（留空 = 永久 / 清除）</label>
         <input class="input" type="date" id="mb-expire" value="${esc(currentExpire)}">
+        <div style="display:flex;gap:6px;margin-top:8px;" data-renew>
+          <button class="btn btn-ghost btn-sm" data-renew-days="30" type="button">续 30 天</button>
+          <button class="btn btn-ghost btn-sm" data-renew-days="90" type="button">续 90 天</button>
+          <button class="btn btn-ghost btn-sm" data-renew-days="365" type="button">续 1 年</button>
+          <span style="font-size:12px;color:var(--sub);align-self:center;">从当前到期时间（已过则从今天）往后顺延</span>
+        </div>
       </label>
-      <div style="font-size:12px;color:var(--sub);margin-top:8px;">档位越高可读的专属文章越多（编辑器「谁能看」按档位设置）；档位不影响积分累计。限时档到期后<b>不会消失</b>，自动降到「会员设置」里指定的降级档位（默认降一档），改一次有效期即续期。</div>
+      <label class="auth-field" style="margin-top:10px;"><label>档位来源（仅作标注，不影响权限）</label>
+        <select class="input" id="mb-source">
+          ${[
+            ['manual', '手动授予'],
+            ['paid', '付费（线下收款）'],
+            ['invite', '邀请码'],
+            ['points', '积分兑换'],
+            ['register', '注册自带'],
+          ]
+            .map(([k, label]) => `<option value="${k}"${source === k ? ' selected' : ''}>${label}</option>`)
+            .join('')}
+        </select>
+      </label>
+      <div style="font-size:12px;color:var(--sub);margin-top:8px;">档位越高可读的专属文章越多（编辑器「谁能看」按档位设置）；档位不影响积分累计。限时档到期后<b>不会消失</b>，自动降到「会员设置」里指定的降级档位（默认降一档）；续期就用上面的快捷按钮，或直接改日期。</div>
     </div>
     <div class="modal-foot"><button class="btn" data-close>取消</button><button class="btn btn-primary" id="mb-tier-save">保存</button></div>`)
   const expireRow = m.mask.querySelector('#mb-expire-row')
@@ -2442,12 +2529,25 @@ function memberTierModal(member, tiers) {
   }
   syncExpireRow()
   m.mask.querySelector('#mb-tier').addEventListener('change', syncExpireRow)
+  // 续期快捷：以「当前到期日」为基准往后加天，已过期则从今天算——站长续费时不用自己数日子
+  m.mask.querySelectorAll('[data-renew-days]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const days = Number(b.dataset.renewDays) || 0
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      const cur = expireInput.value ? new Date(expireInput.value + 'T00:00:00') : today
+      const base = cur.getTime() > today.getTime() ? cur : today
+      base.setDate(base.getDate() + days)
+      const p = (x) => String(x).padStart(2, '0')
+      expireInput.value = `${base.getFullYear()}-${p(base.getMonth() + 1)}-${p(base.getDate())}`
+    })
+  )
   m.mask.querySelector('#mb-tier-save').addEventListener('click', async () => {
     const btn = m.mask.querySelector('#mb-tier-save')
     btn.disabled = true
     const tier = m.mask.querySelector('#mb-tier').value
     const t = list.find((x) => x.key === tier)
-    const body = { tier }
+    const body = { tier, tierSource: m.mask.querySelector('#mb-source').value }
     if (t && !t.permanent) body.tierExpiresAt = expireInput.value || null
     try {
       await api(`/admin/members/${member.id}`, { method: 'PUT', body })

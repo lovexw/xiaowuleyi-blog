@@ -323,8 +323,10 @@ test('createMember：注册昵称进 INSERT（选填，空串占位），列序�
   assert.equal(id, 42)
   assert.match(sqls[0], /INSERT INTO members/)
   assert.match(sqls[0], /display_name/)
-  assert.equal(allBinds[0].length, 7, 'username/hash/salt/email/display_name/created_at/updated_at')
+  assert.match(sqls[0], /tier_source/, '注册时一并标注档位来源（默认 register）')
+  assert.equal(allBinds[0].length, 8, 'username/hash/salt/email/display_name/tier_source/created_at/updated_at')
   assert.equal(allBinds[0][4], '小明')
+  assert.equal(allBinds[0][5], 'register', '走普通注册 = 来源 register')
 })
 
 // ── 可见档位（契约 A0/A2）与付费墙试读段 ──

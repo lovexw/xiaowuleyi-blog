@@ -1086,6 +1086,12 @@ export interface MemberView {
   tierExpired?: boolean
   /** 到期降级前的原档位名（如「咖啡会员」）：已过期时出「已到期，现按 X 生效」 */
   tierDowngradedFrom?: string
+  /** 可升级的目标档名（优质会员 / 站长改过名的同类）：与 upgradeCost / paidNote 同时为空 = 不出升级卡 */
+  upgradeTargetName?: string
+  /** 积分兑换价格（0 / 缺省 = 积分兑换未开放） */
+  upgradeCost?: number
+  /** 付费获取的说明文案（缺省 = 不出付费一行）：本站无在线支付，读者线下付款后站长手动授予 */
+  paidNote?: string
   /** 会员中心公告（settings.memberNotice，服务端已清洗，渲染层 esc） */
   notice?: string
   /** 会员活动中心（会员 3.0 预备）：足迹/点赞/评论/回复，服务端组好数据 */
@@ -1218,11 +1224,41 @@ export function memberCardHtml(m: MemberView, en = false): string {
   const tierExpiry = m.tierExpired
     ? `<p class="mem-email">${
         en
-          ? `${esc(m.tierDowngradedFrom || 'Membership')} expired — you are now on ${esc(m.tierName || 'Member')}. Renew any time to restore.`
-          : `${esc(m.tierDowngradedFrom || '会员档位')}已到期，现按「${esc(m.tierName || '会员')}」生效；续费即可恢复`
+          ? `${esc(m.tierDowngradedFrom || 'Membership')} expired — you are now on ${esc(m.tierName || 'Member')}. Contact the site owner to renew.`
+          : `${esc(m.tierDowngradedFrom || '会员档位')}已到期，现按「${esc(m.tierName || '会员')}」生效；续费请联系站长`
       }</p>`
     : m.tierExpiresAt && !m.tierIsBase
       ? `<p class="mem-email">${tr(en, '有效期至')} ${fmtDateCN(m.tierExpiresAt)}</p>`
+      : ''
+  // 升级卡（2026-11 第五批）：优质会员的三条来路——邀请码（注册时填）、积分兑换、付费（线下，站长手动授予）。
+  // 只在「当前档位低于目标档」且至少有一条来路可用时出现；已经是优质及以上就整块不出，不打扰
+  const canRedeem = !!(m.upgradeCost && m.upgradeCost > 0)
+  const upgradeCard =
+    m.upgradeTargetName && (canRedeem || m.paidNote)
+      ? `<section class="mem-card" data-member-upgrade>
+  <h2 class="mem-form-title">${tr(en, '升级会员')}</h2>
+  ${
+    canRedeem
+      ? `<p class="mem-swap">${
+          en
+            ? `Redeem ${esc(m.upgradeTargetName)} for ${m.upgradeCost} points. One-time, permanent once redeemed.`
+            : `用 ${m.upgradeCost} 积分兑换「${esc(m.upgradeTargetName)}」，一次兑换永久有效`
+        }</p>
+  <p class="mem-swap" style="opacity:.7;">${en ? `Your balance: ${m.points} points` : `当前积分：${m.points}`}</p>
+  <button class="mem-btn" type="button" data-member-redeem${m.points < (m.upgradeCost || 0) ? ' disabled' : ''}>${
+          m.points < (m.upgradeCost || 0)
+            ? en
+              ? `Need ${(m.upgradeCost || 0) - m.points} more points`
+              : `还差 ${(m.upgradeCost || 0) - m.points} 积分`
+            : en
+              ? 'Redeem now'
+              : '立即兑换'
+        }</button>
+  <p class="mem-tip" data-member-redeem-tip aria-live="polite"></p>`
+      : ''
+  }
+  ${m.paidNote ? `<p class="mem-swap" style="opacity:.8;">${esc(m.paidNote)}</p>` : ''}
+</section>`
       : ''
   const notice = m.notice ? `<section class="mem-card mem-notice" style="border-left:3px solid rgba(128,128,128,.35);">${esc(m.notice)}</section>` : ''
   return `${notice}
@@ -1240,6 +1276,7 @@ export function memberCardHtml(m: MemberView, en = false): string {
   ${tierExpiry}
   <button class="mem-btn mem-btn-ghost" type="button" data-member-logout>${tr(en, '退出登录')}</button>
 </section>
+${upgradeCard}
 <section class="mem-card" data-member-checkin${m.checkedToday ? ' data-checked="1"' : ''}>
   <h2 class="mem-form-title">${tr(en, '每日签到')}</h2>
   <p class="mem-swap">${m.checkedToday

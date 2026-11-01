@@ -74,8 +74,10 @@ import {
   consumeInvite,
   deleteInvite,
   getInviteByCode,
+  getInviteById,
   insertInviteCode,
   listInvitesAdmin,
+  listInviteUses,
   releaseInvite,
   weiboCommentCountMap,
   weiboImageList,
@@ -98,10 +100,10 @@ import {
   upsertInstalled,
 } from './pluginpkg'
 import { EMOJI_BASE, WECHAT_EMOJI } from './emoji'
-import { awardCommentPoints, awardPoints, bumpActiveDay, normalizeMinTier } from './points'
+import { awardCommentPoints, awardPoints, bumpActiveDay, normalizeMinTier, spendPoints } from './points'
 import { fanDay, fanLevel, nextStreak } from './fanrank'
-import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, type MemberTierDef } from './tiers'
-import { genInviteCode, normalizeInviteCode } from './invite'
+import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, upgradeTarget, type MemberTierDef } from './tiers'
+import { genInviteCode, inviteStatus, normalizeInviteCode, normalizeMaxUses } from './invite'
 import { applyCommentGate, canReplyGatedComment, commentGateRank, commentGateViewerRank, threadRootTier } from './commentgate'
 import { collectRoutes } from './collect'
 import { exportRoutes } from './export'
@@ -353,7 +355,12 @@ api.post('/auth/logout', async (c) => {
 
 /** 对外视图裁剪：公开口径只有昵称/档位/积分；self = 本人视角（另给 email/username/createdAt），管理口径走 listMembersAdmin 原始行。
  *  档位出参按生效档位（src/tiers.ts：过期即时降到 fallback / 上一档）解析——tierName/tierColor 供前台直接渲染认证徽标 */
-function memberView(m: MemberRow, self = false, defs: MemberTierDef[] = parseMemberTiers(undefined)) {
+function memberView(
+  m: MemberRow,
+  self = false,
+  defs: MemberTierDef[] = parseMemberTiers(undefined),
+  opts: { redeemCost?: number; paidNote?: string } = {}
+) {
   const eff = effectiveTier(defs, m.tier, m.tier_expires_at)
   const v: Record<string, unknown> = {
     nickname: (m.display_name || m.username).slice(0, 24),
@@ -381,6 +388,13 @@ function memberView(m: MemberRow, self = false, defs: MemberTierDef[] = parseMem
     v.activeDays = m.active_days ?? 0
     v.checkinStreak = m.checkin_streak ?? 0
     v.checkedToday = m.last_checkin_day === fanDay()
+    // 升级入口（2026-11 第五批）：只在「当前档位低于优质会员」时下发，已在该档及以上整块不出
+    const target = upgradeTarget(defs)
+    if (target && eff.rank < (target.rank ?? 1)) {
+      v.upgradeTargetName = target.name
+      if ((opts.redeemCost ?? 0) > 0) v.upgradeCost = opts.redeemCost
+      if (opts.paidNote) v.paidNote = opts.paidNote
+    }
   }
   return v
 }
@@ -395,13 +409,14 @@ api.post('/member/register', async (c) => {
     .catch(() => null)
   // 蜜罐字段 link：正常用户看不到、机器人会填 —— 静默丢弃（同 publicComment 口径）
   if (body?.link) return c.json({ ok: true })
-  // 邀请码（可选，src/invite.ts）：一次性，持码注册直接拿码上指定的档位（默认优质会员）。
+  // 邀请码（可选，src/invite.ts）：持码注册直接拿码上指定的档位（默认优质会员）。
+  // 核销次数可限（max_uses：1 一码一人 / 0 不限 / N 限量 N 次），过期与次数用尽都在核销那一步原子判定
   // memberRegOpen='0' 时它是**唯一入口**——做邀请制的站长不该为了发码而把注册重新放开
   const inviteCode = normalizeInviteCode(body?.inviteCode)
   const invite = inviteCode ? await getInviteByCode(c.env.DB, inviteCode) : null
   const now = Date.now()
-  const inviteUsable = !!invite && !invite.used_at && (invite.expires_at == null || invite.expires_at > now)
-  if (inviteCode && !inviteUsable) return jsonError('邀请码无效或已被使用', 400)
+  const inviteUsable = !!invite && inviteStatus(invite, now) === 'usable'
+  if (inviteCode && !inviteUsable) return jsonError('邀请码无效、已用完或已过期', 400)
   if (settings.memberRegOpen === '0' && !inviteUsable) return jsonError('本站暂不开放注册，有邀请码可凭码注册', 403)
   // 注册人机验证（Turnstile，A2 根治）：配置了 Secret 才启用，放在字段校验之前让无令牌机器人
   // 最早出局；演示站跳过（凭据公示的体验站不外发 siteverify，也不给体验者加验证负担）。
@@ -422,22 +437,24 @@ api.post('/member/register', async (c) => {
   const { hash, salt } = await hashPassword(password)
   let memberId: number
   try {
-    memberId = await createMember(c.env.DB, { username, hash, salt, email, displayName: nickname })
+    memberId = await createMember(c.env.DB, { username, hash, salt, email, displayName: nickname, tierSource: inviteUsable ? 'invite' : 'register' })
   } catch {
     return jsonError('用户名已被占用') // 并发注册撞 UNIQUE 约束的兜底
   }
-  // 邀请码核销 + 授予档位。核销是条件 UPDATE（WHERE used_at IS NULL）——同一个码被两人同时提交时
-  // 只有一位能过；抢输的那位把刚建的会员删掉再报错，避免留下「注册成功但没档位」的半成品
+  // 邀请码核销 + 授予档位。核销是一条条件 UPDATE（次数未满且未过期）——同一个码的最后一次
+  // 被两人同时提交时只有一位能过；抢输的那位把刚建的会员删掉再报错，避免留下「注册成功但没档位」的半成品
   if (inviteUsable && invite) {
-    if (!(await consumeInvite(c.env.DB, invite.id, memberId, username, now))) {
+    if (!(await consumeInvite(c.env.DB, invite, memberId, username, now))) {
       await c.env.DB.prepare('DELETE FROM members WHERE id = ?').bind(memberId).run()
-      return jsonError('邀请码刚被用掉了，换一个再试', 409)
+      return jsonError('邀请码刚被用完了，换一个再试', 409)
     }
     const defs = parseMemberTiers(settings.memberTiers)
     // 码上的档位被站长删掉时回落基础档（保守方向：不给多权限），有效期按该档默认天数
     const def = tierByKey(defs, invite.tier) ?? defs[0]
     const expiresAt = def.permanent ? null : now + (def.days || 365) * 86_400_000
-    await c.env.DB.prepare('UPDATE members SET tier = ?, tier_expires_at = ?, updated_at = ? WHERE id = ?').bind(def.key, expiresAt, now, memberId).run()
+    await c.env.DB.prepare('UPDATE members SET tier = ?, tier_expires_at = ?, updated_at = ? WHERE id = ?')
+      .bind(def.key, expiresAt, now, memberId)
+      .run()
   }
   const token = await createMemberSession(c.env.DB, memberId)
   c.header('Set-Cookie', memberSessionCookie(token, isSecureRequest(c.req.raw)))
@@ -445,7 +462,15 @@ api.post('/member/register', async (c) => {
   await bumpActiveDay(c.env.DB, memberId)
   const row = await getMemberById(c.env.DB, memberId)
   // 档位名按站长的自定义定义解析（持码注册会带档位，默认口径的三档名可能对不上）
-  return c.json({ ok: true, member: row ? memberView(row, true, parseMemberTiers(settings.memberTiers)) : null })
+  return c.json({
+    ok: true,
+    member: row
+      ? memberView(row, true, parseMemberTiers(settings.memberTiers), {
+          redeemCost: Math.trunc(Number(settings.premiumPointsCost || 0)),
+          paidNote: settings.premiumPaidNote?.trim() || undefined,
+        })
+      : null,
+  })
 })
 
 api.post('/member/login', async (c) => {
@@ -498,7 +523,14 @@ api.get('/member/me', async (c) => {
   const session = await getMemberUser(c.env.DB, c.req.raw)
   if (!session) return c.json({ member: null })
   const row = await getMemberById(c.env.DB, session.id)
-  return c.json({ member: row ? memberView(row, true) : null })
+  return c.json({
+    member: row
+      ? memberView(row, true, parseMemberTiers(settings.memberTiers), {
+          redeemCost: Math.trunc(Number(settings.premiumPointsCost || 0)),
+          paidNote: settings.premiumPaidNote?.trim() || undefined,
+        })
+      : null,
+  })
 })
 
 /* 会员个人资料（/member 页会员卡，契约见 docs/archive/DEVPLAN-2026-10-07.md）：改昵称（30 天一次）与改密码 */
@@ -548,6 +580,39 @@ api.post('/member/checkin', async (c) => {
   const after = await getMemberById(c.env.DB, m.id)
   const fan = fanLevel(after?.points ?? 0, after?.active_days ?? 0)
   return c.json({ ok: true, delta: res.delta, bonus, points: after?.points ?? 0, streak, level: fan.level, levelName: fan.name })
+})
+
+api.post('/member/redeem-premium', async (c) => {
+  const settings = await getSettings(c.env.DB)
+  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  // 价格 0 = 未开放（默认）。站长在「会员 → 会员设置」填个数就开通，不需要额外的启用开关
+  const cost = Math.trunc(Number(settings.premiumPointsCost || 0))
+  if (!Number.isFinite(cost) || cost <= 0) return jsonError('积分兑换暂未开放')
+  if (!rateLimit(`mredeem:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  const m = await getMemberUser(c.env.DB, c.req.raw)
+  if (!m) return jsonError('请先登录', 401)
+  const row = await getMemberById(c.env.DB, m.id)
+  if (!row || row.status === 'banned') return jsonError('账号不可用', 403)
+  const defs = parseMemberTiers(settings.memberTiers)
+  // 目标档固定是 premium（优质会员）；站长把这档删掉/改名时兜底到第二档——
+  // 「积分兑换」的语义是「升到优质这一层」，不该被自定义 key 绑死
+  const target = tierByKey(defs, 'premium') ?? defs[1] ?? null
+  if (!target) return jsonError('当前档位体系里没有可兑换的档位')
+  const eff = effectiveTier(defs, row.tier, row.tier_expires_at)
+  if (eff.rank >= (target.rank ?? 1)) return jsonError(`你已经是「${eff.name}」，无需兑换`)
+  // ref_id = 1：一辈子只能兑换一次（幂等键落在积分账本的部分唯一索引上）
+  const pay = await spendPoints(c.env.DB, m.id, cost, 'redeemTier', `兑换「${target.name}」`, 1)
+  if (!pay.ok) {
+    if (pay.reason === 'dup') return jsonError('你已经兑换过了，无需重复兑换')
+    return jsonError(`积分不够，还差 ${Math.max(0, cost - pay.balance)} 分`)
+  }
+  const now = Date.now()
+  const expiresAt = target.permanent ? null : now + (target.days || 365) * 86_400_000
+  await c.env.DB.prepare('UPDATE members SET tier = ?, tier_expires_at = ?, tier_source = ?, updated_at = ? WHERE id = ?')
+    .bind(target.key, expiresAt, 'points', now, m.id)
+    .run()
+  const after = await getMemberById(c.env.DB, m.id)
+  return c.json({ ok: true, points: after?.points ?? 0, tier: target.key, tierName: target.name, tierExpiresAt: expiresAt })
 })
 
 api.post('/member/profile', async (c) => {
@@ -678,17 +743,22 @@ api.get('/admin/members', async (c) => {
 api.put('/admin/members/:id', async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return jsonError('会员不存在', 404)
-  const body = await c.req.json<{ tier?: string; status?: string; tierExpiresAt?: unknown }>().catch(() => null)
+  const body = await c.req.json<{ tier?: string; status?: string; tierExpiresAt?: unknown; tierSource?: unknown }>().catch(() => null)
   if (!body || typeof body !== 'object') return jsonError('请求格式错误')
   const settings = await getSettings(c.env.DB)
   const defs = parseMemberTiers(settings.memberTiers)
-  const patch: { tier?: string; status?: string; tierExpiresAt?: number | null } = {}
+  const patch: { tier?: string; status?: string; tierExpiresAt?: number | null; tierSource?: string } = {}
   if ('tier' in body) {
     // 档位必须是自定义定义里的 key（脏值 400 不静默降级——与 contentVisibleRange 同口径）
     if (!tierByKey(defs, String(body.tier || ''))) return jsonError('未知档位')
     patch.tier = String(body.tier)
     // 分配永久档 = 清除有效期；分配限时档且未显式给有效期 = 保持旧值（缺键即保留语义）
     if (tierByKey(defs, patch.tier)?.permanent) patch.tierExpiresAt = null
+  }
+  if ('tierSource' in body) {
+    // 档位来源标注（paid = 线下付费、manual = 手动授予…）：只做运营展示，白名单外一律按 manual
+    const v = String(body.tierSource || '').trim()
+    patch.tierSource = (['register', 'invite', 'points', 'paid', 'manual'] as const).includes(v as 'manual') ? v : 'manual'
   }
   if ('tierExpiresAt' in body) {
     // null = 清除（转永久）；数字 = 到期毫秒；'YYYY-MM-DD' 字符串 = 当天结束（北京时间）
@@ -719,8 +789,14 @@ api.get('/admin/member-tiers', async (c) => {
 
 /* ---------------- 注册邀请码（src/invite.ts） ---------------- */
 
+/**
+ * 可核销次数（max_uses）取值口径：1 = 一码一人（默认）；0 = 不限次数；2-1000 = 限量 N 次。
+ * 与有效期是两个正交维度：`发 10 个一码一人的` 和 `发 1 个限 10 次的` 都能表达，站长按场合选。
+ * 「一人一次」不在码上做——那由注册本身保证（用户名唯一，一个账号只能注册一次）。
+ */
 api.get('/admin/invites', async (c) => {
-  const status = c.req.query('status') === 'used' ? 'used' : c.req.query('status') === 'unused' ? 'unused' : 'all'
+  const q = c.req.query('status')
+  const status = q === 'usable' || q === 'usedup' || q === 'expired' ? q : 'all'
   const page = clampInt(c.req.query('page'), 1, 1_000_000, 1)
   const [list, settings] = await Promise.all([listInvitesAdmin(c.env.DB, status, page), getSettings(c.env.DB)])
   // tiers 随列表下发：生成表单的档位下拉直接用它（自定义档位的事实源是 settings.memberTiers）
@@ -728,7 +804,9 @@ api.get('/admin/invites', async (c) => {
 })
 
 api.post('/admin/invites', async (c) => {
-  const body = await c.req.json<{ count?: unknown; tier?: unknown; note?: unknown; days?: unknown }>().catch(() => null)
+  const body = await c.req
+    .json<{ count?: unknown; tier?: unknown; note?: unknown; days?: unknown; maxUses?: unknown }>()
+    .catch(() => null)
   if (!body) return jsonError('请求格式错误')
   const settings = await getSettings(c.env.DB)
   const defs = parseMemberTiers(settings.memberTiers)
@@ -740,6 +818,8 @@ api.post('/admin/invites', async (c) => {
   const note = String(body.note || '').replace(/\s+/g, ' ').trim().slice(0, 60)
   const days = Math.trunc(Number(body.days ?? 0))
   if (!Number.isFinite(days) || days < 0 || days > 3650) return jsonError('有效期需为 0-3650 天（0 = 不过期）')
+  const maxUses = normalizeMaxUses(body.maxUses ?? 1)
+  if (maxUses === null) return jsonError('可核销次数需为 0（不限）或 1-1000')
   const now = Date.now()
   const expiresAt = days > 0 ? now + days * 86_400_000 : null
   const codes: string[] = []
@@ -748,20 +828,31 @@ api.post('/admin/invites', async (c) => {
     let inserted = false
     for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
       const code = genInviteCode()
-      inserted = await insertInviteCode(c.env.DB, { code, tier: def.key, note, createdAt: now, expiresAt })
+      inserted = await insertInviteCode(c.env.DB, { code, tier: def.key, note, maxUses, createdAt: now, expiresAt })
       if (inserted) codes.push(code)
     }
     if (!inserted) break
   }
   if (!codes.length) return jsonError('生成失败，请重试', 500)
-  return c.json({ ok: true, codes, count: codes.length, tier: def.key, tierName: def.name, expiresAt })
+  return c.json({ ok: true, codes, count: codes.length, tier: def.key, tierName: def.name, expiresAt, maxUses })
+})
+
+/** 核销明细（后台「谁凭这个码进来的」）：一码多人时必须能逐条回查 */
+api.get('/admin/invites/:id/uses', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return jsonError('邀请码不存在', 404)
+  const invite = await getInviteById(c.env.DB, id)
+  if (!invite) return jsonError('邀请码不存在', 404)
+  const [uses, settings] = await Promise.all([listInviteUses(c.env.DB, id), getSettings(c.env.DB)])
+  // tiers 随明细下发：弹窗里把档位 key 翻成站长起的名字
+  return c.json({ invite, uses, tiers: parseMemberTiers(settings.memberTiers) })
 })
 
 api.delete('/admin/invites/:id', async (c) => {
   const id = parseId(c.req.param('id'))
   if (!id) return jsonError('邀请码不存在', 404)
-  // 已核销的删不掉：那是「谁凭哪个码进来的」的账，会员面出问题时得能回查
-  if (!(await deleteInvite(c.env.DB, id))) return jsonError('已使用的邀请码不能撤销', 409)
+  // 用过一次的删不掉：那是「谁凭哪个码进来的」的账，会员面出问题时得能回查（没用过的随便撤）
+  if (!(await deleteInvite(c.env.DB, id))) return jsonError('已有人使用的邀请码不能撤销', 409)
   return c.json({ ok: true })
 })
 
@@ -2429,6 +2520,17 @@ api.put('/admin/settings', async (c) => {
     }
     if (key === 'memberNotice') {
       // 会员中心公告：纯文本单行（换行折叠成空格），长度 200 封顶——渲染层 esc 后直出
+      patch[key] = v.replace(/\s+/g, ' ').trim().slice(0, 200)
+      continue
+    }
+    if (key === 'premiumPointsCost') {
+      // 积分兑换优质会员的价格（2026-11 会员第五批）：0 = 未开放（默认，前台不出现兑换入口）。
+      // 站长先填个数就生效——不需要开开关，0 与正数本身即是开关
+      patch[key] = String(clampInt(v, 0, 1_000_000, 0))
+      continue
+    }
+    if (key === 'premiumPaidNote') {
+      // 付费获取优质会员的说明文案（没有在线支付通道，站长线下收款后手动改档位；这段文案告诉读者怎么找你）
       patch[key] = v.replace(/\s+/g, ' ').trim().slice(0, 200)
       continue
     }

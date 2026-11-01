@@ -9,7 +9,7 @@ import { cstDate } from './utils'
 import { fanDay } from './fanrank'
 import { canReadTiers, parseMemberTiers, TIER_KEY_RE } from './tiers'
 
-export type PointsReason = 'comment' | 'dailyLogin' | 'checkin' | 'streakBonus' | 'adminAdjust'
+export type PointsReason = 'comment' | 'dailyLogin' | 'checkin' | 'streakBonus' | 'adminAdjust' | 'redeemTier'
 
 export const POINTS_RULES: Record<PointsReason, { delta: number; /** 单日最多计次（按额度算，不按调用次数） */ dailyCap: number; label: string }> = {
   // 评论 +2：过审才计（先审后展的挂到后台通过动作），同一评论只计一次（ref_id = 评论 id 去重）
@@ -22,7 +22,12 @@ export const POINTS_RULES: Record<PointsReason, { delta: number; /** 单日最�
   streakBonus: { delta: 1, dailyCap: 1, label: '连续签到加成' },
   // 管理员调整：delta 由调用方给定（可负），不受日上限约束（P1.5 后台接口落地时接入）
   adminAdjust: { delta: 0, dailyCap: 0, label: '管理员调整' },
+  // 积分兑换档位（2026-11）：负向记账，由 spendPoints 写（不走 awardPoints，也不受日上限约束）
+  redeemTier: { delta: 0, dailyCap: 0, label: '积分兑换档位' },
 }
+
+/** 不按常量表出分、不受日上限约束的原因（金额由调用方给定，可负） */
+const VAR_DELTA_REASONS = new Set(['adminAdjust', 'redeemTier'])
 
 /** 北京时间当日 0 点的毫秒时间戳（日上限与「每日登录」的去重窗口；同 utils.ts cstDate 口径） */
 export function cstDayStart(ts = Date.now()): number {
@@ -58,7 +63,8 @@ export async function awardPoints(
     return { ok: false, delta: 0, balance: await memberBalance(db, memberId) }
   }
   const rule = POINTS_RULES[reason as PointsReason]
-  const delta = reason === 'adminAdjust' ? Math.trunc(opts.delta ?? 0) : rule.delta
+  const variable = VAR_DELTA_REASONS.has(reason)
+  const delta = variable ? Math.trunc(opts.delta ?? 0) : rule.delta
   if (delta === 0) return { ok: false, delta: 0, balance: await memberBalance(db, memberId) }
   // refId 承担幂等键：评论 = 评论 id（awardCommentPoints 去重）；每日登录 = 北京日序号（并发双击由
   // member_points_log 的 (member_id, reason, ref_id) 部分唯一索引兜底，见 db.ts SCHEMA_INDEXES / schema.sql）。
@@ -69,10 +75,10 @@ export async function awardPoints(
   const refId =
     reason === 'dailyLogin' || reason === 'checkin' || reason === 'streakBonus'
       ? daySerial
-      : reason === 'adminAdjust'
+      : variable
         ? 0
         : opts.refId ?? 0
-  const capped = reason !== 'adminAdjust' && rule.dailyCap > 0
+  const capped = !variable && rule.dailyCap > 0
   const cap = rule.dailyCap * Math.abs(rule.delta)
   const dayStart = cstDayStart()
   if (capped) {
@@ -138,6 +144,55 @@ export async function awardCommentPoints(db: D1Database, memberId: number, comme
     .first()
   if (dup) return
   await awardPoints(db, memberId, 'comment', { refId: commentId })
+}
+
+/* ---------------- 花积分（2026-11 会员第五批：积分兑换优质会员） ----------------
+ * 与 awardPoints 分开写：加分是「规则表出数 + 日上限」，扣分是「余额够不够 + 一次性动作的幂等」，
+ * 两者的守卫条件不一样，硬塞进一个函数会让日上限那套批内校验读起来更难懂。
+ */
+
+export interface SpendResult {
+  ok: boolean
+  balance: number
+  /** 失败原因：dup = 这笔已经兑换过（同一 ref_id 只认一次）/ poor = 积分不够 */
+  reason?: 'dup' | 'poor'
+}
+
+/**
+ * 扣积分：账本与余额同一批（防漂移），余额不足整笔不生效。
+ * - 余额守卫在 UPDATE 的 WHERE 里（`points >= ?`），并发两笔不会把余额扣成负数
+ * - 幂等靠 (member_id, reason, ref_id) 部分唯一索引：refId 由调用方给，一次性动作传固定值
+ *   （兑换档位传 1 = 这辈子只能兑换一次），重复请求撞索引即视为已兑换过
+ * - 先插账本再扣余额：扣款失败时把刚插的账本行删掉补偿——顺序反过来做不到，
+ *   因为「扣款成不成功」只有 UPDATE 的 changes 知道
+ */
+export async function spendPoints(
+  db: D1Database,
+  memberId: number,
+  cost: number,
+  reason: string,
+  note = '',
+  refId = 1
+): Promise<SpendResult> {
+  const amount = Math.trunc(cost)
+  if (!Number.isFinite(amount) || amount <= 0) return { ok: false, balance: await memberBalance(db, memberId), reason: 'poor' }
+  const now = Date.now()
+  try {
+    const res = await db.batch([
+      db
+        .prepare('INSERT INTO member_points_log (member_id, delta, reason, ref_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+        .bind(memberId, -amount, reason, refId, note, now),
+      db.prepare('UPDATE members SET points = points - ?, updated_at = ? WHERE id = ? AND points >= ?').bind(amount, now, memberId, amount),
+    ])
+    if ((res[1].meta.changes ?? 0) === 0) {
+      await db.prepare('DELETE FROM member_points_log WHERE member_id = ? AND reason = ? AND ref_id = ?').bind(memberId, reason, refId).run()
+      return { ok: false, balance: await memberBalance(db, memberId), reason: 'poor' }
+    }
+  } catch (e) {
+    if (e instanceof Error && /UNIQUE/i.test(e.message)) return { ok: false, balance: await memberBalance(db, memberId), reason: 'dup' }
+    throw e
+  }
+  return { ok: true, balance: await memberBalance(db, memberId) }
 }
 
 /* ---------------- 可见档位（契约 A0/A2：posts.min_tier） ----------------

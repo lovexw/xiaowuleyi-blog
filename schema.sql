@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS members (
   qq            TEXT    NOT NULL DEFAULT '',          -- 绑定的 QQ 号（仅头像抓取记账位，任何公开出参不携带）
   tier          TEXT    NOT NULL DEFAULT 'normal',    -- 档位 key（src/tiers.ts 自定义档位：settings.memberTiers 定义，顺序即等级）
   tier_expires_at INTEGER,                             -- 档位有效期（毫秒；NULL = 永久/不失效）。过期在读侧即时降级为基础档（不靠 cron）
+  tier_source   TEXT    NOT NULL DEFAULT '',           -- 档位来源：register 注册自带 / invite 邀请码 / points 积分兑换 / paid 付费 / manual 后台手改（空 = 历史数据）
   points        INTEGER NOT NULL DEFAULT 0,           -- 当前积分余额（冗余，明细在 member_points_log）
   status        TEXT    NOT NULL DEFAULT 'active',    -- active | banned（封禁后禁登录与评论，历史评论保留）
   created_at    INTEGER NOT NULL,
@@ -98,20 +99,37 @@ CREATE TABLE IF NOT EXISTS member_likes (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_member_likes_dedup ON member_likes (member_id, target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_member_likes_member ON member_likes (member_id, created_at DESC);
 
--- 注册邀请码（2026-11，src/invite.ts）：后台生成，一次性；持码注册直接拿到码上指定的档位（默认优质会员）。
--- 用完即废（used_at 非空），撤销靠删行；used_by_name 是注册时的用户名快照——会员被删后仍能看出「这码被谁用了」
+-- 注册邀请码（2026-11，src/invite.ts）：后台生成，持码注册直接拿到码上指定的档位（默认优质会员）。
+-- 核销次数：max_uses = 1 一码一人（默认）；= 0 不限次数（发给会员群当福利码）；N >= 2 限量 N 次。
+-- used_count 是已核销次数（冗余计数，原子核销拿它做条件判断）；used_at / used_by 记**最近一次**核销，
+-- 完整明细在 invite_uses。used_by_name 是注册时的用户名快照——会员被删后仍能看出「这码被谁用了」
 CREATE TABLE IF NOT EXISTS invite_codes (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   code         TEXT    NOT NULL UNIQUE,            -- 大写字母数字（去掉易混字符），全局唯一
   tier         TEXT    NOT NULL DEFAULT 'premium', -- 注册后授予的档位 key
   note         TEXT    NOT NULL DEFAULT '',        -- 后台备注（发给谁 / 用途）
+  max_uses     INTEGER NOT NULL DEFAULT 1,         -- 可核销次数，0 = 不限
+  used_count   INTEGER NOT NULL DEFAULT 0,         -- 已核销次数
   created_at   INTEGER NOT NULL,
   expires_at   INTEGER,                            -- 码自身的失效时间，NULL = 不过期
-  used_at      INTEGER,                            -- NULL = 未使用；非空 = 已核销（一次性）
-  used_by      INTEGER NOT NULL DEFAULT 0,         -- 核销会员 id，0 = 无
-  used_by_name TEXT    NOT NULL DEFAULT ''         -- 核销时的用户名快照
+  used_at      INTEGER,                            -- 最近一次核销时间，NULL = 从未使用
+  used_by      INTEGER NOT NULL DEFAULT 0,         -- 最近一次核销的会员 id，0 = 无
+  used_by_name TEXT    NOT NULL DEFAULT ''         -- 最近一次核销时的用户名快照
 );
 CREATE INDEX IF NOT EXISTS idx_invite_used ON invite_codes (used_at, created_at DESC);
+
+-- 邀请码核销明细（每次成功核销一条）：一码多人时靠它回查「谁凭这个码进来的」，
+-- 也是「注册成功但没档位」这类事故的唯一对账依据。删码不删明细（账留着）
+CREATE TABLE IF NOT EXISTS invite_uses (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  invite_id   INTEGER NOT NULL,                    -- invite_codes.id（删码后成为孤儿行，保留）
+  code        TEXT    NOT NULL DEFAULT '',         -- 码快照（删码后仍可读）
+  member_id   INTEGER NOT NULL DEFAULT 0,
+  member_name TEXT    NOT NULL DEFAULT '',         -- 注册时的用户名快照
+  tier        TEXT    NOT NULL DEFAULT '',         -- 该次核销实际授予的档位 key
+  created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invite_uses_invite ON invite_uses (invite_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS posts (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
