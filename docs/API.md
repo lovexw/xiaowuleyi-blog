@@ -81,13 +81,14 @@ Body `{"delta": 1}` 或 `{"delta": -1}`，返回 `{"ok":true,"likes":7}`。计�
 会员注册（站点「会员功能」关闭时整组 `/api/member/*` 返回 404）。Body：
 
 ```json
-{ "username": "xiaoke", "password": "至少8位", "nickname": "选填昵称", "email": "可选", "link": "" }
+{ "username": "xiaoke", "password": "至少8位", "nickname": "选填昵称", "email": "可选", "inviteCode": "选填邀请码", "link": "" }
 ```
 
 - `link` 是蜜罐字段，正常客户端永远传空字符串/不传；限流同 IP 10 分钟 5 次
 - 用户名 2-24 位字母/数字/`_`/`-`，密码 8-64 位；用户名占用或校验失败 400
 - `nickname` 选填（中英文均可，剥控制字符后 ≤24 字符，仅展示不做唯一约束）；注册填写**不占用** 30 天修改窗口
-- 成功即登录：`{ok:true, member:{nickname,tier,points,...}}` 并签发 `xw_member_session` Cookie（HttpOnly，30 天，与管理员会话完全独立）
+- `inviteCode` 选填：后台生成的一次性邀请码（大小写/空格/连字符都容忍）。有效则注册后**直接获得该码指定的档位**（有效期按该档默认天数），码即核销；无效/已用/过期 400。**站点关闭「开放注册」时它是唯一入口**（无码 403）
+- 成功即登录：`{ok:true, member:{nickname,tier,tierName,points,...}}` 并签发 `xw_member_session` Cookie（HttpOnly，30 天，与管理员会话完全独立）
 
 ### POST /api/member/login
 `{username, password}` → `{ok:true, member:{...}}`；口令错误 401（响应耗时恒定防用户名枚举），账号被封禁 403 `{"error":"banned"}`。
@@ -404,7 +405,16 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
 会员列表（后台「会员」页数据源）：`{items:[{id, username, email, display_name, avatar, tier, points, status, created_at, updated_at, last_login_at}], total, page, totalPages}`（不含 password_hash/salt）；`q` 模糊匹配用户名 / 邮箱，20 条/页。
 
 ### PUT /api/admin/members/:id
-改档位 / 封禁，**缺键即保留**（只传要改的键）：`{ "tier": "normal|coffee|top" }` 或 `{ "status": "active|banned" }` → `{ok:true}`；`status:"banned"` 同时清空该会员全部会话（即刻踢下线），历史评论保留。会员不存在 404。
+改档位 / 封禁，**缺键即保留**（只传要改的键）：`{ "tier": "档位key（须在 settings.memberTiers 定义里）", "tierExpiresAt": "2027-10-21|null" }` 或 `{ "status": "active|banned" }` → `{ok:true}`；`status:"banned"` 同时清空该会员全部会话（即刻踢下线），历史评论保留。未知档位 400，会员不存在 404。限时档到期后**不会消失**，按该档的 fallback 降级（默认降一档）。
+
+### GET /api/admin/invites?page=1&status=unused|used|all
+注册邀请码列表（后台「会员 → 邀请码」）：`{items:[{id, code, tier, note, created_at, expires_at, used_at, used_by, used_by_name}], total, page, totalPages, unused, used, tiers}`（`tiers` 是当前档位定义，生成表单的下拉直接用它）；20 条/页，新的在前。
+
+### POST /api/admin/invites
+生成邀请码：`{ "tier": "premium", "count": 1, "days": 0, "note": "选填备注" }` → `{ok:true, codes:["ABCD2345"], count, tier, tierName, expiresAt}`。`count` 1-50，`days` 是**码自身**的有效期（0 = 不过期），`note` ≤60 字；档位必须在定义里（脏值 400）。
+
+### DELETE /api/admin/invites/:id
+撤销未使用的邀请码 → `{ok:true}`；**已核销的返回 409**（那是「谁凭哪个码进来的」的账，要能回查）。
 
 ## 外部接口（Token 鉴权，供 Telegram 机器人 / 第三方工具调用）
 

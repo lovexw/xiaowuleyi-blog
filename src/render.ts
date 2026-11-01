@@ -1082,8 +1082,10 @@ export interface MemberView {
   tierIsBase?: boolean
   /** 档位有效期（毫秒，本人视角展示「有效期至」；null/缺省 = 永久） */
   tierExpiresAt?: number | null
-  /** true = 档位已过有效期（能力已按基础档生效，卡上出「已过期」提示） */
+  /** true = 档位已过有效期（能力已按降级后的档位生效，卡上出「已到期」提示） */
   tierExpired?: boolean
+  /** 到期降级前的原档位名（如「咖啡会员」）：已过期时出「已到期，现按 X 生效」 */
+  tierDowngradedFrom?: string
   /** 会员中心公告（settings.memberNotice，服务端已清洗，渲染层 esc） */
   notice?: string
   /** 会员活动中心（会员 3.0 预备）：足迹/点赞/评论/回复，服务端组好数据 */
@@ -1210,10 +1212,15 @@ export function memberCardHtml(m: MemberView, en = false): string {
       ? `<span class="mem-tier" data-tier="${esc(m.tier)}">${esc(m.tierName)}</span>`
       : tierBadgeHtml(m.tierName, m.tierColor || '', 'mem-tier', en)
     : `<span class="mem-tier" data-tier="${esc(m.tier)}">${tierLabel(m.tier, en)}</span>`
-  // 有效期行：已过期必须出提示（此时生效档位已是基础档，tierIsBase=true 不能把提示挡掉）；
-  // 未过期的限时档出「有效期至」；永久档（含过期后清掉的）不出
+  // 有效期行：已过期必须出提示（此时生效档位已是降级后的档，tierIsBase 可能为 false，
+  // 不能因为「有徽标」就把提示挡掉）；未过期的限时档出「有效期至」；永久档不出。
+  // 过期文案走降级口径（咖啡会员到期 → 现按优质会员生效），不再说「恢复为基础会员」
   const tierExpiry = m.tierExpired
-    ? `<p class="mem-email">${tr(en, '会员档位已过期，联系站长续期后恢复权益')}</p>`
+    ? `<p class="mem-email">${
+        en
+          ? `${esc(m.tierDowngradedFrom || 'Membership')} expired — you are now on ${esc(m.tierName || 'Member')}. Renew any time to restore.`
+          : `${esc(m.tierDowngradedFrom || '会员档位')}已到期，现按「${esc(m.tierName || '会员')}」生效；续费即可恢复`
+      }</p>`
     : m.tierExpiresAt && !m.tierIsBase
       ? `<p class="mem-email">${tr(en, '有效期至')} ${fmtDateCN(m.tierExpiresAt)}</p>`
       : ''
@@ -1285,20 +1292,22 @@ export function memberAuthHtml(en = false, o?: { settings?: SettingsMap }): stri
   const s = o?.settings
   const notice = s?.memberNotice?.trim() ? `<section class="mem-card mem-notice" style="border-left:3px solid rgba(128,128,128,.35);">${esc(s.memberNotice.trim())}</section>` : ''
   const regOpen = !s || s.memberRegOpen !== '0'
-  const registerForm = regOpen
-    ? `<form class="mem-card mem-form" data-member-form="register">
+  // 注册表单**总是渲染**：关闭开放注册时它变成「凭邀请码注册」的入口——
+  // 做邀请制的站不该为了发码而把注册重新放开，也不该让持码的人找不到入口
+  const registerForm = `<form class="mem-card mem-form" data-member-form="register">
     <h2 class="mem-form-title">${tr(en, '注册会员')}</h2>
+    ${regOpen ? '' : `<p class="mem-swap" style="margin-top:0;">${tr(en, '本站为邀请制：填写邀请码即可注册')}</p>`}
     <input class="mem-input" name="username" maxlength="24" placeholder="${tr(en, '用户名（2-24 位字母、数字、_ 或 -）')}" autocomplete="username" required aria-label="${tr(en, '用户名')}">
     <input class="mem-input" name="nickname" maxlength="24" placeholder="${tr(en, '昵称（选填，中英文均可）')}" aria-label="${tr(en, '昵称（选填，中英文均可）')}">
     <input class="mem-input" type="password" name="password" maxlength="72" placeholder="${en ? 'Password (min 8 characters)' : '密码（至少 8 位）'}" autocomplete="new-password" required aria-label="${tr(en, '密码')}">
     <input class="mem-input" type="email" name="email" maxlength="120" placeholder="${tr(en, '邮箱（选填）')}" autocomplete="email" aria-label="${tr(en, '邮箱（选填）')}">
+    <input class="mem-input" name="inviteCode" maxlength="12" placeholder="${en ? 'Invite code (optional)' : '邀请码（选填，填了可直接获得对应档位）'}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;" aria-label="${en ? 'Invite code' : '邀请码'}">
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button class="mem-btn" type="submit">${tr(en, '注册并登录')}</button>
     <p class="mem-swap">${tr(en, '密码一旦遗失无法找回，请务必记好')}</p>
     <p class="mem-swap">${tr(en, '已有账号？')}<button type="button" class="mem-swap-btn" data-member-swap="login">${tr(en, '去登录')}</button></p>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>`
-    : ''
   return `<section class="mem-auth">
   ${notice}
   <form class="mem-card mem-form" data-member-form="login">
@@ -1307,7 +1316,7 @@ export function memberAuthHtml(en = false, o?: { settings?: SettingsMap }): stri
     <input class="mem-input" type="password" name="password" maxlength="72" placeholder="${tr(en, '密码')}" autocomplete="current-password" required aria-label="${tr(en, '密码')}">
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button class="mem-btn" type="submit">${tr(en, '登录')}</button>
-    <p class="mem-swap">${regOpen ? `${tr(en, '还没有账号？')}<button type="button" class="mem-swap-btn" data-member-swap="register">${tr(en, '注册一个')}</button>` : tr(en, '本站暂不开放注册，已注册的会员直接登录')}</p>
+    <p class="mem-swap">${regOpen ? `${tr(en, '还没有账号？')}<button type="button" class="mem-swap-btn" data-member-swap="register">${tr(en, '注册一个')}</button>` : `${tr(en, '本站为邀请制')}<button type="button" class="mem-swap-btn" data-member-swap="register">${tr(en, '凭邀请码注册')}</button>`}</p>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>
   ${registerForm}

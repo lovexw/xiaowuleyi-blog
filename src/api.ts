@@ -71,6 +71,12 @@ import {
   updateMemberAdmin,
   updateMemberNickname,
   updateMemberQQ,
+  consumeInvite,
+  deleteInvite,
+  getInviteByCode,
+  insertInviteCode,
+  listInvitesAdmin,
+  releaseInvite,
   weiboCommentCountMap,
   weiboImageList,
   weiboTopicList,
@@ -95,6 +101,7 @@ import { EMOJI_BASE, WECHAT_EMOJI } from './emoji'
 import { awardCommentPoints, awardPoints, bumpActiveDay, normalizeMinTier } from './points'
 import { fanDay, fanLevel, nextStreak } from './fanrank'
 import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, type MemberTierDef } from './tiers'
+import { genInviteCode, normalizeInviteCode } from './invite'
 import { applyCommentGate, canReplyGatedComment, commentGateRank, commentGateViewerRank, threadRootTier } from './commentgate'
 import { collectRoutes } from './collect'
 import { exportRoutes } from './export'
@@ -345,7 +352,7 @@ api.post('/auth/logout', async (c) => {
 /* ---------------- 会员（访客注册/登录，契约见 docs/archive/DEVPLAN-2026-10-07.md 附录 A） ---------------- */
 
 /** 对外视图裁剪：公开口径只有昵称/档位/积分；self = 本人视角（另给 email/username/createdAt），管理口径走 listMembersAdmin 原始行。
- *  档位出参按生效档位（src/tiers.ts：过期即时降级基础档）解析——tierName/tierColor 供前台直接渲染认证徽标 */
+ *  档位出参按生效档位（src/tiers.ts：过期即时降到 fallback / 上一档）解析——tierName/tierColor 供前台直接渲染认证徽标 */
 function memberView(m: MemberRow, self = false, defs: MemberTierDef[] = parseMemberTiers(undefined)) {
   const eff = effectiveTier(defs, m.tier, m.tier_expires_at)
   const v: Record<string, unknown> = {
@@ -358,6 +365,8 @@ function memberView(m: MemberRow, self = false, defs: MemberTierDef[] = parseMem
     tierExpired: eff.expired,
     points: m.points,
   }
+  // 到期降级后的原档位名（如「咖啡会员」）：本人视角拿来做「已到期，现按 X 生效」的文案
+  if (eff.downgradedFrom) v.tierDowngradedFrom = eff.downgradedFrom
   if (m.avatar) v.avatarUrl = m.avatar
   if (self) {
     v.username = m.username
@@ -379,13 +388,21 @@ function memberView(m: MemberRow, self = false, defs: MemberTierDef[] = parseMem
 api.post('/member/register', async (c) => {
   const settings = await getSettings(c.env.DB)
   if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
-  // 注册开关（会员 3.0 预备，settings.memberRegOpen）：关闭 = 老会员照常登录、新用户不再进人
-  if (settings.memberRegOpen === '0') return jsonError('本站暂不开放注册，稍后再来看看', 403)
   const ip = clientIp(c.req.raw)
   if (!rateLimit(`mreg:${ip}`, 5, 10 * 60_000)) return jsonError('注册太频繁，请稍后再试', 429)
-  const body = await c.req.json<{ username?: string; password?: string; email?: string; nickname?: string; link?: string; turnstileToken?: string }>().catch(() => null)
+  const body = await c.req
+    .json<{ username?: string; password?: string; email?: string; nickname?: string; link?: string; turnstileToken?: string; inviteCode?: string }>()
+    .catch(() => null)
   // 蜜罐字段 link：正常用户看不到、机器人会填 —— 静默丢弃（同 publicComment 口径）
   if (body?.link) return c.json({ ok: true })
+  // 邀请码（可选，src/invite.ts）：一次性，持码注册直接拿码上指定的档位（默认优质会员）。
+  // memberRegOpen='0' 时它是**唯一入口**——做邀请制的站长不该为了发码而把注册重新放开
+  const inviteCode = normalizeInviteCode(body?.inviteCode)
+  const invite = inviteCode ? await getInviteByCode(c.env.DB, inviteCode) : null
+  const now = Date.now()
+  const inviteUsable = !!invite && !invite.used_at && (invite.expires_at == null || invite.expires_at > now)
+  if (inviteCode && !inviteUsable) return jsonError('邀请码无效或已被使用', 400)
+  if (settings.memberRegOpen === '0' && !inviteUsable) return jsonError('本站暂不开放注册，有邀请码可凭码注册', 403)
   // 注册人机验证（Turnstile，A2 根治）：配置了 Secret 才启用，放在字段校验之前让无令牌机器人
   // 最早出局；演示站跳过（凭据公示的体验站不外发 siteverify，也不给体验者加验证负担）。
   // verifyTurnstile 拿不到结论一律 false —— 端点抖动时宁可挡注册，不留无验证窗口
@@ -409,12 +426,26 @@ api.post('/member/register', async (c) => {
   } catch {
     return jsonError('用户名已被占用') // 并发注册撞 UNIQUE 约束的兜底
   }
+  // 邀请码核销 + 授予档位。核销是条件 UPDATE（WHERE used_at IS NULL）——同一个码被两人同时提交时
+  // 只有一位能过；抢输的那位把刚建的会员删掉再报错，避免留下「注册成功但没档位」的半成品
+  if (inviteUsable && invite) {
+    if (!(await consumeInvite(c.env.DB, invite.id, memberId, username, now))) {
+      await c.env.DB.prepare('DELETE FROM members WHERE id = ?').bind(memberId).run()
+      return jsonError('邀请码刚被用掉了，换一个再试', 409)
+    }
+    const defs = parseMemberTiers(settings.memberTiers)
+    // 码上的档位被站长删掉时回落基础档（保守方向：不给多权限），有效期按该档默认天数
+    const def = tierByKey(defs, invite.tier) ?? defs[0]
+    const expiresAt = def.permanent ? null : now + (def.days || 365) * 86_400_000
+    await c.env.DB.prepare('UPDATE members SET tier = ?, tier_expires_at = ?, updated_at = ? WHERE id = ?').bind(def.key, expiresAt, now, memberId).run()
+  }
   const token = await createMemberSession(c.env.DB, memberId)
   c.header('Set-Cookie', memberSessionCookie(token, isSecureRequest(c.req.raw)))
   await awardPoints(c.env.DB, memberId, 'dailyLogin')
   await bumpActiveDay(c.env.DB, memberId)
   const row = await getMemberById(c.env.DB, memberId)
-  return c.json({ ok: true, member: row ? memberView(row, true) : null })
+  // 档位名按站长的自定义定义解析（持码注册会带档位，默认口径的三档名可能对不上）
+  return c.json({ ok: true, member: row ? memberView(row, true, parseMemberTiers(settings.memberTiers)) : null })
 })
 
 api.post('/member/login', async (c) => {
@@ -684,6 +715,54 @@ api.put('/admin/members/:id', async (c) => {
 api.get('/admin/member-tiers', async (c) => {
   const settings = await getSettings(c.env.DB)
   return c.json({ tiers: parseMemberTiers(settings.memberTiers) })
+})
+
+/* ---------------- 注册邀请码（src/invite.ts） ---------------- */
+
+api.get('/admin/invites', async (c) => {
+  const status = c.req.query('status') === 'used' ? 'used' : c.req.query('status') === 'unused' ? 'unused' : 'all'
+  const page = clampInt(c.req.query('page'), 1, 1_000_000, 1)
+  const [list, settings] = await Promise.all([listInvitesAdmin(c.env.DB, status, page), getSettings(c.env.DB)])
+  // tiers 随列表下发：生成表单的档位下拉直接用它（自定义档位的事实源是 settings.memberTiers）
+  return c.json({ ...list, tiers: parseMemberTiers(settings.memberTiers) })
+})
+
+api.post('/admin/invites', async (c) => {
+  const body = await c.req.json<{ count?: unknown; tier?: unknown; note?: unknown; days?: unknown }>().catch(() => null)
+  if (!body) return jsonError('请求格式错误')
+  const settings = await getSettings(c.env.DB)
+  const defs = parseMemberTiers(settings.memberTiers)
+  const count = Math.trunc(Number(body.count ?? 1))
+  if (!Number.isFinite(count) || count < 1 || count > 50) return jsonError('一次生成 1-50 个')
+  // 档位必须成立：码是「直接发放身份」的凭据，脏档位会让持码人注册后落到基础档（体验事故）
+  const def = tierByKey(defs, String(body.tier || ''))
+  if (!def) return jsonError('请选择有效的档位')
+  const note = String(body.note || '').replace(/\s+/g, ' ').trim().slice(0, 60)
+  const days = Math.trunc(Number(body.days ?? 0))
+  if (!Number.isFinite(days) || days < 0 || days > 3650) return jsonError('有效期需为 0-3650 天（0 = 不过期）')
+  const now = Date.now()
+  const expiresAt = days > 0 ? now + days * 86_400_000 : null
+  const codes: string[] = []
+  // 撞 UNIQUE 就换一个再试；50 个码的碰撞概率约 5e-8，重试 5 次仍失败说明随机源出了问题，直接停手
+  for (let i = 0; i < count; i++) {
+    let inserted = false
+    for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
+      const code = genInviteCode()
+      inserted = await insertInviteCode(c.env.DB, { code, tier: def.key, note, createdAt: now, expiresAt })
+      if (inserted) codes.push(code)
+    }
+    if (!inserted) break
+  }
+  if (!codes.length) return jsonError('生成失败，请重试', 500)
+  return c.json({ ok: true, codes, count: codes.length, tier: def.key, tierName: def.name, expiresAt })
+})
+
+api.delete('/admin/invites/:id', async (c) => {
+  const id = parseId(c.req.param('id'))
+  if (!id) return jsonError('邀请码不存在', 404)
+  // 已核销的删不掉：那是「谁凭哪个码进来的」的账，会员面出问题时得能回查
+  if (!(await deleteInvite(c.env.DB, id))) return jsonError('已使用的邀请码不能撤销', 409)
+  return c.json({ ok: true })
 })
 
 /* 采集插件（公众号文章 → 草稿），见 src/collect.ts */

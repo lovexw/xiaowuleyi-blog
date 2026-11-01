@@ -72,7 +72,7 @@ async function setupDb() {
     .run()
   await d1
     .prepare(
-      "INSERT INTO posts (slug, title, content, status, min_tier, published_at, created_at, updated_at) VALUES ('paid-post', '付费文', '<p>secret</p>', 'published', 'top', ?, ?, ?)"
+      "INSERT INTO posts (slug, title, content, status, min_tier, published_at, created_at, updated_at) VALUES ('paid-post', '付费文', '<p>secret</p>', 'published', 'coffee', ?, ?, ?)"
     )
     .bind(now, now, now)
     .run()
@@ -230,15 +230,16 @@ test('档位时效链路：过期会员读不了付费档（canReadTiers），�
       .bind(username, hash, salt, username, tier, exp, now, now)
       .run()
   }
-  await ins('expired1', 'top', now - 1000)
-  await ins('living1', 'top', now + 86_400_000)
+  await ins('expired1', 'coffee', now - 1000)
+  await ins('living1', 'coffee', now + 86_400_000)
   const expiredRow = db.prepare("SELECT * FROM members WHERE username = 'expired1'").get() as { id: number; tier: string; tier_expires_at: number }
   const livingRow = db.prepare("SELECT * FROM members WHERE username = 'living1'").get() as { id: number; tier: string; tier_expires_at: number }
 
-  assert.equal(canReadTiers(defs, 'top', expiredRow, now), false, '过期会员读不了付费档')
+  assert.equal(canReadTiers(defs, 'coffee', expiredRow, now), false, '过期会员读不了咖啡档')
   assert.equal(canReadTiers(defs, 'member', expiredRow, now), true, '过期会员仍算登录会员')
-  assert.equal(canReadTiers(defs, 'top', livingRow, now), true, '未过期会员正常可读')
-  assert.equal(effectiveTier(defs, 'top', expiredRow.tier_expires_at, now).expired, true)
+  assert.equal(canReadTiers(defs, 'coffee', livingRow, now), true, '未过期会员正常可读')
+  assert.equal(effectiveTier(defs, 'coffee', expiredRow.tier_expires_at, now).expired, true)
+  assert.equal(effectiveTier(defs, 'coffee', expiredRow.tier_expires_at, now).key, 'premium', '到期不消失，降到优质会员')
 
   // 管理员改档位：PUT 带 tierExpiresAt 日期串 → 落库生效
   const { createSession } = await import('../src/auth')

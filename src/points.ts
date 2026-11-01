@@ -162,9 +162,13 @@ export function normalizeMinTier(v: string | null | undefined): MinTier | string
 }
 
 /** 可见判定：会员等级 ≥ 文章档位即可读。游客按 0。
- *  兼容包装：走默认三档定义（自定义档位场景在调用方用 canReadTiers 传真实定义） */
+ *  **历史兼容包装**：写死 2026-11 前的三档口径（normal=1 / coffee=2 / top=3），
+ *  不随默认档位改名/重排而漂移——它是给外部调用方与老数据兜底的稳定契约。
+ *  站内新代码一律用 tiers.ts 的 canReadTiers（自定义档位定义是唯一真源） */
 export function canRead(minTier: string | null | undefined, tier: string | null | undefined): boolean {
-  return canReadTiers(parseMemberTiers(undefined), minTier, tier ? { tier } : null)
+  const need = MIN_TIER_RANK[(minTier || 'all').trim()] ?? 1
+  const have = tier ? (MEMBER_TIER_RANK[tier.trim()] ?? 1) : 0
+  return have >= need
 }
 
 /** 活跃天数累计（铁粉体系 3.0-M1）：北京日条件更新幂等——同日重复登录/签到不重复计天。

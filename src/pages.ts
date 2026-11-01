@@ -1301,6 +1301,7 @@ export async function renderMember(c: C): Promise<Response> {
         tierIsBase: eff.isBase,
         tierExpiresAt: row.tier_expires_at ?? null,
         tierExpired: eff.expired,
+        tierDowngradedFrom: eff.downgradedFrom,
         notice: settings.memberNotice?.trim() || undefined,
         activity: await memberActivity(c.env.DB, row.id),
       }

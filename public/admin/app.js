@@ -2030,7 +2030,14 @@ async function viewTrash() {
 }
 
 /** 会员管理页：列表 / 搜用户名邮箱 / 改档位 / 封禁解封（API 形状见 DEVPLAN-2026-10-07 附录 A5） */
-const MEMBER_TIER_LABEL = { normal: '普通会员', coffee: '咖啡会员', top: '付费会员' }
+const MEMBER_TIER_LABEL = { normal: '注册会员', premium: '优质会员', coffee: '咖啡会员', top: '付费会员（旧）' }
+
+/** 邀请码展示形态（与 src/invite.ts 的 formatInviteCode 同口径：ABCD1234 → ABCD-1234）。
+ *  后台是纯前端模块，拿不到服务端模块，这里保留一份极小的镜像 */
+function formatInviteCode(code) {
+  const c = String(code || '').toUpperCase()
+  return c.length === 8 ? c.slice(0, 4) + '-' + c.slice(4) : c
+}
 
 /** 档位展示名：优先自定义定义（GET /admin/members 随列表下发 tiers），缺省回落历史三档 */
 function memberTierName(tiers, key) {
@@ -2038,14 +2045,29 @@ function memberTierName(tiers, key) {
   return def ? def.name : MEMBER_TIER_LABEL[key] || key
 }
 
+/** 会员页（2026-11 重构）：会员相关的一切都收在这一页——成员列表 / 会员设置 / 邀请码。
+ *  设置页「互动」里的会员面板整体迁入，会员不再是站点设置的附属项。
+ *  tab 走 hash（?tab=），切 tab 重挂视图：这三个 tab 的数据源不同（members / settings / invites），
+ *  重挂比页内切更省事，也不会带着上一个 tab 的未保存输入到处跑 */
 async function viewMembers() {
   const q = new URLSearchParams(location.hash.split('?')[1] || '')
+  const tabRaw = q.get('tab') || 'list'
+  const tab = tabRaw === 'settings' || tabRaw === 'invites' ? tabRaw : 'list'
   const page = parseInt(q.get('page') || '1', 10)
   const kw = (q.get('q') || '').trim()
+  const status = q.get('status') === 'used' ? 'used' : q.get('status') === 'unused' ? 'unused' : 'all'
 
-  let d
+  let d = { items: [], total: 0, page: 1, totalPages: 1, tiers: [], unused: 0, used: 0 }
   try {
-    d = await api(`/admin/members?page=${page}${kw ? `&q=${encodeURIComponent(kw)}` : ''}`)
+    if (tab === 'settings') {
+      // 与设置页共用 state.settings 缓存：保存后侧栏等依赖设置的 UI 立即生效
+      state.settings = (await api('/admin/settings')).settings
+      loadMemberTierDraft(state.settings.memberTiers)
+    } else if (tab === 'invites') {
+      d = await api(`/admin/invites?page=${page}&status=${status}`)
+    } else {
+      d = await api(`/admin/members?page=${page}${kw ? `&q=${encodeURIComponent(kw)}` : ''}`)
+    }
   } catch (e) {
     return handleApiErr(e)
   }
@@ -2080,17 +2102,41 @@ async function viewMembers() {
     )
     .join('')
 
-  await shellView(
-    'members',
-    `<div class="page-head">
-      <div><div class="page-title">会员</div><div class="page-sub">站内注册的会员 · 评论与每日登录攒积分${d.total ? ` · 共 ${d.total} 位` : ''}</div></div>
-    </div>
-    <div class="toolbar">
+  const tabsHtml = `<div class="tabs members-tabs">
+    <button class="tab${tab === 'list' ? ' is-active' : ''}" data-mtab="list" type="button">成员${tab === 'list' && d.total ? `（${d.total}）` : ''}</button>
+    <button class="tab${tab === 'settings' ? ' is-active' : ''}" data-mtab="settings" type="button">会员设置</button>
+    <button class="tab${tab === 'invites' ? ' is-active' : ''}" data-mtab="invites" type="button">邀请码</button>
+  </div>`
+  const listHtml = `<div class="toolbar">
       <input class="input" id="mb-search" placeholder="搜索用户名 / 邮箱…" value="${esc(kw)}">
     </div>
     <div class="panel">${rows || '<div class="empty-box">还没有会员</div>'}</div>
     ${d.totalPages > 1 ? `<div class="pager-admin"><button class="btn btn-sm" id="pg-prev" ${page <= 1 ? 'disabled' : ''}>上一页</button><span>${d.page} / ${d.totalPages}</span><button class="btn btn-sm" id="pg-next" ${page >= d.totalPages ? 'disabled' : ''}>下一页</button></div>` : ''}`
+
+  await shellView(
+    'members',
+    `<div class="page-head">
+      <div><div class="page-title">会员</div><div class="page-sub">${MEMBERS_TAB_SUB[tab]}</div></div>
+      ${tab === 'settings' ? '<button class="btn btn-primary" id="btn-mem-save">保存会员设置</button>' : ''}
+    </div>
+    ${tabsHtml}
+    ${tab === 'settings' ? memberSettingsPane(state.settings) : tab === 'invites' ? invitesPane(d, status) : listHtml}`
   )
+
+  // tab 切换走 hash：三个 tab 数据源不同，重挂视图最省心（也不会带着半截输入跨 tab）
+  $app.querySelectorAll('[data-mtab]').forEach((b) =>
+    b.addEventListener('click', () => {
+      location.hash = b.dataset.mtab === 'list' ? '#/members' : `#/members?tab=${b.dataset.mtab}`
+    })
+  )
+  if (tab === 'settings') {
+    bindMemberSettings()
+    return
+  }
+  if (tab === 'invites') {
+    bindInvites(d, status)
+    return
+  }
 
   const nav = (patch) => {
     const p = new URLSearchParams({ page: String(page), ...(kw ? { q: kw } : {}), ...patch })
@@ -2129,8 +2175,242 @@ async function viewMembers() {
   })
 }
 
+/** 会员页三个 tab 的副标题（page-head 文案随 tab 变） */
+const MEMBERS_TAB_SUB = {
+  list: '站内注册的会员 · 评论与每日登录攒积分',
+  settings: '会员体系总开关、档位定义与注册规则',
+  invites: '一次性邀请码：凭码注册直接获得指定档位',
+}
+
+/** 会员设置面板（2026-11 从「设置 → 互动」整体迁入）：开关 + 档位定义 + 注册验证。
+ *  id 沿用 st- 前缀——renderMemberTierEditor / renderCommentGateSelect 与保存逻辑都按这套 id 走 */
+function memberSettingsPane(s) {
+  return `<div class="panel" style="padding:20px;">
+    <div class="form-section"><h3>会员体系</h3><div class="sec-desc">游客注册成站内会员：登录评论带身份、攒积分上排行榜；文章可按档位控制「谁能看」</div>
+      <div class="switch-row">
+        <div><div class="switch-label">开启会员体系</div><div class="switch-sub">开启后前台出现「会员」「排行榜」导航入口与 /member /rank 页；编辑器可设文章档位。关闭时这两个页面 404，已设档位的文章仍按档位生效</div></div>
+        <label class="switch"><input type="checkbox" id="st-membersEnabled" ${s.membersEnabled === '1' ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="switch-row">
+        <div><div class="switch-label">开放注册</div><div class="switch-sub">关闭后前台只保留登录（注册表单收起、注册接口拒绝），<b>但持有效邀请码仍可注册</b>——做邀请制的站不用为了发码把注册重新放开</div></div>
+        <label class="switch"><input type="checkbox" id="st-memberRegOpen" ${s.memberRegOpen !== '0' ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="switch-row">
+        <div><div class="switch-label">开放排行榜</div><div class="switch-sub">关闭后 /rank 页显示为空榜（不展示会员名单），会员体系本身照常运行</div></div>
+        <label class="switch"><input type="checkbox" id="st-rankEnabled" ${s.rankEnabled !== '0' ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="switch-row">
+        <div><div class="switch-label">评论区会员徽标</div><div class="switch-sub">开启后评论与微博评论显示会员身份与档位认证徽标（带色 ✓ 标）；关闭则评论区不区分会员与游客</div></div>
+        <label class="switch"><input type="checkbox" id="st-showMemberBadge" ${s.showMemberBadge !== '0' ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="form-row">
+        <div class="form-item" style="max-width:180px;"><label>排行榜展示条数</label><input class="input" id="st-rankTopN" type="number" min="1" max="50" value="${esc(s.rankTopN || '10')}"></div>
+      </div>
+      <div class="form-item" style="max-width:560px;"><label>会员中心公告（选填）</label><input class="input" id="st-memberNotice" maxlength="200" placeholder="如：会员每周五晚直播答疑，欢迎加入" value="${esc(s.memberNotice || '')}"><div class="sec-desc" style="margin-top:4px;">显示在会员中心页顶部（纯文本，最长 200 字）</div></div>
+      <div class="form-item"><label>注册人机验证（Turnstile，选填）</label><div class="sec-desc" style="margin:4px 0 8px;">Cloudflare Dashboard → Turnstile 建个站点，两把钥匙成对填到这里（都留空 = 关闭）。启用后前台注册需先过人机验证，拦批量小号刷分；Secret 保存后只显示打码</div>
+        <input class="input" id="st-turnstileSiteKey" placeholder="0x4AAAA…（Site Key，公开）" autocomplete="off" value="${esc(s.turnstileSiteKey || '')}" style="margin-bottom:8px;">
+        <input class="input" id="st-turnstileSecret" placeholder="0x4AAAA…（Secret Key，保密）" autocomplete="off" value="${esc(s.turnstileSecret || '')}">
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:20px;">
+    <div class="form-section"><h3>会员档位</h3>
+      <div class="sec-desc">等级从上到下排列，<b>第一档是全体会员的兜底身份，必须永久</b>。前台称呼、付费墙文案、认证徽标颜色都随这里改；「永久」以外的档位在「成员」里分配时带有效期，到期自动降到「到期降到」所选档位（默认降一档），会员不会一夜之间变回陌生人。编辑器「谁能看」按档位 key 关联，改名字不影响已有文章</div>
+      <div id="st-tier-editor"></div>
+      <button class="btn btn-ghost btn-sm" id="st-tier-add" type="button" style="margin-top:8px;">+ 添加档位</button>
+    </div>
+  </div>
+
+  <div class="panel" style="padding:20px;">
+    <div class="form-section"><h3>评论圈层可见</h3><div class="sec-desc">让高档位会员之间有一块半私密的说话地方</div>
+      <div class="form-item" style="max-width:360px;"><label>从哪一档起进入私密圈</label>
+        <select class="input" id="st-commentGateTier"></select>
+        <div class="sec-desc" style="margin-top:4px;">选中档位<strong>及以上</strong>的会员评论，只有同档及以上会员与管理员能看到正文、能回复；游客与低档会员只看到「这里有一条 XX 会员的评论」的占位块，正文与回复都不下发（文章、留言板、微博评论三处同口径）。选「关闭」= 评论对所有人可见。档位被删后该项按最严口径（所有会员评论仅会员可见）兜底，重新选一次即可恢复</div>
+      </div>
+    </div>
+  </div>`
+}
+
+/** 会员设置保存：只提交会员相关键（服务端缺键即保留），不复用设置页的「保存全部」 */
+function bindMemberSettings() {
+  const s = state.settings || {}
+  renderMemberTierEditor()
+  renderCommentGateSelect(s.commentGateTier)
+  document.getElementById('st-tier-add').addEventListener('click', () => {
+    memberTierDraft.push({ key: 't' + Date.now().toString(36), name: '新档位', color: '', permanent: false, days: 365, fallback: '' })
+    renderMemberTierEditor()
+  })
+  document.getElementById('btn-mem-save').addEventListener('click', async (e) => {
+    const g = (id) => document.getElementById(id)
+    const btn = e.currentTarget
+    btn.disabled = true
+    const body = {
+      membersEnabled: g('st-membersEnabled').checked ? '1' : '0',
+      memberRegOpen: g('st-memberRegOpen').checked ? '1' : '0',
+      rankEnabled: g('st-rankEnabled').checked ? '1' : '0',
+      showMemberBadge: g('st-showMemberBadge').checked ? '1' : '0',
+      rankTopN: g('st-rankTopN').value || '10',
+      memberNotice: g('st-memberNotice').value.trim(),
+      commentGateTier: g('st-commentGateTier').value || '0',
+      // 档位定义整份提交：服务端 cleanMemberTiers 校验（含 fallback 必须更低），脏值 400 不静默降级
+      memberTiers: JSON.stringify(memberTierDraft),
+      turnstileSiteKey: g('st-turnstileSiteKey').value.trim(),
+      turnstileSecret: g('st-turnstileSecret').value.trim(),
+    }
+    try {
+      const d = await api('/admin/settings', { method: 'PUT', body })
+      state.settings = d.settings
+      loadMemberTierDraft(state.settings.memberTiers)
+      // 档位改名/增删后门槛下拉的选项要跟着换
+      renderCommentGateSelect(state.settings.commentGateTier)
+      toast('会员设置已保存 ✅')
+    } catch (err) {
+      toast(err.message, true)
+    } finally {
+      btn.disabled = false
+    }
+  })
+}
+
+/** 邀请码面板：生成表单 + 列表（未使用 / 已使用 / 已过期三态由 expires_at 现算） */
+function invitesPane(d, status) {
+  const now = Date.now()
+  const tierName = (key) => memberTierName(d.tiers, key)
+  const filter = (v, label) => `<button class="btn btn-sm${status === v ? '' : ' btn-ghost'}" data-inv-status="${v}" type="button">${label}</button>`
+  const rows = (d.items || [])
+    .map((c) => {
+      const expired = c.expires_at && c.expires_at <= now && !c.used_at
+      const stateChip = c.used_at
+        ? `<span class="chip chip-green">已使用</span>`
+        : expired
+          ? `<span class="chip chip-gray">已过期</span>`
+          : `<span class="chip chip-warn">未使用</span>`
+      const meta = c.used_at
+        ? `由 ${esc(c.used_by_name || '（已删会员）')} 于 ${fmtDateTime(c.used_at)} 使用`
+        : c.expires_at
+          ? `${c.expires_at <= now ? '已于' : '有效期至'} ${fmtDateShort(c.expires_at)}`
+          : '长期有效'
+      return `<div class="post-row" data-id="${c.id}" data-code="${esc(c.code)}">
+      <div class="post-main">
+        <div class="post-title"><code style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${esc(formatInviteCode(c.code))}</code> ${stateChip}<span class="chip chip-gray">${esc(tierName(c.tier))}</span></div>
+        <div class="post-meta"><span>${meta}</span>${c.note ? `<span>·</span><span>${esc(c.note)}</span>` : ''}<span>·</span><span>${fmtDateTime(c.created_at)} 生成</span></div>
+      </div>
+      <div class="post-ops">
+        <button class="btn btn-ghost btn-sm" data-inv-copy type="button">复制</button>
+        ${c.used_at ? '' : '<button class="btn btn-ghost btn-sm btn-danger" data-inv-del type="button">撤销</button>'}
+      </div>
+    </div>`
+    })
+    .join('')
+  return `<div class="panel" style="padding:20px;">
+    <div class="form-section"><h3>生成邀请码</h3><div class="sec-desc">一次性：一码一人，用完即废。持码注册的人直接拿到所选档位，不用你再手动改档位。前台注册表单可以填码；「开放注册」关掉时，邀请码就是唯一的注册入口</div>
+      <div class="form-row">
+        <div class="form-item" style="max-width:200px;"><label>授予档位</label><select class="input" id="inv-tier">${(d.tiers || []).map((t) => `<option value="${esc(t.key)}"${t.key === 'premium' ? ' selected' : ''}>${esc(t.name)}</option>`).join('')}</select></div>
+        <div class="form-item" style="max-width:120px;"><label>数量</label><input class="input" id="inv-count" type="number" min="1" max="50" value="1"></div>
+        <div class="form-item" style="max-width:150px;"><label>码有效期（天）</label><input class="input" id="inv-days" type="number" min="0" max="3650" value="0"><div class="sec-desc" style="margin-top:4px;">0 = 不过期</div></div>
+        <div class="form-item" style="flex:1;min-width:180px;"><label>备注（选填）</label><input class="input" id="inv-note" maxlength="60" placeholder="如：小红书引流第 1 批"></div>
+        <div class="form-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn btn-primary" id="btn-inv-gen" type="button">生成</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div style="display:flex;gap:6px;">
+      ${filter('all', `全部（${(d.unused || 0) + (d.used || 0)}）`)}
+      ${filter('unused', `未使用（${d.unused || 0}）`)}
+      ${filter('used', `已使用（${d.used || 0}）`)}
+    </div>
+  </div>
+  <div class="panel">${rows || '<div class="empty-box">还没有邀请码——上面生成一批吧</div>'}</div>
+  ${d.totalPages > 1 ? `<div class="pager-admin"><button class="btn btn-sm" id="pg-prev" ${d.page <= 1 ? 'disabled' : ''}>上一页</button><span>${d.page} / ${d.totalPages}</span><button class="btn btn-sm" id="pg-next" ${d.page >= d.totalPages ? 'disabled' : ''}>下一页</button></div>` : ''}`
+}
+
+function bindInvites(d, status) {
+  const page = d.page || 1
+  const go = (patch) => {
+    const p = new URLSearchParams({ tab: 'invites', ...(status !== 'all' ? { status } : {}), page: String(page), ...patch })
+    location.hash = '#/members?' + p.toString()
+  }
+  $app.querySelectorAll('[data-inv-status]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const v = b.dataset.invStatus
+      location.hash = '#/members?tab=invites' + (v === 'all' ? '' : `&status=${v}`)
+    })
+  )
+  const prev = document.getElementById('pg-prev')
+  const next = document.getElementById('pg-next')
+  if (prev) prev.addEventListener('click', () => go({ page: page - 1 }))
+  if (next) next.addEventListener('click', () => go({ page: page + 1 }))
+
+  document.getElementById('btn-inv-gen').addEventListener('click', async (e) => {
+    const btn = e.currentTarget
+    const count = parseInt(document.getElementById('inv-count').value, 10) || 1
+    const days = parseInt(document.getElementById('inv-days').value, 10) || 0
+    btn.disabled = true
+    try {
+      const r = await api('/admin/invites', {
+        method: 'POST',
+        body: { tier: document.getElementById('inv-tier').value, count, days, note: document.getElementById('inv-note').value.trim() },
+      })
+      // 一次生成多个时把码整批摊开：站长要批量复制去发，逐条列表里翻太难受
+      showInviteCodes(r)
+      navigate()
+    } catch (err) {
+      toast(err.message, true)
+    } finally {
+      btn.disabled = false
+    }
+  })
+
+  $app.querySelectorAll('.post-row').forEach((row) => {
+    const id = Number(row.dataset.id)
+    const code = row.dataset.code
+    const copyBtn = row.querySelector('[data-inv-copy]')
+    if (copyBtn)
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard
+          .writeText(formatInviteCode(code))
+          .then(() => toast('已复制'))
+          .catch(() => toast('复制失败，请手动选中', true))
+      })
+    const delBtn = row.querySelector('[data-inv-del]')
+    if (delBtn)
+      delBtn.addEventListener('click', async () => {
+        if (!(await confirmBox(`撤销邀请码 ${formatInviteCode(code)}？撤销后这个码再也用不了（已使用的码不能撤销）。`))) return
+        delBtn.disabled = true
+        try {
+          await api(`/admin/invites/${id}`, { method: 'DELETE' })
+          toast('已撤销')
+          navigate()
+        } catch (err) {
+          delBtn.disabled = false
+          toast(err.message, true)
+        }
+      })
+  })
+}
+
+/** 新生成的邀请码整批展示（含一键复制全部） */
+function showInviteCodes(r) {
+  const text = r.codes.map(formatInviteCode).join('\n')
+  const m = modal(`<div class="modal-head"><span>已生成 ${r.count} 个邀请码</span><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <p class="sec-desc" style="margin:0 0 10px;">档位：<b>${esc(r.tierName)}</b>　${r.expiresAt ? `码有效期至 ${fmtDateShort(r.expiresAt)}` : '码长期有效'}　一码一人，用完即废</p>
+      <textarea class="textarea" id="inv-out" rows="${Math.min(12, Math.max(3, r.codes.length))}" readonly style="font-family:ui-monospace,monospace;">${esc(text)}</textarea>
+      <div class="sec-desc" style="margin-top:8px;">关掉这个窗口后仍可在列表里复制单个码</div>
+    </div>
+    <div class="modal-foot"><button class="btn" data-close>关闭</button><button class="btn btn-primary" id="inv-copy-all">复制全部</button></div>`)
+  m.mask.querySelector('#inv-copy-all').addEventListener('click', () => {
+    navigator.clipboard
+      .writeText(text)
+      .then(() => toast('已复制全部'))
+      .catch(() => toast('复制失败，请手动选中', true))
+  })
+}
+
 /** 分配档位弹窗（会员 3.0 预备）：档位来自自定义定义（tiers），非永久档可带有效期——
- *  到期后会员前台自动按基础档生效；留空日期 = 清除有效期（转永久）。PUT 缺键即保留 */
+ *  到期后不消失，自动降到 fallback（默认降一档）；留空日期 = 清除有效期（转永久）。PUT 缺键即保留 */
 function memberTierModal(member, tiers) {
   const list = tiers && tiers.length ? tiers : Object.keys(MEMBER_TIER_LABEL).map((k) => ({ key: k, name: MEMBER_TIER_LABEL[k], permanent: k === 'normal', days: 0 }))
   const def = list.find((t) => t.key === member.tier) || list[0]
@@ -2150,7 +2430,7 @@ function memberTierModal(member, tiers) {
       <label class="auth-field" style="margin-top:10px;" id="mb-expire-row"><label>有效期至（留空 = 永久 / 清除）</label>
         <input class="input" type="date" id="mb-expire" value="${esc(currentExpire)}">
       </label>
-      <div style="font-size:12px;color:var(--sub);margin-top:8px;">档位越高可读的专属文章越多（编辑器「谁能看」按档位设置）；档位不影响积分累计。过期会员自动按「${esc(list[0].name)}」生效，改一次有效期即续期。</div>
+      <div style="font-size:12px;color:var(--sub);margin-top:8px;">档位越高可读的专属文章越多（编辑器「谁能看」按档位设置）；档位不影响积分累计。限时档到期后<b>不会消失</b>，自动降到「会员设置」里指定的降级档位（默认降一档），改一次有效期即续期。</div>
     </div>
     <div class="modal-foot"><button class="btn" data-close>取消</button><button class="btn btn-primary" id="mb-tier-save">保存</button></div>`)
   const expireRow = m.mask.querySelector('#mb-expire-row')
@@ -3392,15 +3672,16 @@ async function viewPlugins() {
 /* 设置页当前页签：页内记忆（不进 hash——hashchange 会触发 navigate 重挂视图，丢未保存输入） */
 let settingsTab = 'site'
 
-/* ---------------- 会员档位编辑器（设置页「会员」面板，会员 3.0 预备） ----------------
- * 草稿态编辑：行内改名/选色/切永久/改默认天数，上移下移调等级，增删档位；
+/* ---------------- 会员档位编辑器（会员页「会员设置」页签） ----------------
+ * 草稿态编辑：行内改名/选色/切永久/改默认天数/定到期降级档，上移下移调等级，增删档位；
  * 校验与落库都在服务端（settings.memberTiers → src/tiers.ts cleanMemberTiers），这里只产出 JSON */
 
 function defaultMemberTiers() {
+  // 与 src/tiers.ts DEFAULT_MEMBER_TIERS 对齐（游客 → 注册会员 → 优质会员 → 咖啡会员）
   return [
-    { key: 'normal', name: '普通会员', color: '', permanent: true, days: 0 },
-    { key: 'coffee', name: '咖啡会员', color: '#c9803e', permanent: false, days: 365 },
-    { key: 'top', name: '付费会员', color: '#e0455a', permanent: false, days: 365 },
+    { key: 'normal', name: '注册会员', color: '', permanent: true, days: 0, fallback: '' },
+    { key: 'premium', name: '优质会员', color: '#2f7fd0', permanent: true, days: 0, fallback: '' },
+    { key: 'coffee', name: '咖啡会员', color: '#c9803e', permanent: false, days: 365, fallback: 'premium' },
   ]
 }
 
@@ -3442,9 +3723,21 @@ function renderMemberTierEditor() {
       <input type="color" value="${esc(t.color || '#888888')}" data-tf="color" title="认证徽标颜色（第一档不出徽标）" style="width:34px;height:30px;padding:2px;border:1px solid var(--line);border-radius:6px;background:none;">
       <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--sub);" title="永久档不设有效期（第一档必须永久）"><input type="checkbox" data-tf="permanent" ${t.permanent ? 'checked' : ''} ${i === 0 ? 'disabled' : ''}>永久</label>
       <input class="input" type="number" min="0" max="3650" style="width:86px;" value="${t.days || 0}" data-tf="days" title="分配时的默认有效期（天），仅非永久档生效">
+      ${
+        !t.permanent && i > 0
+          ? `<label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--sub);margin-left:2px;" title="到期后自动降到的档位（只能是更低的档）">到期降到
+              <select class="input" style="width:auto;min-width:92px;padding:4px 6px;" data-tf="fallback">
+                <option value="">自动（上一档）</option>
+                ${memberTierDraft
+                  .slice(0, i)
+                  .map((x) => `<option value="${esc(x.key)}"${(t.fallback || '') === x.key ? ' selected' : ''}>${esc(x.name)}</option>`)
+                  .join('')}
+              </select></label>`
+          : ''
+      }
       <button class="btn btn-ghost btn-sm" type="button" data-tact="up" ${i === 0 ? 'disabled' : ''} title="上移（等级更高）">↑</button>
       <button class="btn btn-ghost btn-sm" type="button" data-tact="down" ${i === memberTierDraft.length - 1 ? 'disabled' : ''} title="下移（等级更低）">↓</button>
-      <button class="btn btn-ghost btn-sm" type="button" data-tact="del" ${memberTierDraft.length <= 2 ? 'disabled' : ''} title="删除档位（用此档的会员自动回落基础档）">删</button>
+      <button class="btn btn-ghost btn-sm" type="button" data-tact="del" ${memberTierDraft.length <= 2 ? 'disabled' : ''} title="删除档位（用此档的会员按降级规则落到下一档）">删</button>
       <span style="font-size:11px;color:var(--sub);">key: ${esc(t.key)}</span>
     </div>`
     )
@@ -3453,10 +3746,11 @@ function renderMemberTierEditor() {
     const i = Number(row.dataset.i)
     row.querySelectorAll('[data-tf]').forEach((el) => {
       const f = el.dataset.tf
-      const ev = f === 'permanent' || f === 'color' ? 'change' : 'input'
+      const ev = f === 'permanent' || f === 'color' || f === 'fallback' ? 'change' : 'input'
       el.addEventListener(ev, () => {
         if (f === 'name') memberTierDraft[i].name = el.value.trim() || memberTierDraft[i].name
         else if (f === 'color') memberTierDraft[i].color = el.value
+        else if (f === 'fallback') memberTierDraft[i].fallback = el.value
         else if (f === 'permanent') {
           memberTierDraft[i].permanent = el.checked
           if (el.checked) memberTierDraft[i].days = 0
@@ -3483,8 +3777,6 @@ async function viewSettings() {
     return handleApiErr(e)
   }
   const s = state.settings
-  // 会员档位编辑态（会员 3.0 预备）：存量定义载入草稿，行内增删排序，随「保存全部」提交
-  loadMemberTierDraft(s.memberTiers)
   // 可见范围：新键为空且旧单键有值时显示旧值（与 utils.visibleRangeOf 的升级回落同口径；
   // 保存时 PUT 会清空旧键，之后新键的空值就是「全部可见」）
   const rangeVal = (key) => s[key] || s.contentVisibleRange || ''
@@ -3655,38 +3947,8 @@ async function viewSettings() {
     </div>
 
     <div class="panel" style="padding:20px;">
-      <div class="form-section"><h3>会员</h3><div class="sec-desc">游客注册成站内会员：登录评论带身份、攒积分上排行榜；文章可按档位控制「谁能看」</div>
-        <div class="switch-row">
-          <div><div class="switch-label">开启会员体系</div><div class="switch-sub">开启后前台出现「会员」「排行榜」导航入口与 /member /rank 页；编辑器可设文章档位。关闭时这两个页面 404，已设档位的文章仍按档位生效</div></div>
-          <label class="switch"><input type="checkbox" id="st-membersEnabled" ${s.membersEnabled === '1' ? 'checked' : ''}><span class="track"></span></label>
-        </div>
-        <div class="switch-row">
-          <div><div class="switch-label">开放注册</div><div class="switch-sub">关闭后前台只保留登录（注册表单收起、注册接口拒绝），已有会员不受影响——适合邀请制的站</div></div>
-          <label class="switch"><input type="checkbox" id="st-memberRegOpen" ${s.memberRegOpen !== '0' ? 'checked' : ''}><span class="track"></span></label>
-        </div>
-        <div class="switch-row">
-          <div><div class="switch-label">开放排行榜</div><div class="switch-sub">关闭后 /rank 页显示为空榜（不展示会员名单），会员体系本身照常运行</div></div>
-          <label class="switch"><input type="checkbox" id="st-rankEnabled" ${s.rankEnabled !== '0' ? 'checked' : ''}><span class="track"></span></label>
-        </div>
-        <div class="switch-row">
-          <div><div class="switch-label">评论区会员徽标</div><div class="switch-sub">开启后评论与微博评论显示会员身份与档位认证徽标（带色 ✓ 标）；关闭则评论区不区分会员与游客</div></div>
-          <label class="switch"><input type="checkbox" id="st-showMemberBadge" ${s.showMemberBadge !== '0' ? 'checked' : ''}><span class="track"></span></label>
-        </div>
-        <div class="form-item" style="max-width:360px;"><label>评论圈层可见</label>
-          <select class="input" id="st-commentGateTier"></select>
-          <div class="sec-desc" style="margin-top:4px;">选中档位<strong>及以上</strong>的会员评论，只有同档及以上会员与管理员能看到正文、能回复；游客与低档会员只看到「这里有一条 XX 会员的评论」的占位块，正文与回复都不下发（文章、留言板、微博评论三处同口径）。选「关闭」= 评论对所有人可见。档位被删后该项按最严口径（所有会员评论仅会员可见）兜底，重新选一次即可恢复</div>
-        </div>
-        <div class="form-item" style="max-width:180px;"><label>排行榜展示条数</label><input class="input" id="st-rankTopN" type="number" min="1" max="50" value="${esc(s.rankTopN || '10')}"></div>
-        <div class="form-item" style="max-width:560px;"><label>会员中心公告（选填）</label><input class="input" id="st-memberNotice" maxlength="200" placeholder="如：会员每周五晚直播答疑，欢迎加入" value="${esc(s.memberNotice || '')}"><div class="sec-desc" style="margin-top:4px;">显示在会员中心页顶部（纯文本，最长 200 字）</div></div>
-        <div class="form-item" style="max-width:640px;"><label>会员档位（等级从上到下，第一档为全体会员的兜底身份，必须永久）</label>
-          <div class="sec-desc" style="margin:4px 0 8px;">前台称呼、付费墙文案、认证徽标颜色都随这里改；「永久」外的档位在「会员管理」里分配时带有效期，过期会员自动按第一档生效。编辑器「谁能看」按档位 key 关联，改名字不影响已有文章</div>
-          <div id="st-tier-editor"></div>
-          <button class="btn btn-ghost btn-sm" id="st-tier-add" type="button" style="margin-top:8px;">+ 添加档位</button>
-        </div>
-        <div class="form-item"><label>注册人机验证（Turnstile，选填）</label><div class="sec-desc" style="margin:4px 0 8px;">Cloudflare Dashboard → Turnstile 建个站点，两把钥匙成对填到这里（都留空 = 关闭）。启用后前台注册需先过人机验证，拦批量小号刷分；Secret 保存后只显示打码</div>
-          <input class="input" id="st-turnstileSiteKey" placeholder="0x4AAAA…（Site Key，公开）" autocomplete="off" value="${esc(s.turnstileSiteKey || '')}" style="margin-bottom:8px;">
-          <input class="input" id="st-turnstileSecret" placeholder="0x4AAAA…（Secret Key，保密）" autocomplete="off" value="${esc(s.turnstileSecret || '')}">
-        </div>
+      <div class="form-section"><h3>会员</h3><div class="sec-desc">会员体系已从「设置」独立成页：档位定义、注册规则、评论圈层、邀请码与成员名单都在侧栏「会员」里管理</div>
+        <a class="btn btn-sm" href="#/members?tab=settings" style="margin-top:10px;display:inline-block;text-decoration:none;">去「会员」页管理 →</a>
       </div>
     </div>
 
@@ -3855,7 +4117,7 @@ async function viewSettings() {
   // 各页签的输入控件始终留在 DOM，「保存全部」跨页签照常收齐，PUT 缺键保留语义不受影响
   const STAB_HINTS = {
     site: '站名、头像、首页形态这些门面事，以及登录密码',
-    social: '留言规则、会员体系与访客统计',
+    social: '留言规则、内容可见范围与访客统计（会员体系已独立到侧栏「会员」）',
     advance: '闭站等特殊开关与外部服务对接——不确定的先别动',
     data: '备份与导出：把数据完整地交回自己手里',
   }
@@ -3973,14 +4235,8 @@ async function viewSettings() {
   const savedAiPolicy = ['seek', 'deny'].includes(s.aiPolicy) ? s.aiPolicy : 'allow'
   document.querySelector(`input[name="st-aiPolicy"][value="${savedAiPolicy}"]`).checked = true
 
-  // 会员档位编辑器：初渲染 + 「添加档位」（会员 3.0 预备）
-  renderMemberTierEditor()
-  // 评论圈层可见的门槛档位下拉（选项依赖上面载入的档位草稿，必须在它之后填值）
-  renderCommentGateSelect(s.commentGateTier)
-  document.getElementById('st-tier-add').addEventListener('click', () => {
-    memberTierDraft.push({ key: 't' + Date.now().toString(36), name: '新档位', color: '', permanent: false, days: 365 })
-    renderMemberTierEditor()
-  })
+  // 会员相关的一切（开关 / 档位 / 圈层 / 邀请码）都在「会员」页，这里不再渲染也不再提交——
+  // 页面上的会员卡片只是一条跳转提示
 
   document.getElementById('btn-save').addEventListener('click', async (e) => {
     const g = (id) => document.getElementById(id)
@@ -4004,17 +4260,7 @@ async function viewSettings() {
       contentVisibleRangePosts: g('st-contentVisibleRangePosts').value,
       contentVisibleRangeWeibo: g('st-contentVisibleRangeWeibo').value,
       contentVisibleForMembers: g('st-contentVisibleForMembers').checked ? '1' : '0',
-      membersEnabled: g('st-membersEnabled').checked ? '1' : '0',
-      rankTopN: g('st-rankTopN').value || '10',
-      // 会员 3.0 预备：注册/排行榜/徽标开关 + 会员公告 + 档位定义（JSON，服务端 cleanMemberTiers 校验）
-      memberRegOpen: g('st-memberRegOpen').checked ? '1' : '0',
-      rankEnabled: g('st-rankEnabled').checked ? '1' : '0',
-      showMemberBadge: g('st-showMemberBadge').checked ? '1' : '0',
-      commentGateTier: g('st-commentGateTier').value || '0',
-      memberNotice: g('st-memberNotice').value.trim(),
-      memberTiers: JSON.stringify(memberTierDraft),
-      turnstileSiteKey: g('st-turnstileSiteKey').value.trim(),
-      turnstileSecret: g('st-turnstileSecret').value.trim(),
+      // 会员开关 / 档位 / 圈层 / Turnstile 已迁到「会员」页，这里不带键（服务端缺键即保留）
       siteGrayscale: g('st-siteGrayscale').checked ? '1' : '0',
       siteClosed: g('st-siteClosed').checked ? '1' : '0',
       siteClosedMessage: g('st-siteClosedMessage').value.trim(),

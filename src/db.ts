@@ -1276,9 +1276,21 @@ const SCHEMA_TABLES = [
     target_id   INTEGER NOT NULL,
     created_at  INTEGER NOT NULL
   )`,
+  // 注册邀请码（src/invite.ts）：一次性，持码注册直接拿码上指定的档位（默认优质会员）；
+  // 核销 = used_at 置值（原子 UPDATE ... WHERE used_at IS NULL 防并发双用），撤销靠删行
+  `CREATE TABLE IF NOT EXISTS invite_codes (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    code         TEXT    NOT NULL UNIQUE,
+    tier         TEXT    NOT NULL DEFAULT 'premium',
+    note         TEXT    NOT NULL DEFAULT '',
+    created_at   INTEGER NOT NULL,
+    expires_at   INTEGER,
+    used_at      INTEGER,
+    used_by      INTEGER NOT NULL DEFAULT 0,
+    used_by_name TEXT    NOT NULL DEFAULT ''
+  )`,
   // Telegram 相册缓冲（src/external.ts）：多选拆成的多条消息先落这里，几秒后合并成一条微博
-  `CREATE TABLE IF NOT EXISTS tg_buffer (
-    media_group_id TEXT PRIMARY KEY,
+  `CREATE TABLE IF NOT EXISTS tg_buffer (    media_group_id TEXT PRIMARY KEY,
     content        TEXT NOT NULL DEFAULT '',
     images         TEXT NOT NULL DEFAULT '[]',
     status         TEXT NOT NULL DEFAULT 'published',
@@ -1675,6 +1687,89 @@ export async function updateMemberAdmin(
   sets.push('updated_at = ?')
   binds.push(Date.now(), id)
   const r = await db.prepare(`UPDATE members SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run()
+  return (r.meta.changes ?? 0) > 0
+}
+
+/* ---------------- 注册邀请码（src/invite.ts 生成码 / 校验形态；这里只做存取与原子核销） ----------------
+ * 一次性：核销 = used_at 置值，条件 UPDATE（WHERE used_at IS NULL）保证并发注册只有一个能吃下同一个码；
+ * 撤销 = 删行（已核销的删不掉——那是账，得留痕） */
+
+export interface InviteCodeRow {
+  id: number
+  code: string
+  tier: string
+  note: string
+  created_at: number
+  expires_at: number | null
+  used_at: number | null
+  used_by: number
+  used_by_name: string
+}
+
+/** 插一条码：撞 UNIQUE 返回 false（调用方换一个码重试），其余错误照常抛 */
+export async function insertInviteCode(
+  db: D1Database,
+  v: { code: string; tier: string; note: string; createdAt: number; expiresAt: number | null }
+): Promise<boolean> {
+  const r = await db
+    .prepare('INSERT OR IGNORE INTO invite_codes (code, tier, note, created_at, expires_at) VALUES (?, ?, ?, ?, ?)')
+    .bind(v.code, v.tier, v.note, v.createdAt, v.expiresAt)
+    .run()
+  return (r.meta.changes ?? 0) > 0
+}
+
+const INVITE_PAGE_SIZE = 20
+/** 后台邀请码列表：status 只分「未使用 / 已使用」两态（过期与否由前端按 expires_at 现算，不落库） */
+export async function listInvitesAdmin(
+  db: D1Database,
+  status: 'all' | 'unused' | 'used',
+  page: number
+): Promise<{ items: InviteCodeRow[]; total: number; page: number; totalPages: number; unused: number; used: number }> {
+  const where = status === 'unused' ? 'WHERE used_at IS NULL' : status === 'used' ? 'WHERE used_at IS NOT NULL' : ''
+  const [cnt, unusedCnt, usedCnt] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS n FROM invite_codes ${where}`).first<{ n: number }>(),
+    db.prepare('SELECT COUNT(*) AS n FROM invite_codes WHERE used_at IS NULL').first<{ n: number }>(),
+    db.prepare('SELECT COUNT(*) AS n FROM invite_codes WHERE used_at IS NOT NULL').first<{ n: number }>(),
+  ])
+  const total = cnt?.n ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / INVITE_PAGE_SIZE))
+  const p = Math.min(Math.max(1, page), totalPages)
+  const { results } = await db
+    .prepare(`SELECT * FROM invite_codes ${where} ORDER BY created_at DESC, id DESC LIMIT ${INVITE_PAGE_SIZE} OFFSET ?`)
+    .bind((p - 1) * INVITE_PAGE_SIZE)
+    .all<InviteCodeRow>()
+  return { items: results ?? [], total, page: p, totalPages, unused: unusedCnt?.n ?? 0, used: usedCnt?.n ?? 0 }
+}
+
+export async function getInviteByCode(db: D1Database, code: string): Promise<InviteCodeRow | null> {
+  return db.prepare('SELECT * FROM invite_codes WHERE code = ?').bind(code).first<InviteCodeRow>()
+}
+
+export async function getInviteById(db: D1Database, id: number): Promise<InviteCodeRow | null> {
+  return db.prepare('SELECT * FROM invite_codes WHERE id = ?').bind(id).first<InviteCodeRow>()
+}
+
+/** 原子核销：只有 used_at 还是 NULL 的那一次能成功（并发注册的唯一真锁）。
+ *  返回 false = 已被别人用了（调用方回滚已建的会员并提示码已失效） */
+export async function consumeInvite(db: D1Database, id: number, memberId: number, username: string, now: number): Promise<boolean> {
+  const r = await db
+    .prepare('UPDATE invite_codes SET used_at = ?, used_by = ?, used_by_name = ? WHERE id = ? AND used_at IS NULL')
+    .bind(now, memberId, username.slice(0, 24), id)
+    .run()
+  return (r.meta.changes ?? 0) > 0
+}
+
+/** 回滚核销（注册后续步骤失败时把码还回去）：只在「确实被这一位会员占用」时释放，不误伤别人 */
+export async function releaseInvite(db: D1Database, id: number, memberId: number): Promise<void> {
+  await db
+    .prepare("UPDATE invite_codes SET used_at = NULL, used_by = 0, used_by_name = '' WHERE id = ? AND used_by = ?")
+    .bind(id, memberId)
+    .run()
+}
+
+/** 撤销（只删未核销的；已核销的返回 false，让后台提示「已使用，无法撤销」） */
+export async function deleteInvite(db: D1Database, id: number): Promise<boolean> {
+  const r = await db.prepare('DELETE FROM invite_codes WHERE id = ? AND used_at IS NULL').bind(id).run()
   return (r.meta.changes ?? 0) > 0
 }
 

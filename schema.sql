@@ -98,6 +98,21 @@ CREATE TABLE IF NOT EXISTS member_likes (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_member_likes_dedup ON member_likes (member_id, target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_member_likes_member ON member_likes (member_id, created_at DESC);
 
+-- 注册邀请码（2026-11，src/invite.ts）：后台生成，一次性；持码注册直接拿到码上指定的档位（默认优质会员）。
+-- 用完即废（used_at 非空），撤销靠删行；used_by_name 是注册时的用户名快照——会员被删后仍能看出「这码被谁用了」
+CREATE TABLE IF NOT EXISTS invite_codes (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  code         TEXT    NOT NULL UNIQUE,            -- 大写字母数字（去掉易混字符），全局唯一
+  tier         TEXT    NOT NULL DEFAULT 'premium', -- 注册后授予的档位 key
+  note         TEXT    NOT NULL DEFAULT '',        -- 后台备注（发给谁 / 用途）
+  created_at   INTEGER NOT NULL,
+  expires_at   INTEGER,                            -- 码自身的失效时间，NULL = 不过期
+  used_at      INTEGER,                            -- NULL = 未使用；非空 = 已核销（一次性）
+  used_by      INTEGER NOT NULL DEFAULT 0,         -- 核销会员 id，0 = 无
+  used_by_name TEXT    NOT NULL DEFAULT ''         -- 核销时的用户名快照
+);
+CREATE INDEX IF NOT EXISTS idx_invite_used ON invite_codes (used_at, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS posts (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
   slug         TEXT    NOT NULL UNIQUE,

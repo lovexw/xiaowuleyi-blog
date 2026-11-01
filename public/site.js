@@ -3083,6 +3083,10 @@
           var nick = form.querySelector('[name=nickname]')
           if (nick && nick.value.trim()) body.nickname = nick.value.trim()
           if (email && email.value.trim()) body.email = email.value.trim()
+          // 邀请码（选填）：一码一人，服务端核销后直接把会员提到码上指定的档位；
+          // 关闭开放注册时它就是唯一入口，留空会被服务端拒绝
+          var inv = form.querySelector('[name=inviteCode]')
+          if (inv && inv.value.trim()) body.inviteCode = inv.value.trim()
           // Turnstile 令牌（配置了 sitekey 才校验）：未就绪先在本侧拦下，省一次注定失败的请求
           if (turnstileSiteKey) {
             var tok = turnstileToken()
