@@ -44,10 +44,15 @@ Body `{"delta": 1}` 或 `{"delta": -1}`，返回 `{"ok":true,"likes":7}`。计�
 留言板留言（`/guestbook` 页）。Body 与规则同 `POST /api/public/comments`（`nickname` / `content` / 蜜罐 `link` / 限流 / 审核），无 `slug`；管理员带 `parentId` 即以作者身份回复（楼中楼）。存储上留言板留言是 `post_id = 0 AND weibo_id = 0` 的评论。响应 `{ok, pending?}`。
 
 ### GET /api/public/weibo/:id/comments
-微博的已展示评论（平铺 ASC，最多 200 条），元素含 `id/parent_id/is_admin/nickname/content/created_at`；前端按 `parent_id` 组装楼中楼。响应 `{comments, allowComments, adminAvatar}`——`adminAvatar` 是站点头像（settings.avatarUrl，可为空串），前端给 `is_admin` 评论的作者头像位用，与会员 `member_avatar` 同一展示位。settings `showCommentRegion` 开启时元素多 `ip_region`（**服务端已换算好的属地标签**，如「广东」「美国」，无快照为空串）；关闭时该键整体不出现（门控在 SELECT，不只是前端藏）。
+微博的已展示评论（平铺 ASC，最多 200 条），元素含 `id/parent_id/is_admin/nickname/content/created_at`；前端按 `parent_id` 组装楼中楼。响应 `{comments, allowComments, adminAvatar, viewerRank}`——`adminAvatar` 是站点头像（settings.avatarUrl，可为空串），前端给 `is_admin` 评论的作者头像位用，与会员 `member_avatar` 同一展示位。settings `showCommentRegion` 开启时元素多 `ip_region`（**服务端已换算好的属地标签**，如「广东」「美国」，无快照为空串）；关闭时该键整体不出现（门控在 SELECT，不只是前端藏）。
+
+**评论圈层可见（settings `commentGateTier`，src/commentgate.ts）**：门槛档位及以上的会员评论对本读者不可见时，该元素 `content` 为空串并多三个键——`gated: true`、`gate_tier_name`（作者生效档位名，如「咖啡会员」）、`gate_hidden`（被折叠的子孙回复数）；`nickname` / `member_tier_name` / `member_tier_color` / `created_at` 照常出（前端画「谁在这里评论过」的占位块）。`viewerRank` 是当前读者等级（0 = 游客），仅供占位块第二行提示（游客→登录 / 低档会员→升级）。**判定与清空都在服务端**：`gated` 为 true 时正文一个字节都不在响应里
+
 
 ### POST /api/public/weibo/:id/comments
 微博评论。规则同 `POST /api/public/comments`（蜜罐 / 限流 / 审核 / 管理员 `parentId` 回复），`nickname`/`content` 约束一致。
+
+**`parentId` 的圈层门槛**（三路评论共用，settings `commentGateTier`）：被回复线程的根评论属于门槛档位及以上的私密圈时，只有**同档及以上会员与管理员**能回复，其余 403 `{"error":"这条留言仅限咖啡会员及以上会员回复"}`（文案按线程根的档位名生成）。游客回复任何评论仍是「登录后才能回复」403。
 
 ### POST /api/public/links/apply
 友链申请（访客提交，进入待审核）。Body：

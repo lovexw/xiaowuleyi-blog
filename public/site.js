@@ -936,7 +936,7 @@
 
   // 平铺评论 → 楼中楼（父评论被删的回复按顶层展示）。
   // memberName（会员 3.0 预备）：接口随列表下发当前登录会员昵称，非空 = 渲染「回复」按钮（会员可回复楼中楼）
-  function renderWeiboComments(panel, comments, isAdmin, adminAvatar, memberName) {
+  function renderWeiboComments(panel, comments, isAdmin, adminAvatar, memberName, viewerRank) {
     var listEl = panel.querySelector('[data-role=list]')
     if (!listEl) return
     var byParent = {}
@@ -952,6 +952,23 @@
     if (!comments.length) {
       listEl.innerHTML = '<p class="wb-cmt-empty">' + T('还没有评论，来抢沙发～') + '</p>'
       return
+    }
+    // 评论圈层可见（src/commentgate.ts）：遮罩由服务端判定并清空 content，这里只画占位块——
+    // 正文与回复都不在出参里，客户端不持有原文（与 SSR 评论区同一套文案口径）。viewerRank 0 = 游客
+    var vRank = Number(viewerRank) || 0
+    function gateTitle(c) {
+      var who = c.gate_tier_name || (EN ? 'member' : '会员')
+      return EN ? 'Only ' + who + ' members and above can read this comment' : '这条评论仅对' + who + '及以上可见'
+    }
+    function gateHint() {
+      if (EN) return vRank > 0 ? 'Upgrade your tier to read it' : 'Sign in as a member to read it'
+      return vRank > 0 ? '升级档位后可见' : '登录会员后可见'
+    }
+    function gateMore(c) {
+      var who = c.gate_tier_name || (EN ? 'member' : '会员')
+      var n = Number(c.gate_hidden) || 0
+      if (EN) return n + ' more ' + (n === 1 ? 'reply' : 'replies') + ', also ' + who + ' members and above only'
+      return '另有 ' + n + ' 条回复，同样仅对' + who + '及以上可见'
     }
     // 评论头像位（服务端 commentAvatarHtml 的 ES5 手工镜像，改任一侧记得同步）：
     // 会员有站内头像用图；作者（管理员）发言用站点头像（adminAvatar，接口随列表下发）；
@@ -973,24 +990,36 @@
       } else if (c.member_name) {
         tierBadge = '<span class="wb-cmt-badge">' + (EN ? 'Member' : '会员') + '</span>'
       }
+      var gated = !!c.gated
       var replyBtn = '<button type="button" class="wb-cmt-reply-btn" data-reply="' + c.id + '" data-name="' + esc(c.nickname) + '">' + T('回复') + '</button>'
+      // 遮罩项：正文换占位块，不给回复/删除键（回复权限另有服务端写侧判定）
+      var body = gated
+        ? '<div class="wb-cmt-gate" style="border:1px dashed currentColor;border-radius:8px;padding:8px 10px;opacity:.6;font-size:13px;line-height:1.6">' +
+          '<span>' + esc(gateTitle(c)) + '</span>' +
+          '<span style="display:block;font-size:11px;opacity:.75;margin-top:2px">' + esc(gateHint()) + '</span>' +
+          '</div>' +
+          (Number(c.gate_hidden) > 0 ? '<div class="wb-cmt-gate-more" style="font-size:12px;opacity:.55;margin-top:6px">' + esc(gateMore(c)) + '</div>' : '')
+        : '<div class="wb-cmt-body">' + wxqReplace(esc(c.content)) + '</div>'
       var html =
-        '<li class="wb-cmt-item' + (nested ? ' wb-cmt-nested' : '') + '" id="wbc-' + c.id + '">' +
+        '<li class="wb-cmt-item' + (nested ? ' wb-cmt-nested' : '') + (gated ? ' wb-cmt-item-gated' : '') + '" id="wbc-' + c.id + '">' +
         '<div class="wb-cmt-head">' + avatarHtml(c) + '<span class="wb-cmt-name">' + esc(c.nickname) +
         (Number(c.is_admin) ? '<span class="wb-cmt-badge">' + T('楼主') + '</span>' : tierBadge) +
         '</span><span class="wb-cmt-time">' + fmtTime(c.created_at) + '</span>' +
         // IP 属地：接口在 showCommentRegion 开启时才带 ip_region（已是服务端格式化好的标签），与楼号同款小灰字
         (c.ip_region ? '<span class="wb-cmt-region" style="font-size:11px;opacity:0.45">' + esc(c.ip_region) + '</span>' : '') +
         (floor ? '<span class="wb-cmt-floor" style="font-size:11px;opacity:0.45;font-variant-numeric:tabular-nums">#' + floor + '</span>' : '') +
-        (isAdmin
-          ? replyBtn +
-            '<button type="button" class="wb-cmt-del-btn" data-cmt-del="' + c.id + '" title="' + T('删除这条评论（其下回复一并删除，不可恢复）') + '">' + T('删除') + '</button>'
-          : memberName
-            ? replyBtn
-            : '') +
-        '</div><div class="wb-cmt-body">' + wxqReplace(esc(c.content)) + '</div>'
+        (gated
+          ? ''
+          : isAdmin
+            ? replyBtn +
+              '<button type="button" class="wb-cmt-del-btn" data-cmt-del="' + c.id + '" title="' + T('删除这条评论（其下回复一并删除，不可恢复）') + '">' + T('删除') + '</button>'
+            : memberName
+              ? replyBtn
+              : '') +
+        '</div>' + body
       var kids = byParent[c.id] || []
-      if (kids.length) html += '<ul class="wb-cmt-children">' + kids.map(function (k) { return item(k, true) }).join('') + '</ul>'
+      // 遮罩项的回复同属私密线程（服务端同样遮罩），所以不再逐条渲染——占位块下方已有「另有 N 条回复」
+      if (!gated && kids.length) html += '<ul class="wb-cmt-children">' + kids.map(function (k) { return item(k, true) }).join('') + '</ul>'
       return html + '</li>'
     }
     listEl.innerHTML = '<ul class="wb-cmt-list">' + tops.map(function (c, i) { return item(c, false, i + 1) }).join('') + '</ul>'
@@ -1003,7 +1032,7 @@
     listEl.innerHTML = '<p class="wb-cmt-loading">' + T('加载中…') + '</p>'
     Promise.all([getJSON('/api/public/weibo/' + encodeURIComponent(wbId) + '/comments'), authState()])
       .then(function (rs) {
-        renderWeiboComments(panel, (rs[0] && rs[0].comments) || [], !!(rs[1] && rs[1].user), (rs[0] && rs[0].adminAvatar) || '', (rs[0] && rs[0].memberName) || '')
+        renderWeiboComments(panel, (rs[0] && rs[0].comments) || [], !!(rs[1] && rs[1].user), (rs[0] && rs[0].adminAvatar) || '', (rs[0] && rs[0].memberName) || '', (rs[0] && rs[0].viewerRank) || 0)
       })
       .catch(function () {
         listEl.innerHTML = '<p class="wb-cmt-empty">' + T('评论加载失败，稍后再试') + '</p>'

@@ -4,6 +4,7 @@ import { renderFooterHtml } from './hooks'
 import { outHref } from './outlink'
 import { cstDate, esc, excerpt, extractWeiboTopics, fmtDate, fmtDateCN, fmtDateTime, isoDate, NICKNAME_CHANGE_COOLDOWN_MS, nicknameCooldown } from './utils'
 import { effectiveTier, parseMemberTiers, tierByKey, type MemberTierDef } from './tiers'
+import { commentGateMoreText, commentGateText } from './commentgate'
 import { replaceEmoji } from './emoji'
 import { appearanceHeadStyle } from './appearance'
 import { customCssHeadStyle } from './skinpack'
@@ -1525,6 +1526,9 @@ export function commentsHtml(o: {
   tiers?: MemberTierDef[]
   /** 评论区会员徽标开关（settings.showMemberBadge，缺省开）：关闭时会员/档位徽标整体不渲染 */
   showBadge?: boolean
+  /** 当前读者的圈层等级（src/commentgate.ts：0 = 游客）：只影响遮罩占位块的第二行提示
+   *  （游客→登录会员后可见 / 低档会员→升级档位后可见）。遮罩本身由服务端 applyCommentGate 决定 */
+  gateViewerRank?: number
   /** 英文测试版：文案走词典/英文语序，中文路径不传即原样 */
   en?: boolean
 }): string {
@@ -1564,15 +1568,36 @@ export function commentsHtml(o: {
     const kids = children.get(c.id) || []
     // IP 属地：与楼号同款小灰字（复用内联样式，七主题零改动）；开关关闭或无快照（旧评论/自托管）不渲染
     const region = o.showRegion ? ipRegionLabel(c.ip_region || '', en) : ''
-    return `<li class="cmt-item" id="cmt-${c.id}">
-  <div class="cmt-head">
+    // 操作键位单列成参数：遮罩项一律不给任何键（回复键会把「正文拿不到」变成「能往私密楼里打字」）
+    const head = (btns: string): string => `<div class="cmt-head">
     ${commentAvatarHtml(c, o.adminAvatar)}
     <span class="cmt-name">${esc(c.nickname)}${badge}</span>
     <span class="cmt-time">${en ? fmtDateTimeEn(c.created_at) : fmtDateTime(c.created_at)}</span>
     ${region ? `<span class="cmt-region" style="font-size:11px;opacity:0.45">${esc(region)}</span>` : ''}
     ${floor ? `<span class="cmt-floor" style="font-size:11px;opacity:0.45;font-variant-numeric:tabular-nums">#${floor}</span>` : ''}
-    ${adminBtns}
+    ${btns}
+  </div>`
+    // 圈层遮罩（src/commentgate.ts）：正文与回复都不出 HTML——content 在服务端已被清空，这里
+    // 只画占位块（同付费墙 teaserHtml 口径：浏览器里根本没有原文）。昵称 / 档位徽标 / 时间照常露，
+    // 读者知道「圈子里有谁在聊」
+    if (c.gated) {
+      const g = commentGateText(c.gate_tier_name || '', o.gateViewerRank || 0, en)
+      const more = c.gate_hidden
+        ? `<div class="cmt-gate-more" style="font-size:12px;opacity:0.55;margin-top:6px">${esc(
+            commentGateMoreText(c.gate_tier_name || '', c.gate_hidden, en)
+          )}</div>`
+        : ''
+      return `<li class="cmt-item cmt-item-gated" id="cmt-${c.id}">
+  ${head('')}
+  <div class="cmt-gate" style="border:1px dashed currentColor;border-radius:8px;padding:8px 10px;opacity:0.6;font-size:13px;line-height:1.6">
+    <span>${esc(g.title)}</span>
+    <span style="display:block;font-size:11px;opacity:0.75;margin-top:2px">${esc(g.hint)}</span>
   </div>
+  ${more}
+</li>`
+    }
+    return `<li class="cmt-item" id="cmt-${c.id}">
+  ${head(adminBtns)}
   <div class="cmt-body">${replaceEmoji(esc(c.content))}</div>
   ${kids.length ? `<ul class="cmt-children">${kids.map((k) => renderItem(k)).join('')}</ul>` : ''}
 </li>`

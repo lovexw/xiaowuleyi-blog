@@ -3415,9 +3415,26 @@ function loadMemberTierDraft(stored) {
   }
 }
 
+/** 评论圈层可见（src/commentgate.ts）的门槛档位下拉：选项随档位定义走。
+ *  存的是档位 key（''/'0' = 关闭）；失效 key 保留成一条「失效档位」选项——不能让站长在
+ *  没察觉的情况下被下拉框悄悄改成「关闭」（那等于把私密评论一次性公开） */
+function renderCommentGateSelect(value) {
+  const el = document.getElementById('st-commentGateTier')
+  if (!el) return
+  const cur = value !== undefined ? String(value || '') : el.value
+  const opts = ['<option value="0">关闭（评论对所有人可见）</option>']
+  for (const t of memberTierDraft) opts.push('<option value="' + esc(t.key) + '">' + esc(t.name) + '及以上</option>')
+  if (cur && cur !== '0' && !memberTierDraft.some((t) => t.key === cur))
+    opts.push('<option value="' + esc(cur) + '">失效档位 ' + esc(cur) + '（按最严口径）</option>')
+  el.innerHTML = opts.join('')
+  el.value = cur || '0'
+}
+
 function renderMemberTierEditor() {
   const box = document.getElementById('st-tier-editor')
   if (!box) return
+  // 档位增删改名后同步门槛下拉的选项（保留当前选择）
+  renderCommentGateSelect()
   box.innerHTML = memberTierDraft
     .map(
       (t, i) => `<div class="st-tier-row" data-i="${i}" style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
@@ -3654,6 +3671,10 @@ async function viewSettings() {
         <div class="switch-row">
           <div><div class="switch-label">评论区会员徽标</div><div class="switch-sub">开启后评论与微博评论显示会员身份与档位认证徽标（带色 ✓ 标）；关闭则评论区不区分会员与游客</div></div>
           <label class="switch"><input type="checkbox" id="st-showMemberBadge" ${s.showMemberBadge !== '0' ? 'checked' : ''}><span class="track"></span></label>
+        </div>
+        <div class="form-item" style="max-width:360px;"><label>评论圈层可见</label>
+          <select class="input" id="st-commentGateTier"></select>
+          <div class="sec-desc" style="margin-top:4px;">选中档位<strong>及以上</strong>的会员评论，只有同档及以上会员与管理员能看到正文、能回复；游客与低档会员只看到「这里有一条 XX 会员的评论」的占位块，正文与回复都不下发（文章、留言板、微博评论三处同口径）。选「关闭」= 评论对所有人可见。档位被删后该项按最严口径（所有会员评论仅会员可见）兜底，重新选一次即可恢复</div>
         </div>
         <div class="form-item" style="max-width:180px;"><label>排行榜展示条数</label><input class="input" id="st-rankTopN" type="number" min="1" max="50" value="${esc(s.rankTopN || '10')}"></div>
         <div class="form-item" style="max-width:560px;"><label>会员中心公告（选填）</label><input class="input" id="st-memberNotice" maxlength="200" placeholder="如：会员每周五晚直播答疑，欢迎加入" value="${esc(s.memberNotice || '')}"><div class="sec-desc" style="margin-top:4px;">显示在会员中心页顶部（纯文本，最长 200 字）</div></div>
@@ -3954,6 +3975,8 @@ async function viewSettings() {
 
   // 会员档位编辑器：初渲染 + 「添加档位」（会员 3.0 预备）
   renderMemberTierEditor()
+  // 评论圈层可见的门槛档位下拉（选项依赖上面载入的档位草稿，必须在它之后填值）
+  renderCommentGateSelect(s.commentGateTier)
   document.getElementById('st-tier-add').addEventListener('click', () => {
     memberTierDraft.push({ key: 't' + Date.now().toString(36), name: '新档位', color: '', permanent: false, days: 365 })
     renderMemberTierEditor()
@@ -3987,6 +4010,7 @@ async function viewSettings() {
       memberRegOpen: g('st-memberRegOpen').checked ? '1' : '0',
       rankEnabled: g('st-rankEnabled').checked ? '1' : '0',
       showMemberBadge: g('st-showMemberBadge').checked ? '1' : '0',
+      commentGateTier: g('st-commentGateTier').value || '0',
       memberNotice: g('st-memberNotice').value.trim(),
       memberTiers: JSON.stringify(memberTierDraft),
       turnstileSiteKey: g('st-turnstileSiteKey').value.trim(),

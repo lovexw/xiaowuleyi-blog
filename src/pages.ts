@@ -69,6 +69,7 @@ import { extractOgImage, sanitizeHtml } from './sanitize'
 import { hasValidUnlock, isProtected, PP_COOKIE, PP_CSS, passwordFormHtml, protectedDescription } from './protect'
 import { normalizeMinTier } from './points'
 import { canReadTiers, effectiveTier, parseMemberTiers, type MemberTierDef } from './tiers'
+import { applyCommentGate, commentGateContext } from './commentgate'
 import { renderPostContentHtml } from './hooks'
 import { getTheme, THEMES } from './themes/registry'
 import type { MemberData, RankData } from './themes/registry'
@@ -698,8 +699,11 @@ export async function renderPost(c: C): Promise<Response> {
         url.origin
       )
   const en = isEn(settings)
+  // 评论圈层可见（src/commentgate.ts）：高档位会员的评论只对同档及以上会员与管理员可见——
+  // 遮罩/脱敏在服务端一次算好（正文不进 HTML），渲染层只画占位块
+  const gateCtx = commentGateContext(tierDefs, settings.commentGateTier, member, !!user, Date.now())
   const commentsBlock = commentsHtml({
-    comments,
+    comments: applyCommentGate(comments, gateCtx),
     slug: row.slug,
     allowComments: settings.allowComments === '1' && row.status === 'published',
     count: commentTotal,
@@ -713,6 +717,7 @@ export async function renderPost(c: C): Promise<Response> {
     // 会员认证徽标（会员 3.0 预备）：档位定义解析 + 后台开关（关闭时评论区不出会员徽标）
     tiers: tierDefs,
     showBadge: settings.showMemberBadge !== '0',
+    gateViewerRank: gateCtx.viewerRank,
     tip: settings.moderateComments === '1' && !user ? tr(en, '提交后审核通过即展示') : undefined,
     showRegion: settings.showCommentRegion === '1',
     en,
@@ -964,6 +969,9 @@ export async function renderGuestbook(c: C): Promise<Response> {
     c.env.DB.prepare("SELECT COUNT(*) AS n FROM comments INDEXED BY idx_comments_post WHERE post_id = 0 AND weibo_id = 0 AND status = 'approved'").first<{ n: number }>(),
     membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
   ])
+  // 评论圈层可见（src/commentgate.ts）：遮罩与脱敏在服务端一次算好，渲染层只画占位块
+  const gbTierDefs = parseMemberTiers(settings.memberTiers)
+  const gbGateCtx = commentGateContext(gbTierDefs, settings.commentGateTier, member, !!user, Date.now())
   const html = theme.guestbook({
     settings,
     categories,
@@ -971,7 +979,7 @@ export async function renderGuestbook(c: C): Promise<Response> {
     pages,
     count: gbCount?.n ?? comments.length,
     html: commentsHtml({
-      comments,
+      comments: applyCommentGate(comments, gbGateCtx),
       slug: '',
       allowComments: settings.allowComments === '1',
       count: gbCount?.n ?? comments.length,
@@ -981,8 +989,9 @@ export async function renderGuestbook(c: C): Promise<Response> {
       memberName: !user && member ? (member.display_name || member.username || '').slice(0, 24) : undefined,
       adminAvatar: settings.avatarUrl || undefined,
       // 会员认证徽标（会员 3.0 预备）：与文章评论区同一套口径
-      tiers: parseMemberTiers(settings.memberTiers),
+      tiers: gbTierDefs,
       showBadge: settings.showMemberBadge !== '0',
+      gateViewerRank: gbGateCtx.viewerRank,
       tip: settings.moderateComments === '1' && !user ? tr(en, '提交后审核通过即展示') : undefined,
       showRegion: settings.showCommentRegion === '1',
       guestbook: true,

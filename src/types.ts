@@ -134,6 +134,13 @@ export interface CommentRow {
   qq?: string
   /** 游客头像（服务端 qlogo 抓取后站内转存地址）：评论头像位展示用；空 = 首字块 */
   avatar?: string
+  /** 评论圈层可见（src/commentgate.ts）：true = 本条对当前读者遮罩（content 已被服务端清空）。
+   *  出参 / 渲染态字段，不落库；判定与脱敏统一走 applyCommentGate */
+  gated?: boolean
+  /** 遮罩项的作者生效档位名（"咖啡会员"）：占位块文案用，与徽标开关无关 */
+  gate_tier_name?: string
+  /** 遮罩项被折叠的回复条数（子孙同属私密线程，不逐条渲染） */
+  gate_hidden?: number
 }
 
 export interface CategoryRow {

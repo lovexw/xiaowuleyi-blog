@@ -128,6 +128,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   rankEnabled: '1',
   // 评论会员徽标开关（认证徽标展示）：'0' = 评论区与微博评论不出会员/档位徽标（采集不受影响）
   showMemberBadge: '1',
+  // 评论圈层可见（src/commentgate.ts）：'' / '0' = 关闭（评论对所有人可见）；档位 key = **该档及
+  // 以上的会员评论只对同档及以上会员与管理员可见**，游客与低档会员只看到占位块（正文不下发，
+  // 回复同样遮罩）。默认 'coffee' = 咖啡会员及以上进私密圈；档位 key 失效时按最严口径兜底
+  commentGateTier: 'coffee',
   // 会员中心页公告（纯文本 ≤200 字，空 = 不出）：开服须知 / 档位权益说明等站长自填内容
   memberNotice: '',
   // 排行榜展示条数上限（/rank 页与首页挂件共用，1-50）

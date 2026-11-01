@@ -94,7 +94,8 @@ import {
 import { EMOJI_BASE, WECHAT_EMOJI } from './emoji'
 import { awardCommentPoints, awardPoints, bumpActiveDay, normalizeMinTier } from './points'
 import { fanDay, fanLevel, nextStreak } from './fanrank'
-import { cleanMemberTiers, effectiveTier, parseMemberTiers, tierByKey, type MemberTierDef } from './tiers'
+import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, type MemberTierDef } from './tiers'
+import { applyCommentGate, canReplyGatedComment, commentGateRank, commentGateViewerRank, threadRootTier } from './commentgate'
 import { collectRoutes } from './collect'
 import { exportRoutes } from './export'
 import { adminExternalRoutes, externalRoutes, notifyAdminComment, telegramRoutes } from './external'
@@ -2352,6 +2353,14 @@ api.put('/admin/settings', async (c) => {
       patch[key] = v.replace(/\s+/g, ' ').trim().slice(0, 200)
       continue
     }
+    if (key === 'commentGateTier') {
+      // 评论圈层可见（src/commentgate.ts）：'' / '0' = 关闭；其余必须是合法档位 key 形态。
+      // 写路径只校验形态，不校验「档位此刻存在」——站长可能先选档再改档位定义；
+      // 读侧对失效 key 有最严兜底（见 commentGateRank）
+      if (v !== '' && v !== '0' && !TIER_KEY_RE.test(v)) return jsonError('评论可见档位不正确')
+      patch[key] = v
+      continue
+    }
     if (key === 'contentVisibleForMembers') {
       // 会员是否同样受可见窗口限制：只认 '0' / '1'，脏值 400
       if (v !== '0' && v !== '1') return jsonError('会员可见范围档位不正确')
@@ -3200,10 +3209,30 @@ async function publicComment(
   if (parentId) {
     // 会员 3.0 起放开会员回复；游客仍不可（匿名楼中楼是刷量面，也不利于「收到的回复」归账）
     if (!user && !member) return jsonError(`登录后才能回复${o.noun}`, 403)
-    const scopeCond = o.kind === 'post' ? 'post_id = ?' : o.kind === 'weibo' ? 'weibo_id = ?' : 'post_id = 0 AND weibo_id = 0'
+    const scopeCond =
+      o.kind === 'post' ? 'c.post_id = ?' : o.kind === 'weibo' ? 'c.weibo_id = ?' : 'c.post_id = 0 AND c.weibo_id = 0'
     const scopeBind = o.kind === 'guestbook' ? [] : [o.kind === 'post' ? t.postId : t.weiboId]
-    parent = await db.prepare(`SELECT * FROM comments WHERE id = ? AND ${scopeCond}`).bind(parentId, ...scopeBind).first<CommentRow>()
+    // 带出作者档位：评论圈层可见（src/commentgate.ts）的写侧判定需要它
+    const parentSql =
+      'SELECT c.*, m.tier AS member_tier, m.tier_expires_at AS member_tier_expires_at FROM comments c LEFT JOIN members m ON m.id = c.member_id'
+    parent = await db.prepare(`${parentSql} WHERE c.id = ? AND ${scopeCond}`).bind(parentId, ...scopeBind).first<CommentRow>()
     if (!parent) return jsonError(`要回复的${o.noun}不存在`, 404)
+    // 圈层门控：父线程属于高档位私密圈时，只有同档及以上会员与管理员能回复（游客本就走不到这里）。
+    // 圈层以**线程根**为准（回复一律挂根，见下方 parent.parent_id || parent.id）——被点的那条可能
+    // 是楼中楼里的高档回复，按它判会把同楼低档会员挡在自己楼外
+    const gateDefs = parseMemberTiers(settings.memberTiers)
+    const gateRank = commentGateRank(gateDefs, settings.commentGateTier)
+    if (gateRank > 0 && !user) {
+      let root: CommentRow = parent
+      if (parent.parent_id) {
+        const r = await db.prepare(`${parentSql} WHERE c.id = ?`).bind(parent.parent_id).first<CommentRow>()
+        if (r) root = r
+      }
+      const rootTier = threadRootTier(gateDefs, root, now)
+      const viewerRank = commentGateViewerRank(gateDefs, member, now)
+      if (!canReplyGatedComment(viewerRank, false, rootTier, gateRank))
+        return jsonError(`这条${o.noun}仅限${rootTier.name}及以上会员回复`, 403)
+    }
   }
   if (user) {
     // 作者发言（回复或自己留言）：直接展示，带「作者」徽标
@@ -3417,23 +3446,37 @@ api.get('/public/weibo/:id/comments', async (c) => {
   const badgeOn = settings.showMemberBadge !== '0'
   const defs = parseMemberTiers(settings.memberTiers)
   const now = Date.now()
-  const comments = (results ?? []).map((r: Record<string, unknown>) => {
-    if (badgeOn && r.member_tier) {
-      const eff = effectiveTier(defs, String(r.member_tier), (r.member_tier_expires_at as number | null) ?? null, now)
-      r.member_tier_name = eff.isBase ? '' : eff.name
-      r.member_tier_color = eff.isBase ? '' : eff.color
-    }
-    delete r.member_tier_expires_at
-    return showRegion ? { ...r, ip_region: ipRegionLabel(String(r.ip_region || ''), en) } : r
-  })
   // memberName 驱动微博评论的「回复」按钮（会员可回复，游客没有按钮）；匿名访客千人一面才配吃缓存，
   // 会员 Cookie 在场时 pagecache 本就回源（pageCacheKeyFor 挡），不会串身份
   const member = settings.membersEnabled === '1' ? await getMemberUser(c.env.DB, c.req.raw) : null
+  // 评论圈层可见（src/commentgate.ts）：管理员会话只在门控开启时才查（关闭 = 与历史版本同样的读放大）
+  const gateRank = commentGateRank(defs, settings.commentGateTier)
+  const isAdmin = gateRank > 0 ? !!(await getSessionUser(c.env.DB, c.req.raw)) : false
+  const gateCtx = {
+    defs,
+    gateRank,
+    viewerRank: commentGateViewerRank(defs, member, now),
+    admin: isAdmin,
+    now,
+  }
+  // 遮罩在出参前完成：content 被清空、带 gated/gate_tier_name/gate_hidden，客户端只画占位块
+  const comments = applyCommentGate(((results ?? []) as unknown as CommentRow[]), gateCtx).map((r) => {
+    const row = r as unknown as Record<string, unknown>
+    if (badgeOn && row.member_tier) {
+      const eff = effectiveTier(defs, String(row.member_tier), (row.member_tier_expires_at as number | null) ?? null, now)
+      row.member_tier_name = eff.isBase ? '' : eff.name
+      row.member_tier_color = eff.isBase ? '' : eff.color
+    }
+    delete row.member_tier_expires_at
+    return showRegion ? { ...row, ip_region: ipRegionLabel(String(row.ip_region || ''), en) } : row
+  })
   return c.json({
     comments,
     allowComments: settings.allowComments === '1',
     adminAvatar: settings.avatarUrl || '',
     memberName: member ? (member.display_name || member.username).slice(0, 24) : '',
+    // 遮罩占位块的第二行提示用（0 = 游客 → 提示登录）
+    viewerRank: gateCtx.viewerRank,
   })
 })
 
