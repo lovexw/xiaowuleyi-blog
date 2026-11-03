@@ -63,7 +63,13 @@ else
   die "无法执行 docker（既不在 docker 组，也没有免密 sudo）"
 fi
 
-mkdir -p "$STATE_DIR" 2>/dev/null || die "无法创建状态目录 $STATE_DIR"
+# 状态目录可能在 /opt 下（root 属主）：先试着直接建，不行就用免密 sudo 建好再改名归属，
+# 这样脚本在「刚 clone 完还没跑过 install」的机器上也能一次跑通
+if ! mkdir -p "$STATE_DIR" 2>/dev/null; then
+  sudo -n mkdir -p "$STATE_DIR" 2>/dev/null &&
+    sudo -n chown "$(id -u):$(id -g)" "$STATE_DIR" 2>/dev/null ||
+    die "无法创建状态目录 $STATE_DIR（需要 sudo 权限）"
+fi
 
 # 同一时间只允许一个部署任务，避免定时器与手工部署打架
 exec 9>"$STATE_DIR/lock"
