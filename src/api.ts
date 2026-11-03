@@ -276,10 +276,20 @@ api.post('/auth/setup', async (c) => {
 const SESSIONS_PER_USER_CAP = 10
 
 /** 登录失败 TG 告警（B13）：每 IP 10 分钟最多 1 条防爆破刷屏；TG 未配置时 notifyAdminText 内部静默；
- *  异步发送不阻塞登录响应。用户名来自请求体（截断 40），纯文本消息无注入面 */
-function alertLoginFailure(env: Env, ip: string, username: string): void {
+ *  异步发送不阻塞登录响应。用户名来自请求体（截断 40），纯文本消息无注入面。
+ *
+ *  ctx 必须传（2026-11-03 修）：notifyAdminText 第一件事是 `await getSettings(env.DB)`，即一次 D1 查询。
+ *  原先这里用「即发即弃」裸 promise，请求返回 401 后这次查询悬空；线上 Workers 会回收，但本地 workerd
+ *  的 D1 连接池会被它卡死——实测输错一次密码后，全站 `/` 与所有 `/api/*` 永久超时（`/admin/` 走静态
+ *  资源所以看似正常）。挂到 waitUntil 让运行时明确知晓「响应后仍需等它完成」，与项目其他异步任务一致 */
+function alertLoginFailure(env: Env, ip: string, username: string, ctx?: { waitUntil(p: Promise<unknown>): void }): void {
   if (!rateLimit(`login-alert:${ip}`, 1, 10 * 60_000)) return
-  void notifyAdminText(env, `⚠️ 后台登录失败：用户名「${String(username || '').slice(0, 40)}」IP ${ip}。若非本人操作，请改密码或到「设置 → 两步验证」加固`).catch(() => {})
+  const p = notifyAdminText(env, `⚠️ 后台登录失败：用户名「${String(username || '').slice(0, 40)}」IP ${ip}。若非本人操作，请改密码或到「设置 → 两步验证」加固`).catch(() => {})
+  try {
+    ctx?.waitUntil(p)
+  } catch {
+    /* 无 ExecutionContext（如单测直接调用 handler）时退化为普通 promise，不影响告警本身 */
+  }
 }
 
 /** TOTP 配对二维码（B13）：qrMatrix（src/qrcode.ts 零依赖实现）→ 内联 SVG，随 setup 一次性回显 */
@@ -315,7 +325,7 @@ api.post('/auth/login', async (c) => {
       const totpSettings = await getSettings(c.env.DB)
       if (totpSettings.totpEnabled === '1' && totpSettings.totpSecret) {
         if (!(await verifyTotp(totpSettings.totpSecret, body?.totp || ''))) {
-          alertLoginFailure(c.env, ip, username)
+          alertLoginFailure(c.env, ip, username, c.executionCtx)
           return jsonError('两步验证码不对', 401)
         }
       }
@@ -341,7 +351,7 @@ api.post('/auth/login', async (c) => {
     // 用户不存在也跑一次等开销的哈希：响应耗时对齐，防时序侧信道枚举用户名
     await hashPassword(password, 'timing-equalizer-salt-0000')
   }
-  alertLoginFailure(c.env, ip, username)
+  alertLoginFailure(c.env, ip, username, c.executionCtx)
   return jsonError('用户名或密码错误', 401)
 })
 

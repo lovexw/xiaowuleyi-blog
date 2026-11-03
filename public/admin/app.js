@@ -71,13 +71,33 @@ function fmtSize(bytes) {
   return bytes + ' B'
 }
 
+/* 请求超时（2026-11-03）：原先裸 await fetch，服务端卡住时请求既不成功也不失败，
+ * boot() 永远等不到结果 → 整页白屏、控制台无任何报错（本地 worker 卡死时实测）。
+ * 20s 对慢网的正常请求足够宽裕；超时抛带 timeout 标记的错误，让调用方能区分
+ * 「没登录 / 没权限」和「根本连不上」——前者回登录页，后者要明确说连不上 */
+const API_TIMEOUT_MS = 20000
+
 async function api(path, opts = {}) {
   const init = { method: opts.method || 'GET', credentials: 'same-origin', headers: {} }
   if (opts.body !== undefined) {
     init.headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(opts.body)
   }
-  const res = await fetch('/api' + path, init)
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS)
+  let res
+  try {
+    res = await fetch('/api' + path, { ...init, signal: ctrl.signal })
+  } catch (e) {
+    if (ctrl.signal.aborted) {
+      const err = new Error('后台没有响应，请求已超时')
+      err.timeout = true
+      throw err
+    }
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     // 会话过期兜底：登录之后发生的 401 一律立即回登录页并提示，
@@ -5098,6 +5118,23 @@ async function viewEditor(id) {
   }
 }
 
+/* 启动失败页：连 /auth/state 都拿不到时，登录页也渲染不出来（不知道站点名、是否要初始化），
+ * 与其白屏不如明说「连不上」，并给一个重建连接的入口。复用登录页的 .auth-* 版式 */
+function bootErrorView(msg) {
+  pendingRoute = null
+  $app.innerHTML = `<div class="auth-wrap"><div class="auth-card">
+    <div class="auth-logo">
+      <img src="/favicon.svg" alt="">
+      <h1>连不上后台</h1>
+      <p>请求没有返回，可能是服务没启动或正在重启</p>
+    </div>
+    <div class="auth-err" style="display:block">${esc(msg)}</div>
+    <button class="btn btn-primary auth-btn" type="button" id="boot-retry">重新连接</button>
+    <p class="auth-tip">住在 Cloudflare 上的小博客 · D1 存储 · R2 图床</p>
+  </div></div>`
+  document.getElementById('boot-retry').addEventListener('click', () => location.reload())
+}
+
 async function boot() {
   try {
     const st = await api('/auth/state')
@@ -5105,7 +5142,10 @@ async function boot() {
     state.needsSetup = st.needsSetup
     state.demo = !!st.demo
     state.needsTotp = !!st.needsTotp
-  } catch {
+  } catch (e) {
+    // 超时 ≠ 未登录：回落到登录页会让用户以为「要重新输入密码」，
+    // 实际是服务端根本没应答，必须说清楚（2026-11-03）
+    if (e && e.timeout) return bootErrorView(e.message)
     state.user = null
   }
   if (state.user) {
