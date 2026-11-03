@@ -41,7 +41,7 @@ export const THEME_APPEARANCE: Record<string, ThemeAppearance> = {
       accent: { vars: ['--wx-accent'], default: '#b23a29' },
       link: { vars: ['--wx-link'], default: '#576b95' },
       ink: { vars: ['--wx-text'], default: '#333333' },
-      sub: { vars: ['--wx-sub'], default: '#9e9e9e' },
+      sub: { vars: ['--wx-sub'], default: '#6e675e' },
       bg: { vars: ['--wx-bg'], default: '#f6f4f0' },
       card: { vars: ['--wx-card'], default: '#ffffff' },
       line: { vars: ['--wx-line'], default: '#e8e2d9' },

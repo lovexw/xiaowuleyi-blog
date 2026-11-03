@@ -1391,7 +1391,7 @@ export async function renderNotFound(c: C): Promise<Response> {
       noindex: true,
       body: `<div style="max-width:480px;margin:18vh auto 0;padding:0 24px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;">
   <div style="font-size:64px;font-weight:700;letter-spacing:.05em;">404</div>
-  <p style="color:#999;margin:12px 0 28px;">${en ? 'This page wandered off. Head back home?' : '这一页飘走了，回首页看看吧。'}</p>
+  <p style="color:inherit;opacity:.72;margin:12px 0 28px;">${en ? 'This page wandered off. Head back home?' : '这一页飘走了，回首页看看吧。'}</p>
   <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
     <a href="/" style="display:inline-block;padding:10px 28px;border-radius:999px;background:#b23a29;color:#fff;text-decoration:none;font-size:14px;">${en ? 'Back to Home' : '回首页'}</a>
     <a href="/random" style="display:inline-block;padding:10px 24px;border-radius:999px;border:1px solid #d9d2c7;color:#666;text-decoration:none;font-size:14px;">${en ? '🎲 Surprise me' : '🎲 随机一篇'}</a>

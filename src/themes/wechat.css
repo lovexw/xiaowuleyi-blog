@@ -11,7 +11,7 @@
   --wx-accent: #b23a29;
   --wx-link: #576b95;
   --wx-text: #333;
-  --wx-sub: #9e9e9e;
+  --wx-sub: #6e675e;
   --wx-bg: #f6f4f0;
   --wx-card: #fff;
   --wx-line: #e8e2d9;
@@ -58,7 +58,7 @@ img { max-width: 100%; height: auto; }
   box-shadow: 0 6px 20px rgba(178, 58, 41, 0.2);
 }
 .wx-masthead-name { font-size: 26px; font-weight: 700; letter-spacing: 0.02em; color: #1a1a1a; }
-.wx-masthead-desc { font-size: 14px; color: #8f887d; line-height: 1.7; margin-top: 10px; }
+.wx-masthead-desc { font-size: 14px; color: var(--wx-sub); line-height: 1.7; margin-top: 10px; }
 
 /* 文章列表：日期外置 + 细线分隔的编辑部式排版 */
 .wx-feed { min-height: 120px; }
@@ -74,7 +74,7 @@ img { max-width: 100%; height: auto; }
 .wx-post:last-child { border-bottom: none; }
 .wx-post-date {
   grid-column: 1;
-  font-size: 13px; color: #b5aea1;
+  font-size: 13px; color: var(--wx-sub);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   padding-top: 5px;
@@ -89,11 +89,11 @@ img { max-width: 100%; height: auto; }
 }
 .wx-post:hover .wx-post-title, .wx-post:active .wx-post-title { color: var(--wx-accent); }
 .wx-post-abs {
-  font-size: 14px; color: #978f82; line-height: 1.75; margin-top: 7px;
+  font-size: 14px; color: var(--wx-sub); line-height: 1.75; margin-top: 7px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .wx-post-meta {
-  font-size: 12.5px; color: #b5aea1;
+  font-size: 12.5px; color: var(--wx-sub);
   margin-top: 10px;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
 }
@@ -111,25 +111,25 @@ img { max-width: 100%; height: auto; }
   display: block;
   background: #efe9df;
 }
-.wx-empty { padding: 72px 16px; text-align: center; color: #b5aea1; font-size: 14px; }
+.wx-empty { padding: 72px 16px; text-align: center; color: var(--wx-sub); font-size: 14px; }
 
 .wx-footer {
   /* 品牌行与链接行上下两段：先署名、后导航，避免挤一行里折乱 */
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   text-align: center;
-  color: #b5aea1; font-size: 12.5px;
+  color: var(--wx-sub); font-size: 12.5px;
   padding: 28px 0 10px;
   margin-top: 14px;
   border-top: 1px solid var(--wx-line);
 }
 .wx-footer-links { line-height: 2; }
-.wx-footer-links a { color: #8f887d; margin: 0 6px; white-space: nowrap; transition: color 0.2s ease; }
+.wx-footer-links a { color: var(--wx-sub); margin: 0 6px; white-space: nowrap; transition: color 0.2s ease; }
 .wx-footer-links a:hover { color: var(--wx-accent); }
 
 /* ---------- 分页 ---------- */
 .pager { display: flex; justify-content: center; gap: 4px; padding: 30px 0 0; flex-wrap: wrap; }
 .pager-btn {
-  font-size: 13.5px; color: #8f887d;
+  font-size: 13.5px; color: var(--wx-sub);
   padding: 6px 12px;
   transition: color 0.2s ease;
 }
@@ -269,7 +269,7 @@ a.wx-account:hover { opacity: 0.75; }
 .like-btn b { font-weight: 500; }
 
 .wx-related { margin-top: 36px; }
-.wx-related-title { font-size: 15px; color: #999; font-weight: 400; margin-bottom: 12px; }
+.wx-related-title { font-size: 15px; color: var(--wx-sub); font-weight: 400; margin-bottom: 12px; }
 .wx-related-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .wx-related-item { display: block; background: var(--wx-card); border-radius: var(--wx-radius); overflow: hidden; padding-bottom: 10px; transition: transform 0.2s ease; }
 .wx-related-item:hover { transform: translateY(-2px); }
@@ -279,7 +279,7 @@ a.wx-account:hover { opacity: 0.75; }
   padding: 8px 10px 4px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.wx-related-item span { font-size: 11px; color: #bbb; padding: 0 10px; }
+.wx-related-item span { font-size: 11px; color: var(--wx-sub); padding: 0 10px; }
 
 /* ---------- 留言 ---------- */
 /* 评论区 = 白色面板卡（与微博卡/时光机卡同语言），一眼与正文区分 */
@@ -293,7 +293,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .cmt-title { display: flex; align-items: center; gap: 8px; font-size: 16px; color: #1a1a1a; font-weight: 600; margin-bottom: 14px; }
 .cmt-title::before { content: ''; flex: 0 0 auto; width: 4px; height: 16px; border-radius: 2px; background: var(--wx-accent); }
-.cmt-count { background: #f0ede7; color: #8f887d; border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 500; }
+.cmt-count { background: #f0ede7; color: var(--wx-sub); border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 500; }
 .cmt-list { list-style: none; }
 .cmt-item { padding: 12px 14px; background: #f7f7f7; border-radius: 10px; margin-bottom: 10px; }
 .cmt-list > .cmt-item:last-child { margin-bottom: 0; }
@@ -304,16 +304,16 @@ a.wx-account:hover { opacity: 0.75; }
 
 .cmt-avatar { width: 22px; height: 22px; flex: none; align-self: center; border-radius: 50%; background: var(--wx-accent); color: #fff; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
 .cmt-avatar-img { object-fit: cover; }
-.cmt-time { font-size: 12px; color: #bbb; flex: 0 0 auto; }
+.cmt-time { font-size: 12px; color: var(--wx-sub); flex: 0 0 auto; }
 .cmt-body { font-size: 15px; line-height: 1.7; margin-top: 5px; white-space: pre-wrap; word-break: break-word; }
 .cmt-children { list-style: none; margin: 10px 0 0 14px; padding-left: 12px; border-left: 2px solid var(--wx-line); }
 .cmt-children .cmt-item { background: transparent; padding: 10px 0 0; margin-bottom: 0; }
 .cmt-badge { font-size: 11px; color: var(--wx-accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; margin-left: 6px; font-weight: 400; white-space: nowrap; }
-.cmt-empty { color: #bbb; font-size: 14px; padding: 10px 0 12px; text-align: center; }
+.cmt-empty { color: var(--wx-sub); font-size: 14px; padding: 10px 0 12px; text-align: center; }
 .cmt-form { margin-top: 16px; }
 .cmt-form-row { display: flex; gap: 10px; margin-bottom: 10px; }
 /* 管理员登录后的发言身份行（文章/微博评论表单共用），替代昵称输入框 */
-.cmt-as { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; color: #b5aea1; }
+.cmt-as { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; font-size: 13px; color: var(--wx-sub); }
 .cmt-as b { color: var(--wx-text); font-weight: 600; }
 .cmt-input {
   flex: 1; font: inherit; font-size: 14px;
@@ -334,7 +334,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .cmt-textarea:focus { box-shadow: 0 0 0 2px rgba(178, 58, 41, 0.32); }
 .cmt-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 10px; }
-.cmt-tip { font-size: 12px; color: #bbb; }
+.cmt-tip { font-size: 12px; color: var(--wx-sub); }
 .cmt-submit {
   background: var(--wx-accent); color: #fff;
   border: none; border-radius: 999px;
@@ -342,12 +342,12 @@ a.wx-account:hover { opacity: 0.75; }
   transition: opacity 0.2s ease;
 }
 .cmt-submit:hover { opacity: 0.85; }
-.cmt-closed { color: #bbb; font-size: 14px; padding: 16px 0; }
+.cmt-closed { color: var(--wx-sub); font-size: 14px; padding: 16px 0; }
 
 /* ---------- 微博（随手记） ---------- */
 .wb-page-head { text-align: center; padding: 42px 0 4px; }
 .wb-page-title { font-size: 22px; font-weight: 700; color: #1a1a1a; letter-spacing: 0.04em; }
-.wb-page-sub { font-size: 13px; color: #8f887d; margin-top: 8px; }
+.wb-page-sub { font-size: 13px; color: var(--wx-sub); margin-top: 8px; }
 .wb-list { margin-top: 20px; display: flex; flex-direction: column; gap: 14px; }
 .wb-card {
   background: var(--wx-card);
@@ -363,7 +363,7 @@ a.wx-account:hover { opacity: 0.75; }
 .wb-avatar .wx-avatar { width: 38px; height: 38px; flex-basis: 38px; font-size: 17px; border-radius: 10px; }
 .wb-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .wb-name { font-size: 14px; font-weight: 600; color: #1a1a1a; }
-.wb-time { font-size: 12px; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.wb-time { font-size: 12px; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 .wb-text {
   margin-top: 10px;
   font-size: 15.5px; line-height: 1.75; color: var(--wx-text);
@@ -398,10 +398,10 @@ a.wx-account:hover { opacity: 0.75; }
   .wb-video.is-portrait video { height: 60vh; }
   .wb-composer-tile--video { width: 108px; }
 }
-.wb-empty { padding: 64px 16px; text-align: center; color: #b5aea1; font-size: 14px; }
+.wb-empty { padding: 64px 16px; text-align: center; color: var(--wx-sub); font-size: 14px; }
 .wb-pager { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 24px 0 0; }
 .wb-pager-btn {
-  font-size: 13.5px; color: #8f887d;
+  font-size: 13.5px; color: var(--wx-sub);
   background: var(--wx-card);
   border: 1px solid var(--wx-line); border-radius: 999px;
   padding: 7px 18px;
@@ -409,7 +409,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .wb-pager-btn:hover { color: var(--wx-accent); border-color: var(--wx-accent); }
 .wb-pager-btn.is-disabled { opacity: 0.4; }
-.wb-pager-info { font-size: 12.5px; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.wb-pager-info { font-size: 12.5px; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 
 /* 微博卡片底栏：点赞 + 评论数 */
 .wb-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--wx-line); }
@@ -418,7 +418,7 @@ a.wx-account:hover { opacity: 0.75; }
 .wb-foot .like-btn.liked { background: var(--wx-accent); color: #fff; }
 .wb-action {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; color: #8f887d; background: transparent;
+  font-size: 13px; color: var(--wx-sub); background: transparent;
   border: 1px solid var(--wx-line); border-radius: 999px;
   padding: 5px 14px; cursor: pointer;
   transition: color 0.2s ease, border-color 0.2s ease;
@@ -429,7 +429,7 @@ a.wx-account:hover { opacity: 0.75; }
 /* 管理员登录：卡片底栏右侧管理操作（访客 HTML 不渲染，交互在 site.js） */
 .wb-admin { margin-left: auto; display: inline-flex; gap: 2px; flex-shrink: 0; }
 .wb-admin-btn {
-  font-size: 12px; color: #8f887d; background: transparent;
+  font-size: 12px; color: var(--wx-sub); background: transparent;
   border: none; border-radius: 4px; padding: 5px 7px; cursor: pointer;
   transition: color 0.2s ease;
 }
@@ -449,16 +449,16 @@ a.wx-account:hover { opacity: 0.75; }
 .wb-cmt-avatar { width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--wx-accent); color: #fff; font-size: 11px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; }
 .wb-cmt-avatar-img { object-fit: cover; }
 .wb-cmt-badge { font-size: 11px; color: var(--wx-accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; font-weight: 400; white-space: nowrap; }
-.wb-cmt-time { font-size: 11.5px; color: #b5aea1; }
+.wb-cmt-time { font-size: 11.5px; color: var(--wx-sub); }
 .wb-cmt-body { font-size: 14px; line-height: 1.7; margin-top: 3px; white-space: pre-wrap; word-break: break-word; color: var(--wx-text); }
-.wb-cmt-empty, .wb-cmt-loading { color: #b5aea1; font-size: 13px; padding: 8px 0; }
+.wb-cmt-empty, .wb-cmt-loading { color: var(--wx-sub); font-size: 13px; padding: 8px 0; }
 .wb-cmt-reply-btn, .cmt-reply-btn {
-  font-size: 12px; color: #8f887d; background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--wx-sub); background: none; border: none; cursor: pointer;
   padding: 0; margin-left: auto; white-space: nowrap;
 }
 .wb-cmt-reply-btn:hover, .cmt-reply-btn:hover { color: var(--wx-accent); }
 .cmt-del-btn, .wb-cmt-del-btn {
-  font-size: 12px; color: #8f887d; background: none; border: none; cursor: pointer;
+  font-size: 12px; color: var(--wx-sub); background: none; border: none; cursor: pointer;
   padding: 0 0 0 10px; white-space: nowrap;
 }
 .cmt-del-btn:hover, .wb-cmt-del-btn:hover { color: #c0392b; }
@@ -482,7 +482,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .wb-cmt-textarea:focus { box-shadow: 0 0 0 2px rgba(178, 58, 41, 0.32); }
 .wb-cmt-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
-.wb-cmt-tip { font-size: 12px; color: #b5aea1; }
+.wb-cmt-tip { font-size: 12px; color: var(--wx-sub); }
 .wb-cmt-submit {
   border: none; background: var(--wx-accent); color: #fff;
   font-size: 13px; padding: 6px 16px; border-radius: 999px; cursor: pointer;
@@ -499,7 +499,7 @@ a.wx-account:hover { opacity: 0.75; }
   box-shadow: 0 1px 3px rgba(43, 36, 25, 0.04);
 }
 .wb-composer.is-dragover { border-color: var(--wx-accent); border-style: dashed; }
-.wb-composer-as { font-size: 12px; color: #8f887d; padding: 2px 0 8px; }
+.wb-composer-as { font-size: 12px; color: var(--wx-sub); padding: 2px 0 8px; }
 .wb-composer-as b { color: var(--wx-accent); font-weight: 600; }
 .wb-composer-textarea {
   width: 100%; box-sizing: border-box; font-size: 14.5px; color: var(--wx-text);
@@ -519,13 +519,13 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .wb-composer-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
 .wb-composer-add, .wb-composer-draft {
-  font-size: 13px; color: #8f887d; background: transparent;
+  font-size: 13px; color: var(--wx-sub); background: transparent;
   border: 1px solid var(--wx-line); border-radius: 999px;
   padding: 5px 14px; cursor: pointer;
   transition: color 0.2s ease, border-color 0.2s ease;
 }
 .wb-composer-add:hover, .wb-composer-draft:hover { color: var(--wx-accent); border-color: var(--wx-accent); }
-.wb-composer-count { font-size: 12px; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.wb-composer-count { font-size: 12px; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 .wb-composer-tip {
   flex: 1; min-width: 0; font-size: 12px; color: var(--wx-accent); text-align: right;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -554,7 +554,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .wb-home-ico { width: 16px; height: 16px; color: var(--wx-accent); flex: 0 0 auto; }
 .wb-home-title { font-size: 14.5px; font-weight: 600; color: #1a1a1a; }
-.wb-home-count { font-size: 12px; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.wb-home-count { font-size: 12px; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 .wb-home-more { margin-left: auto; font-size: 12.5px; color: var(--wx-link); white-space: nowrap; transition: color 0.2s ease; }
 .wb-home-head:hover .wb-home-more, .wb-home-head:hover .wb-home-title { color: var(--wx-accent); }
 .wb-home-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
@@ -566,7 +566,7 @@ a.wx-account:hover { opacity: 0.75; }
   transition: color 0.15s ease;
 }
 .wb-home-item:hover .wb-home-text { color: var(--wx-accent); }
-.wb-home-time { display: block; margin-top: 4px; font-size: 12px; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.wb-home-time { display: block; margin-top: 4px; font-size: 12px; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 .wb-home-thumb { flex: 0 0 56px; width: 56px; height: 56px; border-radius: var(--wx-radius); overflow: hidden; }
 .wb-home-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; background: #efe9df; }
 
@@ -651,7 +651,31 @@ a.wx-account:hover { opacity: 0.75; }
   .wx-snav::-webkit-scrollbar { display: none; }
   .wx-snav > * { flex: 0 0 auto; }
   .wx-snav-link { font-size: 13.5px; }
-  .wx-snav-member { font-size: 12.5px; padding: 4.5px 12px; }
+  /* 「分类话题」面板里的 chip 也抬到 30px 高：26px 在手机上偏窄，容易点串行（面板行距 8px，
+   * 再高会让相邻两行热区打架，30 是这里的上限）。基础规则在本文件更后面（716 行），
+   * 这里必须多带一层 .wx-snav 抬权重，否则被覆盖 */
+  .wx-snav .wx-snav-chip { padding: 9px 12px; font-size: 12.5px; }
+  /* 触控热区（2026-11-03）：文字只有 22px 高，手指点不准。用透明伪元素把热区撑到 44px，
+   * 视觉行高、间距一个像素都不动（padding 方案会把吸顶栏撑高 20px） */
+  .wx-snav-link { position: relative; }
+  .wx-snav-link::after {
+    content: ''; position: absolute; left: 0; right: 0; top: 50%;
+    height: 44px; transform: translateY(-50%);
+  }
+  /* 会员药丸贴右端常驻（2026-11-03）：会员开的站，药丸是导航最后一个 flex 项，横滑时被推到
+   * 视口外，读者根本不知道有会员入口。sticky 贴住右边缘，左侧投一层底色阴影做渐隐——
+   * 滑过去的链接在药丸前自然淡出，同时也成了「这边还能横滑」的视觉提示 */
+  .wx-snav-member {
+    position: sticky; right: 0; z-index: 5;
+    margin-left: 4px;
+    font-size: 12.5px; padding: 4.5px 12px;
+  }
+  /* 药丸左侧的渐隐：用一层底色渐变盖住滑过来的链接，比 box-shadow 的边缘干净（不会把字切一半） */
+  .wx-snav-member::before {
+    content: ''; position: absolute; right: 100%; top: -8px; bottom: -8px; width: 42px;
+    background: linear-gradient(to right, transparent, var(--wx-bg) 72%);
+    pointer-events: none;
+  }
   /* 菜单打开时放开横滑裁剪（site.js 切 snav-open；:has 兜底无 JS）——WebKit 把滚动容器内
    * fixed 子元素按容器定位（iOS 实测 fixed 菜单被剪掉看不见）。敞开后 dd 转静态、菜单以吸顶
    * 导航为定位基准（left/right 14px 锚两端），落在导航正下方且随吸顶一起走，窄屏不戳出右缘。
@@ -715,7 +739,7 @@ a.wx-account:hover { opacity: 0.75; }
   background: var(--wx-card); outline: none;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
-.wx-search-input::placeholder { color: #b5aea1; }
+.wx-search-input::placeholder { color: var(--wx-sub); }
 .wx-search-input:focus { border-color: rgba(178, 58, 41, 0.55); box-shadow: 0 0 0 3px rgba(178, 58, 41, 0.08); }
 .wx-search-btn {
   position: absolute; right: 5px; top: 50%; transform: translateY(-50%);
@@ -731,7 +755,7 @@ a.wx-account:hover { opacity: 0.75; }
   display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
   gap: 8px; max-width: 460px; margin: 20px auto 8px;
 }
-.fs-label { font-size: 12px; color: #b5aea1; letter-spacing: 0.08em; }
+.fs-label { font-size: 12px; color: var(--wx-sub); letter-spacing: 0.08em; }
 .fs-chip {
   font-size: 12.5px; line-height: 1.2; padding: 6px 13px; border-radius: 999px;
   border: 1px solid var(--wx-line); color: var(--wx-sub); background: var(--wx-card);
@@ -739,6 +763,17 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .fs-chip:hover { color: var(--wx-accent); border-color: var(--wx-accent); }
 .fs-chip.is-active { color: #fff; background: var(--wx-accent); border-color: var(--wx-accent); }
+/* 窄屏排序条（2026-11-03）：13.5px 字 + 13px 内边距时 5 个 chip 在 390px 装不下，
+ * 「随机」被挤到第二行单独一个——读起来像漏了一块。这里收字号与内距让它一行站住，
+ * 再留 overflow-x 兜底（字体回退 / 更窄的机器） */
+@media (max-width: 560px) {
+  .fs-bar { gap: 6px; max-width: none; margin: 16px 0 6px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .fs-bar::-webkit-scrollbar { display: none; }
+  .fs-label { display: none; }
+  /* chip 在横滑容器里，::after 撑出的热区会被 overflow 竖着剪掉（同 dd 菜单的坑），
+   * 所以直接把它做成 44px 高的实体，视觉上反而更像一排分段控件 */
+  .fs-chip { flex: 0 0 auto; font-size: 12px; padding: 11px 11px; line-height: 1.2; }
+}
 .search-meta { font-size: 13px; color: var(--wx-sub); padding: 8px 2px 0; }
 .pager-jump { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 14px 0 0; font-size: 13px; color: var(--wx-sub); flex-wrap: wrap; }
 .pager-input {
@@ -799,7 +834,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .fl-card:hover .fl-name { color: var(--wx-accent); }
 .fl-desc {
-  font-size: 12.5px; color: #978f82; line-height: 1.55;
+  font-size: 12.5px; color: var(--wx-sub); line-height: 1.55;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .fl-apply {
@@ -810,7 +845,7 @@ a.wx-account:hover { opacity: 0.75; }
   box-shadow: 0 1px 3px rgba(43, 36, 25, 0.04);
 }
 .fl-apply-title { font-size: 15px; font-weight: 600; color: #1a1a1a; }
-.fl-apply-sub { font-size: 12.5px; color: #b5aea1; margin-top: 4px; }
+.fl-apply-sub { font-size: 12.5px; color: var(--wx-sub); margin-top: 4px; }
 .fl-form { margin-top: 12px; }
 .fl-form-row { display: flex; gap: 8px; }
 .fl-input {
@@ -827,7 +862,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .fl-textarea:focus { box-shadow: 0 0 0 2px rgba(178, 58, 41, 0.32); }
 .fl-form-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
-.fl-tip { font-size: 12px; color: #b5aea1; }
+.fl-tip { font-size: 12px; color: var(--wx-sub); }
 .fl-submit {
   border: none; background: var(--wx-accent); color: #fff;
   font-size: 13px; padding: 6px 16px; border-radius: 999px; cursor: pointer;
@@ -845,12 +880,12 @@ a.wx-account:hover { opacity: 0.75; }
   font-size: 17px; font-weight: 700; color: #1a1a1a;
   padding-bottom: 6px;
 }
-.ar-year i { font-style: normal; font-size: 12px; font-weight: 400; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.ar-year i { font-style: normal; font-size: 12px; font-weight: 400; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 .ar-list { list-style: none; }
 .ar-item { border-bottom: 1px solid var(--wx-line); }
 .ar-item:last-child { border-bottom: none; }
 .ar-link { display: flex; align-items: baseline; gap: 16px; padding: 13px 0; }
-.ar-date { flex: 0 0 auto; font-size: 13px; color: #b5aea1; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.ar-date { flex: 0 0 auto; font-size: 13px; color: var(--wx-sub); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 .ar-title {
   flex: 1; min-width: 0;
   font-size: 15.5px; line-height: 1.6; color: var(--wx-text);
@@ -888,7 +923,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .otd-ico { width: 16px; height: 16px; color: var(--wx-accent); align-self: center; flex: 0 0 auto; }
 .otd-title { font-size: 14.5px; font-weight: 600; color: #1a1a1a; }
-.otd-sub { font-size: 12px; color: #b5aea1; }
+.otd-sub { font-size: 12px; color: var(--wx-sub); }
 .otd-item {
   display: flex; align-items: center; gap: 12px;
   padding: 11px 0;
@@ -896,7 +931,7 @@ a.wx-account:hover { opacity: 0.75; }
 }
 .otd-item:last-child { border-bottom: none; }
 .otd-year { flex: 0 0 auto; font-size: 13px; font-weight: 700; color: var(--wx-accent); font-variant-numeric: tabular-nums; }
-.otd-year i { font-style: normal; font-size: 11px; font-weight: 400; color: #b5aea1; margin-left: 4px; }
+.otd-year i { font-style: normal; font-size: 11px; font-weight: 400; color: var(--wx-sub); margin-left: 4px; }
 .otd-text { flex: 1 1 auto; min-width: 0; font-size: 14px; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s ease; }
 .otd-kind { flex: 0 0 auto; font-size: 11px; color: var(--wx-accent); border: 1px solid currentColor; border-radius: 999px; padding: 1px 8px; opacity: 0.75; }
 .otd-item:hover .otd-text { color: var(--wx-link); }
@@ -907,7 +942,7 @@ a.wx-account:hover { opacity: 0.75; }
   text-align: center;
   padding: 10px 0 4px;
   font-size: 12px;
-  color: #b5aea1;
+  color: var(--wx-sub);
   user-select: none;
   transition: color 0.2s ease;
 }
@@ -994,7 +1029,7 @@ html { scroll-behavior: smooth; }
   font-size: 14px; font-weight: 600; color: #1a1a1a;
   margin-bottom: 10px;
 }
-.wx-side-sub { font-size: 12px; font-weight: 400; color: #b5aea1; font-variant-numeric: tabular-nums; }
+.wx-side-sub { font-size: 12px; font-weight: 400; color: var(--wx-sub); font-variant-numeric: tabular-nums; }
 .wx-side-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .wx-side-chip {
   font-size: 12.5px; line-height: 1; color: var(--wx-text); white-space: nowrap;
@@ -1010,7 +1045,7 @@ html { scroll-behavior: smooth; }
 }
 .wx-side-rows .wx-side-row:first-child { padding-top: 2px; }
 .wx-side-rows .wx-side-row:last-child { border-bottom: none; padding-bottom: 2px; }
-.wx-side-row span { flex: 0 0 auto; font-size: 12.5px; color: #b5aea1; }
+.wx-side-row span { flex: 0 0 auto; font-size: 12.5px; color: var(--wx-sub); }
 .wx-side-row b { font-weight: 500; font-variant-numeric: tabular-nums; text-align: right; }
 .wx-side-row a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.15s ease; }
 .wx-side-row a:hover { color: var(--wx-accent); }
@@ -1033,7 +1068,7 @@ html { scroll-behavior: smooth; }
   transition: transform 0.25s ease;
 }
 .wx-snav.xw-nav-hide { transform: translateY(-100%); }
-.wx-toc-lv3 { padding-left: 26px; font-size: 12.5px; color: #978f82; }
+.wx-toc-lv3 { padding-left: 26px; font-size: 12.5px; color: var(--wx-sub); }
 @media (min-width: 1024px) {
   .wx-page-wide, .wx-article-wide { max-width: 1120px; }
   .wx-cols {
@@ -1065,7 +1100,9 @@ html { scroll-behavior: smooth; }
   text-decoration: none;
 }
 .pn-next { text-align: right; }
-.pn-empty { pointer-events: none; border-style: dashed; opacity: 0.55; }
+/* 缺一侧时不留占位：原先给 .pn-empty 画虚线框「保持两端对齐」，读者看到的是像加载失败的虚框；
+   现在直接让它不占位，剩下那一侧 flex:1 撑满整行，比半张卡飘在右边自然 */
+.pn-empty { display: none; }
 .pn-label { display: block; font-size: 12px; color: var(--wx-sub); margin-bottom: 4px; }
 .pn-title {
   display: block; font-size: 13.5px; font-weight: 500; color: var(--wx-text);

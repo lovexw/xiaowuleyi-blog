@@ -42,6 +42,11 @@ input, textarea, select { font: inherit; color: inherit; }
 .btn-danger:hover { border-color: var(--danger); }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--sub); }
 .btn-ghost:hover { color: var(--ink); border-color: var(--line); }
+/* 危险操作在列表里必须一眼认出来（.btn-ghost 在文件里排在 .btn-danger 之后，会把红色盖成灰的，
+ * 所以这里用双类选择器把权重抬回来）。常态用压暗一点的红，一列十行才不至于抢掉标题；
+ * 悬停才给实心红底——2026-11-03 */
+.btn-ghost.btn-danger { color: #bf5148; border-color: transparent; }
+.btn-ghost.btn-danger:hover { color: #fff; background: var(--danger); border-color: var(--danger); }
 .btn-sm { padding: 4px 10px; font-size: 13px; border-radius: 5px; }
 
 .input, .textarea {
@@ -208,6 +213,11 @@ input, textarea, select { font: inherit; color: inherit; }
 .tab { padding: 5px 14px; border-radius: 6px; font-size: 13px; color: var(--sub); transition: all 0.15s ease; }
 .tab.is-active { background: var(--card); color: var(--ink); font-weight: 500; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 .toolbar .input { width: 220px; }
+/* 窄屏筛选（2026-11-03）：文章列表原来四行控件（视图 / 状态 / 时间 / 搜索）把 844 高的首屏
+ * 吃掉 300px，列表只剩一条半。桌面用 display:contents 让两个 tabs 组继续平铺（布局零变化），
+ * 手机上收进「筛选」按钮，点开才展开 */
+.toolbar-toggle { display: none; }
+.toolbar-filters { display: contents; }
 
 /* 小屏（390px）下操作按钮一行放不下：允许换行，别把标题挤没。
    main 给足 flex-basis（同 wb-row-main/fl-main 先例）——纯 flex:1 基线为 0 时
@@ -216,8 +226,15 @@ input, textarea, select { font: inherit; color: inherit; }
 .post-row:last-child { border-bottom: none; }
 .post-main { flex: 1 1 240px; min-width: 0; }
 .post-title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 8px; }
+/* 标题过长时让标题自己省略，别把右边的「已发布 / 置顶 / 加密」挤出面板（390px 实测被切一半） */
+.post-title > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.post-title > .chip { flex: 0 0 auto; }
 .post-title a:hover { color: var(--accent); }
-.post-meta { font-size: 12px; color: var(--sub); margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+.post-meta { font-size: 12px; color: var(--sub); margin-top: 3px; display: flex; gap: 0 6px; flex-wrap: wrap; }
+/* 分隔符由 CSS 生成，跟着后一个字段走：换行时不会在行尾留一个孤零零的「·」（2026-11-03）
+ * span 加 nowrap：否则浏览器只把「·」留在行尾、把字段本身挤到下一行，看起来更怪 */
+.post-meta > span { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.post-meta > span + span::before { content: '·'; margin-right: 6px; opacity: 0.6; }
 .post-ops { display: flex; gap: 4px; flex: 0 0 auto; margin-left: auto; }
 .empty-box { text-align: center; color: var(--sub); padding: 48px 0; }
 .empty-sm { padding: 28px 0; font-size: 13px; }
@@ -981,3 +998,15 @@ a.stat-row:hover .stat-row-title { color: var(--accent); }
 .sess-list { max-height: 300px; overflow-y: auto; }
 .sess-expand { margin-top: 8px; padding: 4px 14px; font-size: 12.5px; }
 .sess-kick { padding: 4px 14px; font-size: 12.5px; }
+
+/* ---------- 文章列表：窄屏筛选折叠（2026-11-03） ----------
+ * 桌面：.toolbar-filters 用 display:contents，两个 tabs 组照旧平铺，视觉零变化。
+ * ≤700px：收起，只留「筛选」按钮（有筛选条件时按钮带 • 提示），点开在下一行展开。 */
+@media (max-width: 700px) {
+  .toolbar { gap: 8px; }
+  .toolbar-toggle { display: inline-flex; flex: 0 0 auto; }
+  .toolbar-toggle.is-active { border-color: var(--accent); color: var(--accent); }
+  .toolbar-filters { display: none; }
+  .toolbar-filters.is-open { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; order: 10; padding-top: 2px; }
+  .toolbar .input { flex: 1 1 110px; width: auto; min-width: 0; }
+}

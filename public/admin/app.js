@@ -18,6 +18,8 @@ let wbEditing = null
 
 /* 文章列表搜索防抖：模块级，路由切换时清掉，防遗留回调把用户「拽回」文章页 */
 let postsSearchTimer = null
+/* 文章列表筛选面板在窄屏下的展开态：模块级，筛选条件变化重渲染后保留用户的展开意图 */
+let postsFilterOpen = false
 /* 会员列表搜索防抖：同上 */
 let membersSearchTimer = null
 /* 搜索框是否处于焦点中：重渲染后据此恢复焦点与光标 */
@@ -978,6 +980,8 @@ async function viewPosts() {
   const page = parseInt(q.get('page') || '1', 10)
   const kw = q.get('q') || ''
   const range = q.get('range') || ''
+  // 窄屏「筛选」按钮上的提示点：状态 / 时间任一非默认，就说明列表正被条件压着（按钮收起也必须看得出）
+  const filterActive = status !== 'all' || !!range
 
   let d
   try {
@@ -1002,10 +1006,10 @@ async function viewPosts() {
           ${p.hasPassword ? '<span class="chip chip-gray">🔒 加密</span>' : ''}
         </div>
         <div class="post-meta">
-          <span>${p.slug}</span><span>·</span><span>${p.views} 阅读</span><span>·</span><span>${p.likes} 赞</span>
-          <span>·</span><span>${fmtDateTime(p.published_at || p.updated_at)}</span>
-          ${p.categoryName ? `<span>·</span><span>${esc(p.categoryName)}</span>` : ''}
-          ${p.tagList && p.tagList.length ? `<span>·</span><span>${p.tagList.map(esc).join(' / ')}</span>` : ''}
+          <span>${p.slug}</span><span>${p.views} 阅读</span><span>${p.likes} 赞</span>
+          <span>${fmtDateTime(p.published_at || p.updated_at)}</span>
+          ${p.categoryName ? `<span>${esc(p.categoryName)}</span>` : ''}
+          ${p.tagList && p.tagList.length ? `<span>${p.tagList.map(esc).join(' / ')}</span>` : ''}
         </div>
       </div>
       <div class="post-ops">
@@ -1030,18 +1034,21 @@ async function viewPosts() {
         <button class="tab is-active" data-vtab="list" type="button">列表</button>
         <button class="tab" data-vtab="cats" type="button">分类标签</button>
       </div>
-      <div class="tabs">
-        ${['all', 'published', 'scheduled', 'draft']
-          .map(
-            (t) =>
-              `<button class="tab${t === status ? ' is-active' : ''}" data-tab="${t}">${{ all: '全部', published: '已发布', scheduled: '定时', draft: '草稿' }[t]}</button>`
-          )
-          .join('')}
-      </div>
-      <div class="tabs">
-        ${LIST_RANGE_CHIPS.map(([v, label]) => `<button class="tab${v === range ? ' is-active' : ''}" data-range="${v}" type="button">${label}</button>`).join('')}
+      <div class="toolbar-filters${postsFilterOpen ? ' is-open' : ''}" id="toolbar-filters">
+        <div class="tabs">
+          ${['all', 'published', 'scheduled', 'draft']
+            .map(
+              (t) =>
+                `<button class="tab${t === status ? ' is-active' : ''}" data-tab="${t}">${{ all: '全部', published: '已发布', scheduled: '定时', draft: '草稿' }[t]}</button>`
+            )
+            .join('')}
+        </div>
+        <div class="tabs">
+          ${LIST_RANGE_CHIPS.map(([v, label]) => `<button class="tab${v === range ? ' is-active' : ''}" data-range="${v}" type="button">${label}</button>`).join('')}
+        </div>
       </div>
       <input class="input" id="search-input" placeholder="搜索标题 / 正文…" value="${esc(kw)}">
+      <button class="btn btn-sm toolbar-toggle${filterActive ? ' is-active' : ''}" id="filter-toggle" type="button" aria-expanded="${postsFilterOpen ? 'true' : 'false'}">筛选${filterActive ? ' •' : ''}</button>
     </div>
     <div class="panel">${rows || '<div class="empty-box">没有找到文章</div>'}</div>
     ${d.totalPages > 1 ? `<div class="pager-admin"><button class="btn btn-sm" id="pg-prev" ${page <= 1 ? 'disabled' : ''}>上一页</button><span>${d.page} / ${d.totalPages}</span><button class="btn btn-sm" id="pg-next" ${page >= d.totalPages ? 'disabled' : ''}>下一页</button></div>` : ''}`
@@ -1058,6 +1065,16 @@ async function viewPosts() {
     b.addEventListener('click', () => (location.hash = '#/posts?view=cats'))
   )
   const searchEl = document.getElementById('search-input')
+  // 窄屏筛选面板开关：只切 class 不重渲染（重渲染会丢焦点、也会让刚点的展开又收回去）
+  const filterToggle = document.getElementById('filter-toggle')
+  if (filterToggle) {
+    filterToggle.addEventListener('click', () => {
+      postsFilterOpen = !postsFilterOpen
+      const panel = document.getElementById('toolbar-filters')
+      if (panel) panel.classList.toggle('is-open', postsFilterOpen)
+      filterToggle.setAttribute('aria-expanded', postsFilterOpen ? 'true' : 'false')
+    })
+  }
   searchEl.addEventListener('focus', () => (searchFocused = true))
   searchEl.addEventListener('blur', () => (searchFocused = false))
   searchEl.addEventListener('input', () => {
@@ -1150,12 +1167,12 @@ async function viewWeibo() {
         <div class="wb-row-meta">
           ${w.status === 'published' ? '<span class="chip chip-green">已发布</span>' : '<span class="chip chip-gray">草稿</span>'}
           ${w.pinned ? '<span class="chip chip-warn">置顶</span>' : ''}
-          ${w.imageList.length ? `<span>${w.imageList.length} 图</span><span>·</span>` : ''}
+          ${w.imageList.length ? `<span>${w.imageList.length} 图</span>` : ''}
           ${(w.topicList || []).length
-            ? `<span class="wb-row-topics">${w.topicList.map((t) => `<a href="/weibo?topic=${encodeURIComponent(t)}" target="_blank">#${esc(t)}</a>`).join('')}</span><span>·</span>`
+            ? `<span class="wb-row-topics">${w.topicList.map((t) => `<a href="/weibo?topic=${encodeURIComponent(t)}" target="_blank">#${esc(t)}</a>`).join('')}</span>`
             : ''}
           <span>${w.likes || 0} 赞 · ${w.commentCount || 0} 评</span>
-          <span>·</span>
+          
           <span>${fmtDateTime(w.published_at || w.updated_at)}</span>
         </div>
       </div>
@@ -1963,7 +1980,7 @@ async function viewTrash() {
       (it) => `<div class="post-row" data-type="${it.type}" data-id="${it.id}">
       <div class="post-main">
         <div class="post-title">${esc(it.label || '（无文字内容）')}<span class="chip">${TRASH_TYPE_LABEL[it.type] || it.type}</span>${statusChip(it.status)}</div>
-        <div class="post-meta"><span>删除于 ${fmtDateTime(it.deleted_at)}</span><span>·</span><span>${purgeHint(it.deleted_at)}</span></div>
+        <div class="post-meta"><span>删除于 ${fmtDateTime(it.deleted_at)}</span><span>${purgeHint(it.deleted_at)}</span></div>
       </div>
       <div class="post-ops">
         <button class="btn btn-ghost btn-sm" data-act="restore">恢复</button>
@@ -2112,13 +2129,13 @@ async function viewMembers() {
       (m) => `<div class="post-row" data-id="${m.id}">
       <div class="post-main">
         <div class="post-title">${esc(m.username)}${tierChip(m)}${m.status === 'banned' ? '<span class="chip chip-gray">已封禁</span>' : ''}</div>
-        <div class="post-meta"><span>积分 ${m.points}</span>${m.email ? `<span>·</span><span>${esc(m.email)}</span>` : ''}${
-        m.tier_source ? `<span>·</span><span>来源 ${esc(TIER_SOURCE_LABEL[m.tier_source] || m.tier_source)}</span>` : ''
+        <div class="post-meta"><span>积分 ${m.points}</span>${m.email ? `<span>${esc(m.email)}</span>` : ''}${
+        m.tier_source ? `<span>来源 ${esc(TIER_SOURCE_LABEL[m.tier_source] || m.tier_source)}</span>` : ''
       }${
         m.tier_expires_at && !(tierDef(m.tier) || { permanent: m.tier === 'normal' }).permanent
-          ? `<span>·</span><span>${m.tier_expires_at <= now ? '已于' : '有效期至'} ${fmtDateShort(m.tier_expires_at)}</span>`
+          ? `<span>${m.tier_expires_at <= now ? '已于' : '有效期至'} ${fmtDateShort(m.tier_expires_at)}</span>`
           : ''
-      }<span>·</span><span>注册于 ${fmtDateTime(m.created_at)}</span></div>
+      }<span>注册于 ${fmtDateTime(m.created_at)}</span></div>
       </div>
       <div class="post-ops">
         <button class="btn btn-ghost btn-sm" data-act="tier">分配档位</button>
@@ -2338,7 +2355,7 @@ function invitesPane(d, status) {
       return `<div class="post-row" data-id="${c.id}" data-code="${esc(c.code)}">
       <div class="post-main">
         <div class="post-title"><code style="font-family:ui-monospace,monospace;letter-spacing:0.5px;">${esc(formatInviteCode(c.code))}</code> ${stateChip}<span class="chip chip-gray">${esc(tierName(c.tier))}</span><span class="chip chip-gray">${esc(quota)}</span></div>
-        <div class="post-meta"><span>${meta}</span>${c.note ? `<span>·</span><span>${esc(c.note)}</span>` : ''}<span>·</span><span>${fmtDateTime(c.created_at)} 生成</span></div>
+        <div class="post-meta"><span>${meta}</span>${c.note ? `<span>${esc(c.note)}</span>` : ''}<span>${fmtDateTime(c.created_at)} 生成</span></div>
       </div>
       <div class="post-ops">
         <button class="btn btn-ghost btn-sm" data-inv-copy type="button">复制</button>
@@ -2462,7 +2479,7 @@ function showInviteUses(r) {
       (u) => `<div class="post-row" style="padding:8px 0;">
       <div class="post-main">
         <div class="post-title" style="font-size:13px;">${esc(u.member_name || '（已删会员）')}</div>
-        <div class="post-meta"><span>${fmtDateTime(u.created_at)}</span>${u.tier ? `<span>·</span><span>${esc(memberTierName(r.tiers || [], u.tier) || u.tier)}</span>` : ''}</div>
+        <div class="post-meta"><span>${fmtDateTime(u.created_at)}</span>${u.tier ? `<span>${esc(memberTierName(r.tiers || [], u.tier) || u.tier)}</span>` : ''}</div>
       </div>
     </div>`
     )

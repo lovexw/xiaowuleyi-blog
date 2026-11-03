@@ -60,8 +60,9 @@ function footLinksFor(s: SettingsMap, en: boolean): { home: string; archive: str
   return {
     home: `${secondary}${rss}${admin}`,
     archive: `${back}${secondary}${rss}${admin}`,
-    article: `${back}${secondary}${admin}`,
-    about: `${back}${secondary}${admin}`,
+    // 文章 / 关于页同样带 RSS：同一站四个页脚只差「回主页」一项，别让订阅入口时有时无
+    article: `${back}${secondary}${rss}${admin}`,
+    about: `${back}${secondary}${rss}${admin}`,
   }
 }
 
