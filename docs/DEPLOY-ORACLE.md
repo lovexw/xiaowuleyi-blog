@@ -113,6 +113,7 @@ cd /opt/xwblog-app && ./scripts/install-oracle-deploy.sh --uninstall
 - **不要在服务器上改代码**。`git reset --hard` 会覆盖，改了也白改；要改就改 GitHub。
 - 不要在服务器上手动 `docker run` 别的容器占 8788 端口，脚本按名称 `xwblog-next` 管理。
 - 不要给 `/opt/xwblog-data` 做 `git` 操作，它不在仓库里。
+- 不要去掉 `blog.xiaowuleyi.com.conf` 里的 `proxy_set_header Host $host`，多租户按 Host 路由。
 
 ## 与 Cloudflare 的关系
 
@@ -126,8 +127,51 @@ Workers & Pages → 选中该 Worker → Settings → Build → 断开 Git / 关
 再经 Actions 部署到 CF；即使哪天补上 secrets 也不会误触发。
 
 注意：断开后，只要域名还解析到 Cloudflare，**线上站点会冻结在最后部署的那版**，直到把
-`blog.xiaowuleyi.com` 切到甲骨文（443 被 VLESS+REALITY 占用，入口方案待定：xray fallbacks
-回落 / 8443 带端口 / 继续套 CF 回源）。
+`blog.xiaowuleyi.com` 切到甲骨文（见下一节）。
+
+## 域名接入：CF 橙云回源 80
+
+源站 443 被 xray（VLESS+REALITY，伪装 `www.tesla.com`）占着，所以博客**不启用源站 HTTPS**，
+而是保持 Cloudflare 橙云代理、回源 80。这样不动代理配置、不用另签证书，回滚只需改 DNS。
+
+源站侧落在 1Panel 的 openresty 上（host 网络，容器内 `/www` ← 宿主机
+`/opt/1panel/apps/openresty/openresty/www`）：
+
+`/opt/1panel/apps/openresty/openresty/conf/conf.d/blog.xiaowuleyi.com.conf`
+
+- `listen 80` + `server_name blog.xiaowuleyi.com`
+- `proxy_pass http://127.0.0.1:8788`（容器 `xwblog-next`）
+- **必须透传 `Host`**：应用按 Host 路由多租户，头丢了直接 404
+- 透传 `X-Forwarded-Proto`，并把 CF 边缘注入的 `CF-Visitor` 原样带到后端——Flexible SSL 下
+  回源段是 http，应用靠 `resolveScheme` 读 `CF-Visitor` 判定访客侧是 https，否则登录会被判跨站
+- 日志目录 `/www/sites/blog.xiaowuleyi.com/log` 必须先在容器内存在，否则 `openresty -t` 报
+  `No such file or directory`
+
+改完自检：
+
+```bash
+sudo docker exec 1Panel-openresty-fokI openresty -t
+sudo docker exec 1Panel-openresty-fokI openresty -s reload
+curl -s -o /dev/null -w '%{http_code} %{time_total}s\n' \
+  -H 'Host: blog.xiaowuleyi.com' http://127.0.0.1/
+```
+
+Cloudflare 控制台三件事：
+
+1. **DNS**：`blog.xiaowuleyi.com` A → `167.234.216.40`，代理状态保持**橙色云**
+2. **SSL/TLS → Overview**：必须是 **Flexible**（源站只有 80；选 Full / Full strict 会 526）
+3. 保留 **Always Use HTTPS**（边缘跳转，不影响回源）
+
+确认切换生效：
+
+```bash
+curl -sI https://blog.xiaowuleyi.com/ | head -3
+# 期望 200，且 server: cloudflare
+ssh ... 'tail -5 /opt/1panel/apps/openresty/openresty/www/sites/blog.xiaowuleyi.com/log/access.log'
+# 能看到 CF 节点的回源请求
+```
+
+回滚：把 DNS 记录改回切换前那条即可，所以**改之前先截图原有记录**。
 
 ## 排障
 
@@ -136,6 +180,8 @@ Workers & Pages → 选中该 Worker → Settings → Build → 断开 Git / 关
 | 推了但没变化 | `journalctl -u xwblog-deploy -n 50`；`systemctl list-timers xwblog-deploy.timer` |
 | 一直是旧版本 | `--status` 里「容器提交」是否等于远端 sha；`last-failed` 是否有记录 |
 | 部署后 502/连不上 | `journalctl` 里的健康检查输出；`docker logs xwblog-next --tail 50` |
+| 切域名后 526 / 5xx | CF 的 SSL/TLS 模式不是 Flexible，或回源打到了 443（那是 xray） |
+| 切域名后是应用自己的 404 | openresty 没透传 `Host`，应用按 Host 找不到租户 |
 | 构建慢或失败 | `/opt/xwblog-deploy/state/build.log`，多为 npm 网络或磁盘满（`df -h /`） |
 | 数据像丢了 | 基本不会：`ls /opt/xwblog-data/blog.xiaowuleyi.com/`，容器只是挂载它 |
 
