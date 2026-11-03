@@ -1,0 +1,19 @@
+[Unit]
+Description=xwblog 自动部署（GitHub main → Docker 容器替换）
+Documentation=https://github.com/lovexw/bloghao-xwblog/blob/main/docs/DEPLOY-ORACLE.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+# 以 ubuntu 运行：代码目录和状态目录都归它，git 操作不会留下 root 属主文件；
+# docker 通过免密 sudo 调用（脚本内部自动探测）
+User=ubuntu
+Group=ubuntu
+Environment=HOME=/home/ubuntu
+ExecStart=/opt/xwblog-app/scripts/deploy-oracle.sh
+# 构建+健康检查最长 20 分钟，超时视为失败
+TimeoutStartSec=1200
+Nice=10
+IOSchedulingClass=idle

@@ -1,8 +1,11 @@
 name: Deploy to Cloudflare Workers
 
+# 2026-11-03：部署目标改为甲骨文自托管实例（见 docs/DEPLOY-ORACLE.md），
+# 不再在 push main 时部署到 Cloudflare。
+# 说明：本工作流原本因缺少 CLOUDFLARE_API_TOKEN 一直 skipped，真正把代码送上 CF 的是
+# Workers Builds 的 Git 集成（那个要在 Cloudflare 控制台断开，改本文件管不到）。
+# 这里显式改成只能手动触发，是为了将来补上 secrets 后 push 不会又悄悄部署到 CF。
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # 最小权限 + 单飞：部署只需要拉代码，同仓库并发推送排队部署（不取消进行中的部署）

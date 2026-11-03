@@ -1,0 +1,13 @@
+[Unit]
+Description=每 2 分钟检查 xwblog 是否需要在甲骨文服务器上重新部署
+
+[Timer]
+# 开机 3 分钟后才开始，避开开机时的 network/docker 起势阶段
+OnBootSec=3min
+# 上一轮结束后再等 2 分钟（oneshot 不会被叠加触发）
+OnUnitActiveSec=2min
+AccuracySec=30s
+Unit=xwblog-deploy.service
+
+[Install]
+WantedBy=timers.target
