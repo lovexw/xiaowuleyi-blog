@@ -1,0 +1,11 @@
+[Unit]
+Description=定时刷新 xwblog 备份快照（每 30 分钟）
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=30min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

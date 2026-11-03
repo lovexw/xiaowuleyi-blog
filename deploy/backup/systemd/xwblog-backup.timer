@@ -1,0 +1,10 @@
+[Unit]
+Description=每天凌晨 3:30 备份 xwblog 到树莓派
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

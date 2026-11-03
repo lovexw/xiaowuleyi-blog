@@ -1,0 +1,15 @@
+[Unit]
+Description=xwblog 全站备份（从甲骨文拉取到树莓派）
+Documentation=file:///data/backup/xwblog/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/data/backup/xwblog/bin/backup.sh
+User=root
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=3h
+# 备份失败时保留失败状态，下次 Persistent 触发会重试
+Restart=no

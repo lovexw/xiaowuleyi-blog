@@ -1,0 +1,13 @@
+[Unit]
+Description=xwblog 备份快照（db 一致性导出 + 配置收集）
+Documentation=https://github.com/lovexw/bloghao-xwblog
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/xwblog-backup/snapshot.sh
+User=root
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=300
