@@ -34,7 +34,14 @@ KEEP_IMAGES=${KEEP_IMAGES:-3}
 STATE_DIR=${STATE_DIR:-/opt/xwblog-deploy/state}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-40}
 
-# 实例清单：容器名|绑定地址|健康检查域名|数据目录，分号分隔；留空则用上面单实例三件套
+# 实例清单：容器名|绑定地址|健康检查域名|数据目录，分号分隔；留空则用上面单实例三件套。
+# 手动执行时没有 systemd 注入的环境变量，这里回退去读同一个单元里的 INSTANCES，
+# 免得手动 --status / --force 时只看到一个实例、和定时器行为不一致。
+INSTANCES=${INSTANCES:-}
+if [ -z "$INSTANCES" ]; then
+  INSTANCES=$(systemctl show -p Environment --value xwblog-deploy.service 2>/dev/null |
+    tr ' ' '\n' | sed -n 's/^INSTANCES=//p' | head -1 || true)
+fi
 INSTANCES=${INSTANCES:-"${CONTAINER}|${BIND_ADDR}|${HEALTH_HOST}|${DATA_DIR}"}
 IFS=';' read -ra INSTANCE_LIST <<<"$INSTANCES"
 
