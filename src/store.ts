@@ -27,6 +27,33 @@ export function imageExtOf(mime: string): string | undefined {
   return Object.prototype.hasOwnProperty.call(IMAGE_MIMES, mime) ? IMAGE_MIMES[mime] : undefined
 }
 
+/** 扩展名 → mime，给 /images/* 读取侧兜底。
+ *  为什么要兜：存量对象常缺 httpMetadata.contentType（迁移/导入进 R2 的历史文件），读出就退化成
+ *  application/octet-stream——浏览器还能显示，但微信抓 og:image、Safari、图片索引都不认，而且
+ *  pagecache 的 isImageStorable 只放行 image|video，等于这些图连边缘缓存都进不去。
+ *  只列白名单里真实存在的图片扩展名加 mp4/webm：SVG 永不补类型（同源直开可执行脚本，见上），
+ *  认不出的一律保持 octet-stream，配合 nosniff。 */
+export const MIME_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  ico: 'image/x-icon',
+  avif: 'image/avif',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+}
+
+/** 按图床键的扩展名取 mime，认不出返回 ''（调用方保持 octet-stream）。
+ *  同 imageExtOf，必须 hasOwnProperty：键名可控，`x.constructor` 直查表会取到函数对象 */
+export function mimeOfKey(key: string): string {
+  const dot = key.lastIndexOf('.')
+  if (dot < 0) return ''
+  const ext = key.slice(dot + 1).toLowerCase()
+  return Object.prototype.hasOwnProperty.call(MIME_BY_EXT, ext) ? MIME_BY_EXT[ext] : ''
+}
+
 /** 字节进 R2 图床并登记 uploads 表，返回站内地址。
  *  ext/mime 由调用方先过白名单（imageExtOf）或魔数识别（sniffImageExt）；
  *  dir 为图床目录（普通上传 u/，OG 卡图 og/），年月子目录由这里统一拼。

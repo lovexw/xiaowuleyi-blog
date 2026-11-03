@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, sniffImageExt, sniffUploadExt } from '../src/store.ts'
+import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mimeOfKey, sniffImageExt, sniffUploadExt } from '../src/store.ts'
 
 // ── 上传常量与白名单（AGENTS「上传常量与落库统一走 src/store.ts」）：
 // imageExtOf 必须走 hasOwnProperty——IMAGE_MIMES['constructor'] 是继承属性，直查表可穿透 ──
@@ -44,4 +44,34 @@ test('sniffUploadExt：HTML/SVG/文本与空缓冲一律拒收', () => {
 test('转存上限常量：单篇图数与单文件字节在位（防 Workers 子请求 / 内存超限）', () => {
   assert.equal(MAX_REMOTE_IMAGES, 30)
   assert.ok(MAX_UPLOAD_BYTES > 0 && MAX_UPLOAD_BYTES <= 25 * 1024 * 1024)
+})
+
+// ── /images/* 读取侧的 MIME 兜底：迁移进 R2 的历史对象常缺 httpMetadata.contentType，
+//    读出会退化成 application/octet-stream，微信抓不到 og:image，也进不了 isImageStorable 缓存 ──
+test('mimeOfKey：按扩展名补回图片/视频 mime', () => {
+  assert.equal(mimeOfKey('u/202610/abc.png'), 'image/png')
+  assert.equal(mimeOfKey('u/202610/abc.jpg'), 'image/jpeg')
+  assert.equal(mimeOfKey('u/202610/abc.jpeg'), 'image/jpeg')
+  assert.equal(mimeOfKey('u/202610/abc.webp'), 'image/webp')
+  assert.equal(mimeOfKey('u/202610/abc.gif'), 'image/gif')
+  assert.equal(mimeOfKey('og/favicon.ico'), 'image/x-icon')
+  assert.equal(mimeOfKey('u/202610/abc.avif'), 'image/avif')
+  assert.equal(mimeOfKey('u/202610/abc.mp4'), 'video/mp4')
+  assert.equal(mimeOfKey('u/202610/abc.webm'), 'video/webm')
+  // 大小写不敏感；只取最后一个点（目录名带点不影响）
+  assert.equal(mimeOfKey('u/202610/ABC.PNG'), 'image/png')
+  assert.equal(mimeOfKey('u/2026.10/a.png'), 'image/png')
+})
+
+test('mimeOfKey：认不出的扩展名一律返回空，保持 octet-stream', () => {
+  // SVG 永不补类型：同源直开可执行脚本，是存储 XSS
+  assert.equal(mimeOfKey('u/202610/a.svg'), '')
+  assert.equal(mimeOfKey('u/202610/a.html'), '')
+  assert.equal(mimeOfKey('u/202610/a.js'), '')
+  assert.equal(mimeOfKey('u/202610/noext'), '')
+  assert.equal(mimeOfKey('u/202610/a.'), '')
+  // 键名可控，原型链属性必须挡住（MIME_BY_EXT['constructor'] 是继承来的函数对象）
+  assert.equal(mimeOfKey('u/x.constructor'), '')
+  assert.equal(mimeOfKey('u/x.toString'), '')
+  assert.equal(mimeOfKey('u/x.__proto__'), '')
 })

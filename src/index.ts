@@ -19,6 +19,7 @@ import { siteBase } from './render'
 import { buildRobotsTxt, contentSignalValue, indexNowKeyOk, readAiPolicy } from './seo'
 import { pluginConfig } from './hooks'
 import { purgeVisits } from './stats'
+import { mimeOfKey } from './store'
 import { purgeTrash } from './trash'
 import { purgeMemberVisits, recountWeiboCount, refreshFootStats, refreshOnThisDay } from './db'
 import type { Env, SessionUser } from './types'
@@ -388,7 +389,12 @@ app.get('/images/*', async (c) => {
   }
   const headers = new Headers()
   obj.writeHttpMetadata(headers)
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/octet-stream')
+  // 存量对象丢了 contentType（迁移/导入进 R2）时按扩展名补，别退化成 octet-stream：
+  // 退化的图微信抓不到 og:image，也进不了 isImageStorable 的边缘缓存。SVG 等不在表里，仍走兜底
+  const storedType = headers.get('Content-Type') || ''
+  if (!storedType || storedType === 'application/octet-stream') {
+    headers.set('Content-Type', mimeOfKey(key) || storedType || 'application/octet-stream')
+  }
   headers.set('ETag', obj.httpEtag)
   if (!headers.has('Cache-Control')) headers.set('Cache-Control', cacheControl)
   // 禁止浏览器嗅探内容类型：图床里只允许真正的图片被当图片渲染
