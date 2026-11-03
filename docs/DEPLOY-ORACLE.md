@@ -3,8 +3,14 @@
 > 一句话：**代码只改 GitHub，服务器只负责拉取和重建。** 推送到 `main` 后，服务器上的
 > systemd 定时器会在 2 分钟内发现新提交，用 ARM 原生构建出新镜像并替换容器，健康检查失败自动回滚。
 
-首次接入：2026-11-03，机器 `167.234.216.40`（Ubuntu 20.04 / aarch64 Ampere A1），
-容器 `xwblog-next` 监听 `127.0.0.1:8788`，数据在 `/opt/xwblog-data`。
+首次接入：2026-11-03，机器 `167.234.216.40`（Ubuntu 20.04 / aarch64 Ampere A1）。当天起这台机器跑两个实例：
+
+| 实例 | 容器 | 监听 | 数据目录 |
+| --- | --- | --- | --- |
+| blog.xiaowuleyi.com | `xwblog-next` | `127.0.0.1:8788` | `/opt/xwblog-data` |
+| blog.btchao.com（比特囤币） | `btchao-blog` | `127.0.0.1:8790` | `/opt/btchao-blog/data` |
+
+两个实例共用同一份代码、同一个镜像，一次构建同时升级，见下文「多实例」。
 
 ## 为什么是「服务器定时拉」而不是「GitHub 推」
 
@@ -21,18 +27,21 @@
 
 ```
 GitHub main  ──(git fetch, 每 2 分钟)──▶  /opt/xwblog-app    代码（视为只读）
-                                              │ docker build（ARM 原生）
+                                              │ docker build（ARM 原生，只构建一次）
                                               ▼
                                           xwblog:sha-47f2cae   镜像按 commit 打 tag
-                                              │ 停旧容器 → 起新容器 → 健康检查
-                                              ▼
-                                          xwblog-next          监听 127.0.0.1:8788
                                               │
-                     /opt/xwblog-data  ───────┘  数据（blog.db + uploads + tenants.json）
+                        ┌─────────────────────┴─────────────────────┐
+                        ▼                                           ▼
+                  xwblog-next                                 btchao-blog
+                  127.0.0.1:8788                              127.0.0.1:8790
+                        │                                           │
+              /opt/xwblog-data                      /opt/btchao-blog/data
+        （blog.db + uploads + tenants.json）      （blog.db + uploads + tenants.json）
 ```
 
 关键点：**代码目录和数据目录是分开的**。`git reset --hard`、`docker build`、重建容器都不会碰到
-`blog.db` 和 `uploads/`，所以自动部署没有丢数据的风险。
+`blog.db` 和 `uploads/`，所以自动部署没有丢数据的风险。两个实例各自有独立的数据目录，互不干扰。
 
 ## 一次性初始化（已在本机完成，换机器时照做）
 
@@ -63,6 +72,47 @@ ssh ubuntu@167.234.216.40
 sudo systemctl start xwblog-deploy          # 立即跑一轮
 journalctl -u xwblog-deploy -f              # 盯日志
 ```
+
+## 多实例：一台机器跑多个站点
+
+一台机器可以同时托管多个站点，它们共用同一份代码和同一个镜像，部署时只构建一次、
+逐个替换容器。实例清单写在 systemd 单元的 `INSTANCES` 环境变量里：
+
+```
+容器名|绑定地址|健康检查域名|数据目录
+```
+
+多个实例用**分号**分隔，例如当前这台机器（`/etc/systemd/system/xwblog-deploy.service`）：
+
+```ini
+Environment="INSTANCES=xwblog-next|127.0.0.1:8788|blog.xiaowuleyi.com|/opt/xwblog-data;btchao-blog|127.0.0.1:8790|blog.btchao.com|/opt/btchao-blog/data"
+```
+
+不设置 `INSTANCES` 时退化为单实例，行为与老版本一致（读 `CONTAINER` / `BIND_ADDR` /
+`HEALTH_HOST` / `DATA_DIR`）。
+
+**新增一个站点**：
+
+```bash
+# 1. 准备数据目录与租户配置（脚本要求 $DATA_DIR/tenants.json 存在）
+sudo mkdir -p /opt/<新站>/data
+echo '{"<新域名>": {"demo": false}}' | sudo tee /opt/<新站>/data/tenants.json
+
+# 2. 编辑单元，在 INSTANCES 末尾追加一段，然后重载
+sudo systemctl edit --full xwblog-deploy   # 或在 /etc/systemd/system/ 下直接改
+sudo systemctl daemon-reload
+
+# 3. 手动跑一轮（会 git reset + build + 起新容器）
+cd /opt/xwblog-app && ./scripts/deploy-oracle.sh
+```
+
+**部署行为**：
+
+- 「已是最新」的判定是**所有**实例都跑在目标 commit 上，任一实例落后就会触发部署
+- 镜像只构建一次，所有实例共用（`xwblog:sha-xxxxxxx`）
+- 某个实例健康检查失败，只回滚它自己，其它实例保持新版本；`last-failed` 记下这个
+  commit 防止每 2 分钟重试
+- `--status` 会按实例分段打印镜像 / 提交 / 健康码
 
 ## 常用命令
 

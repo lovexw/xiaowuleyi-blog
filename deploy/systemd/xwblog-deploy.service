@@ -12,6 +12,10 @@ Type=oneshot
 User=ubuntu
 Group=ubuntu
 Environment=HOME=/home/ubuntu
+# 这台机器上要跟随 main 的实例，格式「容器|绑定地址|健康检查域名|数据目录」，分号分隔。
+# 一次 git pull + 一次 build，逐个替换容器；某个实例健康检查失败只回滚它自己。
+# 新增站点：把数据目录（含 tenants.json）准备好，在下面追加一段即可。
+Environment="INSTANCES=xwblog-next|127.0.0.1:8788|blog.xiaowuleyi.com|/opt/xwblog-data;btchao-blog|127.0.0.1:8790|blog.btchao.com|/opt/btchao-blog/data"
 ExecStart=/opt/xwblog-app/scripts/deploy-oracle.sh
 # 构建+健康检查最长 20 分钟，超时视为失败
 TimeoutStartSec=1200
