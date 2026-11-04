@@ -236,7 +236,7 @@ export function post(d: PostData): string {
       <span class="wx-date">${en ? `${fmtDateEn(p.published_at)} · ${p.readingMinutes} min read${p.aiGenerated ? ' · AI-generated' : ''}` : `${fmtDateCN(p.published_at)} · ${p.readingMinutes} 分钟${p.aiGenerated ? ' · AI 生成' : ''}`}</span>
     </div>
   </div>
-  ${p.cover ? `<div class="wx-cover"><img src="${esc(variantUrl(p.cover, 960))}"${coverSrcset(p.cover)} alt=""></div>` : ''}
+  ${p.cover ? `<div class="wx-cover"><img src="${esc(variantUrl(p.cover, 960))}"${coverSrcset(p.cover)} loading="eager" fetchpriority="high" decoding="async" alt=""></div>` : ''}
   <article class="rich" id="rich-content">${p.contentHtml}</article>
   ${p.locked ? paywallHtml(p.minTier, en, d) : ''}
   ${tagChips || catChip ? `<div class="wx-tags">${catChip}${tagChips}</div>` : ''}

@@ -10,6 +10,7 @@ import { isEn, recordEditionFailure } from './i18n'
 import { buildLlmsFullTxt, buildLlmsStub, buildLlmsTxt } from './llms'
 import { mcpRoutes } from './mcp'
 import { goPageHtml, isTrustedOutHost } from './outlink'
+import { htmlEtagMiddleware } from './html-etag'
 import { imageCacheMatch, imageCachePut, pageCacheMiddleware } from './pagecache'
 import { renderAbout, renderArchive, renderCategory, renderGuestbook, renderHome, renderLinks, renderMember, renderNotFound, renderPage, renderPost, renderRank, renderSearch, renderWeibo } from './pages'
 import { mergeUnlockCookie, PP_COOKIE, PP_TTL_MS, verifyPostPassword } from './protect'
@@ -82,6 +83,15 @@ app.use('*', async (c, next) => {
   }
   await next()
 })
+
+/* ---------------- HTML 条件请求（ETag / 304，src/html-etag.ts） ----------------
+ * 公开页响应恒带 Cache-Control: no-cache，浏览器每次刷新都回来验证；此前没有 ETag，
+ * 每次验证都拿回一份完整 200（HTML 20–60KB，跨境链路上白付一个 RTT 的传输）。
+ * 现在按内容生成强 ETag，命中 If-None-Match 回 304（零 body）；CF 边缘副本带同一 ETag，
+ * 命中边缘时由 CF 直接回 304、不必回源。
+ * 注册位必须在 pageCacheMiddleware 之前：洋葱模型下先注册者的后半段最后执行，
+ * 边缘缓存命中的响应也会经过这里，直接复用副本上的 ETag，不重复算哈希。 */
+app.use('*', htmlEtagMiddleware())
 
 /* ---------------- 页面边缘缓存（src/pagecache.ts）：公开页 / 订阅源 / 公开只读 API · 匿名访客 · 30 分钟副本 ----------------
  * 命中直接吐响应跳过 SSR/API 与 D1。登录 Cookie / 演示站 / 灰度一律不进缓存；带 query 走受控

@@ -22,6 +22,11 @@ export interface ThemePageOptions {
   description?: string
   ogImage?: string
   path: string
+  /** canonical / og:url 用的完整路径（含规范化 query）。列表分页与筛选页传它自指，
+   *  否则第 2、3 页都会把 canonical 指向第一页，被搜索引擎当成重复内容 */
+  canonicalPath?: string
+  /** 404 / 错误页不输出 canonical 与 og:url：否则会指向一个根本不存在的地址 */
+  noCanonical?: boolean
   body: string
   preview?: boolean
   /** 请求源（new URL(c.req.url).origin）：canonical / og:url 绝对化的兜底，未配置 siteUrl 时也能产出绝对地址 */
@@ -80,6 +85,14 @@ export function page(o: ThemePageOptions): string {
   const title = o.title ? `${o.title} - ${siteName}` : siteName
   const ogType = o.path.startsWith('/post/') ? 'article' : 'website'
   const ogImage = resolveOgImage(o.ogImage, o.settings)
+  // 列表页分页/筛选时自指带规范化 query 的 URL；其余页沿用 path（与既有行为一致）
+  const canonicalPath = o.canonicalPath ?? o.path
+  const canonicalHtml = base && !o.noCanonical
+    ? `<link rel="canonical" href="${esc(base + canonicalPath)}">`
+    : ''
+  const ogUrlHtml = base && !o.noCanonical
+    ? `<meta property="og:url" content="${esc(base + canonicalPath)}">`
+    : ''
   // JSON-LD 里的 < 必须转成 \u003c（仍是合法 JSON）：防正文标题带 </script> 提前闭合脚本标签
   const jsonLdHtml = o.jsonLd
     ? (Array.isArray(o.jsonLd) ? o.jsonLd : [o.jsonLd])
@@ -98,12 +111,12 @@ export function page(o: ThemePageOptions): string {
 <meta name="description" content="${esc(desc)}">
 ${o.noindex || en ? '<meta name="robots" content="noindex">' : '<meta name="robots" content="max-snippet:-1, max-image-preview:large, max-video-preview:-1">'}
 ${o.settings.statsEnabled === '0' ? '<meta name="xw-stats" content="off">' : ''}
-${base ? `<link rel="canonical" href="${esc(base + o.path)}">` : ''}
+${canonicalHtml}
 <meta property="og:title" content="${esc(o.title || siteName)}">
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:type" content="${ogType}">
 <meta property="og:site_name" content="${esc(siteName)}">
-${base ? `<meta property="og:url" content="${esc(base + o.path)}">` : ''}
+${ogUrlHtml}
 <meta property="og:image" content="${esc(absUrl(base, ogImage))}">
 <meta property="og:image:alt" content="${esc(o.title || siteName)}">
 <meta name="twitter:card" content="summary_large_image">
@@ -112,7 +125,7 @@ ${o.settings.faviconUrl ? `<link rel="icon" href="${esc(absUrl(base, o.settings.
 ${base ? `<link rel="alternate" type="application/rss+xml" title="${esc(siteName)}" href="${esc(base)}/rss.xml">` : ''}
 ${base ? `<link rel="alternate" type="application/feed+json" title="${esc(siteName)}" href="${esc(base)}/feed.json">` : ''}
 ${base && o.path.startsWith('/post/') && readAiPolicy(o.settings.aiPolicy) !== 'deny' ? `<link rel="alternate" type="text/markdown" title="${esc(o.title || siteName)}" href="${esc(base + o.path)}.md">` : ''}
-<style>${o.css}</style>
+${o.css ? `<style>${o.css}</style>` : ''}
 ${appearanceHeadStyle(o.settings)}
 ${customCssHeadStyle(o.settings)}
 ${grayscaleStyle(o.settings)}

@@ -72,7 +72,7 @@ import { normalizeMinTier } from './points'
 import { canReadTiers, effectiveTier, parseMemberTiers, upgradeTarget, type MemberTierDef } from './tiers'
 import { applyCommentGate, commentGateContext } from './commentgate'
 import { renderPostContentHtml } from './hooks'
-import { getTheme, THEMES } from './themes/registry'
+import { getTheme } from './themes/registry'
 import type { MemberData, RankData } from './themes/registry'
 import type { Env, PostRow, SessionUser, SettingsMap } from './types'
 import { packMatrix, qrMatrix } from './qrcode'
@@ -143,6 +143,23 @@ function baseHeaders(c: C, settings?: SettingsMap) {
     const signal = contentSignalValue(readAiPolicy(settings.aiPolicy))
     if (signal) c.header('Content-Signal', signal)
   }
+}
+
+/**
+ * canonical / og:url 的规范化 query：固定顺序只放行「影响内容、且应当被索引」的参数，
+ * 静默丢掉 UTM / 追踪 / 深链定位（微博 ?wb=）这类会给同一份内容造出无数 URL 的噪声参数。
+ * 默认值（page=1、sort=latest、空值）一律省略，保持自指地址最简。
+ * 列表与微博的分页页此前一律把 canonical 指向第一页，被搜索引擎当成重复内容——
+ * 现在由 renderList / renderWeibo 用本函数拼出「当前页」的自指地址。
+ */
+function canonicalQuery(entries: [string, string | number | undefined | null][]): string {
+  const p = new URLSearchParams()
+  for (const [k, v] of entries) {
+    if (v === undefined || v === null || v === '') continue
+    p.set(k, String(v))
+  }
+  const s = p.toString()
+  return s ? `?${s}` : ''
 }
 
 // 浏览量去重：同一 IP 对同一篇文章 1 小时内只计 1 次（进程内缓存，尽力而为），
@@ -536,6 +553,14 @@ async function renderList(
   // 首页——「sitemap 提交、canonical 却指首页」是自相矛盾信号，2026-10 SEO 审计）；
   // ?tag= 查询串形态也随之归一到 /tag/ 短链形态。标签页不进 sitemap（rss.ts buildSitemap 同口径）
   const listPath = opts.mode === 'home' ? (tag ? `/tag/${encodeURIComponent(tag)}` : '/') : url.pathname
+  // 分页 / 排序 / 搜索页 canonical 自指「当前规范化 URL」：此前第 2、3 页一律指向第一页，
+  // 被搜索引擎判为重复内容；?wb= 深链、UTM 等噪声参数由 canonicalQuery 白名单挡在外面。
+  const canonicalQ = canonicalQuery([
+    ['q', opts.mode === 'search' ? q || undefined : undefined],
+    ['sort', opts.mode !== 'search' && sort !== 'latest' ? sort : undefined],
+    ['seed', opts.mode !== 'search' && sort === 'random' && seed ? seed : undefined],
+    ['page', r.page > 1 ? r.page : undefined],
+  ])
   return c.html(
     page(pageOpts(c, {
       settings,
@@ -543,6 +568,7 @@ async function renderList(
       title,
       description: (opts.mode === 'category' && category?.description) || settings.siteDescription,
       path: listPath,
+      canonicalPath: listPath + canonicalQ,
       origin: url.origin,
       noindex: opts.mode === 'search' || (opts.mode === 'home' && !!tag),
       jsonLd: listBreadcrumb,
@@ -1109,6 +1135,13 @@ export async function renderWeibo(c: C, asHome = false): Promise<Response> {
     topics,
   })
   c.header('Cache-Control', 'no-cache')
+  // 微博分页 / 话题筛选页 canonical 自指当前规范化 URL；?wb= 是深链定位参数，
+  // 绝不能进 canonical（否则同一条微博的每个深链都成了独立地址）。
+  const canonicalQ = canonicalQuery([
+    ['topic', topic || undefined],
+    ['page', r.page > 1 ? r.page : undefined],
+  ])
+  const weiboPath = asHome ? '/' : '/weibo'
   return c.html(
     page(pageOpts(c, {
       settings,
@@ -1119,7 +1152,8 @@ export async function renderWeibo(c: C, asHome = false): Promise<Response> {
         : en
           ? `Short notes and daily bits by ${tr(en, settings.siteName)}`
           : `${settings.siteName}的随手记`,
-      path: asHome ? '/' : '/weibo',
+      path: weiboPath,
+      canonicalPath: weiboPath + canonicalQ,
       origin: url.origin,
       body: html,
     }))
@@ -1379,17 +1413,18 @@ export async function renderNotFound(c: C): Promise<Response> {
   const settings = await getSettings(c.env.DB)
   baseHeaders(c, settings)
   const en = isEn(settings)
-  // hasOwnProperty 防原型链属性（constructor 等）被当成主题 id
-  const t = Object.prototype.hasOwnProperty.call(THEMES, settings.theme) ? THEMES[settings.theme] : undefined
-  const themeCss = t ? t.css : getTheme('wechat').css
   c.header('Cache-Control', 'no-cache')
   return c.html(
     page(pageOpts(c, {
       settings,
-      css: themeCss,
+      // 404 是错误页，不背整套主题 CSS（每页内联的 56KB）与皮肤包：只留 page() 统一的
+      // 安全头 / noindex / favicon，体积从约 60KB 降到约 2KB。也不输出 canonical 与
+      // og:url——那会指向一个根本不存在的地址。
+      css: '',
       title: '404',
       description: en ? 'Page not found' : '页面不存在',
       path: '/404',
+      noCanonical: true,
       origin: new URL(c.req.url).origin,
       noindex: true,
       body: `<div style="max-width:480px;margin:18vh auto 0;padding:0 24px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;">
