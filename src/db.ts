@@ -218,7 +218,9 @@ export async function invalidateSharedSettings(db: D1Database): Promise<void> {
 
 export async function getSettings(db: D1Database): Promise<SettingsMap> {
   const inflight = settingsInflight.get(db)
-  if (inflight) return inflight
+  // 恒返回副本：后台「设置」接口会原地改写 settings[key] = SECRET_MASK（api.ts），
+  // 并发读共享同一个 promise 结果时，不能让其中一个调用把掩码写进别人拿到的对象
+  if (inflight) return { ...(await inflight) }
   const p = (async () => {
     const cache = sharedCache()
     if (cache) {
@@ -251,9 +253,10 @@ export async function getSettings(db: D1Database): Promise<SettingsMap> {
   })()
   settingsInflight.set(db, p)
   try {
-    return await p
+    return { ...(await p) }
   } finally {
-    settingsInflight.delete(db)
+    // 只删自己：写路径可能已经清掉 inflight 并放进一条新的读，别把后来那条误删
+    if (settingsInflight.get(db) === p) settingsInflight.delete(db)
   }
 }
 
@@ -1428,8 +1431,16 @@ export const SCHEMA_INDEXES = [
   // （2026-10-22 实测 comments 14k 行、每删一条扫 1.36 万行，批量清 26 条垃圾评论烧当日额度 7%）。
   // parent_id 是老库 ALTER 补的列 → 只进这里（tests/member-schema.test.ts 索引归位 + feed-index 计划守卫）
   'CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)',
+  // 游客评论带 QQ 号时反查同号已转存的站内头像（api.ts 公开评论 POST）：
+  // WHERE qq = ? AND avatar != '' ORDER BY created_at DESC LIMIT 1，无索引 = 每提交一条评论全表扫。
+  // qq 是老库运行时 ALTER 补的列 → 索引只在这里登记、不得进 schema.sql（归位规矩同 idx_comments_parent）
+  'CREATE INDEX IF NOT EXISTS idx_comments_qq ON comments (qq, created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_members_points ON members (points DESC)',
   'CREATE INDEX IF NOT EXISTS idx_member_sessions_expiry ON member_sessions (expires_at)',
+  // 登录膨胀防护：DELETE WHERE member_id = ? AND expires_at <= ? / COUNT WHERE member_id = ?
+  'CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at)',
+  // 管理员会话同款（sessions.user_id）；两个会话表都按账号维度收口，避免登录路径全表扫
+  'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at)',
   // 邀请码核销明细（2026-11 会员第五批）：详情回查按码取最近 N 条；表由 SCHEMA_TABLES 建，索引在这里兜底
   'CREATE INDEX IF NOT EXISTS idx_invite_uses_invite ON invite_uses (invite_id, created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_points_log_member ON member_points_log (member_id, created_at)',

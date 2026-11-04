@@ -11,6 +11,12 @@
  * - node:sqlite 查出来的行是 null 原型对象，统一展开成普通对象
  *   （业务代码大量解构 / JSON 序列化 / hasOwnProperty 判断，普通对象最安全）
  * - D1 不接受 undefined / boolean 绑定，这里 undefined→null、boolean→1/0
+ *
+ * 语句缓存（2026-11 第三批）：原先每次 first/all/run 都要 db.prepare(sql) 重新解析一遍
+ * SQL。热路径里同一条 SQL（getSettings、计数、会话校验…）每请求反复出现，解析纯属浪费。
+ * 按 SQL 文本缓存 StatementSync；DDL / PRAGMA 执行时清空缓存，避免 ALTER TABLE /
+ * CREATE INDEX 之后旧编译结果引用过期的 schema。缓存按 createD1 实例隔离，并设上限
+ * 防止动态拼出来的 SQL（IN 占位符个数不同）无限增长。
  */
 import { DatabaseSync } from 'node:sqlite'
 
@@ -22,6 +28,12 @@ function normValue(v: unknown): null | number | string {
 }
 
 type Row = Record<string, unknown>
+type Prepared = ReturnType<DatabaseSync['prepare']>
+
+/** 语句缓存上限：超过就整体丢弃重建（SQL 都是固定串，动态串最多几十种，256 足够） */
+const STMT_CACHE_MAX = 256
+/** 会改变 schema 或依赖实时 schema 的语句不缓存，且执行前清掉已有缓存 */
+const SCHEMA_SQL = /^\s*(CREATE|ALTER|DROP|PRAGMA|REINDEX|VACUUM|ATTACH|DETACH)\b/i
 
 function plainRow(row: Row | undefined | null): Row | null {
   return row ? { ...row } : null
@@ -30,11 +42,11 @@ function plainRow(row: Row | undefined | null): Row | null {
 class ShimStatement {
   sql: string
   args: (null | number | string)[] = []
-  private db: DatabaseSync
+  private stmt: (sql: string) => Prepared
 
-  constructor(db: DatabaseSync, sql: string) {
-    this.db = db
+  constructor(sql: string, stmt: (sql: string) => Prepared) {
     this.sql = sql
+    this.stmt = stmt
   }
 
   bind(...args: unknown[]): ShimStatement {
@@ -44,7 +56,7 @@ class ShimStatement {
 
   /** run 的同步版：batch 在同一事务里逐条执行时用 */
   _runSync(): { success: true; meta: { changes: number; last_row_id: number; duration: number } } {
-    const info = this.db.prepare(this.sql).run(...(this.args as never[]))
+    const info = this.stmt(this.sql).run(...(this.args as never[]))
     return {
       success: true,
       meta: {
@@ -60,17 +72,17 @@ class ShimStatement {
   }
 
   async first<T = Row>(): Promise<T | null> {
-    const row = this.db.prepare(this.sql).get(...(this.args as never[])) as Row | undefined
+    const row = this.stmt(this.sql).get(...(this.args as never[])) as Row | undefined
     return plainRow(row) as T | null
   }
 
   async all<T = Row>(): Promise<{ results: T[]; meta: Record<string, never> }> {
-    const rows = this.db.prepare(this.sql).all(...(this.args as never[])) as Row[]
+    const rows = this.stmt(this.sql).all(...(this.args as never[])) as Row[]
     return { results: rows.map((r) => ({ ...r })) as T[], meta: {} }
   }
 
   async raw<T = Row>(): Promise<unknown[][]> {
-    const rows = this.db.prepare(this.sql).all(...(this.args as never[])) as Row[]
+    const rows = this.stmt(this.sql).all(...(this.args as never[])) as Row[]
     return rows.map((r) => Object.values(r))
   }
 }
@@ -81,6 +93,22 @@ export function createD1(file: string) {
   const db = new DatabaseSync(file)
   // WAL：读不阻塞写；busy_timeout 防多进程（未来分实例）偶发锁冲突
   db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000; PRAGMA synchronous = NORMAL; PRAGMA foreign_keys = ON;')
+
+  const stmtCache = new Map<string, Prepared>()
+  function stmt(sql: string): Prepared {
+    // DDL / PRAGMA 可能改变 schema：旧 statement 里编译好的列信息会过期，整表作废最省心
+    if (SCHEMA_SQL.test(sql)) {
+      stmtCache.clear()
+      return db.prepare(sql)
+    }
+    let s = stmtCache.get(sql)
+    if (!s) {
+      if (stmtCache.size >= STMT_CACHE_MAX) stmtCache.clear()
+      s = db.prepare(sql)
+      stmtCache.set(sql, s)
+    }
+    return s
+  }
 
   async function batch(stmts: ShimStatement[]) {
     const out: ReturnType<ShimStatement['_runSync']>[] = []
@@ -96,16 +124,20 @@ export function createD1(file: string) {
   }
 
   return {
-    prepare: (sql: string) => new ShimStatement(db, sql),
+    prepare: (sql: string) => new ShimStatement(sql, stmt),
     batch,
-    // D1.exec 用于多语句脚本；node:sqlite 原生支持
+    // D1.exec 用于多语句脚本；node:sqlite 原生支持（脚本里通常带 DDL，先清缓存）
     exec: async (sql: string) => {
+      stmtCache.clear()
       db.exec(sql)
       return []
     },
     withSession: () => {
       throw new Error('[d1-shim] withSession 未实现（业务代码未用到）')
     },
-    close: () => db.close(),
+    close: () => {
+      stmtCache.clear()
+      db.close()
+    },
   }
 }

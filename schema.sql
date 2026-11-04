@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions (expires_at);
+-- 登录时「清本账号过期会话 + 计活跃会话数」都按 user_id 过滤，没这条索引就扫整张会话表
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at);
 
 -- 会员：访客注册的站内身份。架构红线：与 users/sessions 彻底分离（users 只承载管理员，
 -- /api/auth/setup 靠 countUsers()===0 判断首装，游客混入会破坏部署初始化流程），见 docs/ROADMAP.md 会员体系小节
@@ -57,6 +59,8 @@ CREATE TABLE IF NOT EXISTS member_sessions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_member_sessions_expiry ON member_sessions (expires_at);
+-- 会员登录同款膨胀防护：按 member_id 清过期 + 计活跃会话数
+CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at);
 
 -- 积分账本：每笔变动一条（规则键常量表在 src/points.ts），余额冗余在 members.points；
 -- delta 可为负（扣减 / 管理员调整），ref_id 关联对象（评论 id 等），0 = 无
@@ -183,6 +187,8 @@ CREATE TABLE IF NOT EXISTS comments (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments (post_id, created_at);
+-- idx_comments_qq 只进 src/db.ts SCHEMA_INDEXES：qq 是老库运行时 ALTER 补的列（同 idx_comments_parent 归位规矩），
+-- 本文件对老库执行时该列可能尚不存在，在这里建索引会直接报错
 -- idx_comments_weibo 由 src/db.ts ensureSchema() 在运行时创建：
 -- 老库执行本文件时 weibo_id 列尚不存在（ALTER 由运行时补齐），在这里建索引会报错
 -- （idx_comments_member 同理：挂在运行时补齐的 member_id 列上，只进 db.ts SCHEMA_INDEXES）
