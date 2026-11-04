@@ -22,6 +22,11 @@
 <body>
 <div id="app"></div>
 <div id="toast-slot"></div>
+<!-- 下面这行由自托管适配层（docker-poc/server.ts）在返回本文件时改写：注入一张
+     importmap 把 app.js / editor.js / emoji.js 一起挂上内容版本 ?v=<hash>，
+     否则后台改前端后，模块图里被静态 import 的 editor.js 仍会命中浏览器旧副本。
+     标记串（script type="module" src="./app.js"）与 src/assets.ts 里的 ADMIN_ENTRY_TAG
+     必须逐字一致，改这里请同步改那边。Workers 形态不注入，本行原样输出。 -->
 <script type="module" src="./app.js"></script>
 </body>
 </html>

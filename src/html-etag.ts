@@ -10,7 +10,12 @@ import type { Env, SessionUser } from './types'
  * Cloudflare 边缘缓存的副本也带这个 ETag，命中边缘时由 CF 直接回 304、不必回源。
  *
  * 注册位刻意在 pageCacheMiddleware 之前（src/index.ts）：洋葱模型下先注册者的后半段
- * 最后执行，边缘缓存命中的响应同样会经过这里，并直接复用副本上已有的 ETag，不重复算哈希。
+ * 最后执行，边缘缓存命中的响应也要经过这里，才有机会改写成 304。
+ *
+ * 注意：边缘副本里没有 ETag。pageCache 是在 next() 返回之后才 clone 入库的，那一刻本
+ * 中间件还没执行，所以存进去的响应不可能带 ETag。每个「命中边缘副本」的请求都要按内容
+ * 重算一次哈希——几十 KB 的 SHA-256 只有几十微秒，远便宜于跨境传一份完整 body。
+ * 「复用已有 ETag」的分支只在响应自带 ETag 时生效（上游/反代写入的情形）。
  *
  * 不依赖 caches.default——Node / docker-poc 一样生效；只碰 200 的 text/html，
  * /api、/images、RSS、503、404、带 Set-Cookie 的响应一律原样放行。
@@ -31,7 +36,7 @@ export async function htmlConditionalResponse(res: Response, ifNoneMatch: string
   // 带 Set-Cookie 的响应不做条件请求：304 会让浏览器漏掉这次的 Cookie 写入
   if (res.headers.has('set-cookie')) return res
 
-  // 边缘缓存回填的副本已带 ETag（首次响应算好后存进去的），直接复用，不重复读 body
+  // 响应自带 ETag（上游 / 反代已写入）时直接复用，省一次读 body + 摘要
   let etag = res.headers.get('ETag')
   if (!etag) {
     try {
