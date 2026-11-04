@@ -78,6 +78,14 @@ def image_size(path):
             head = f.read(64 * 1024)
     except OSError:
         return None
+    # 按魔数嗅探，**不信扩展名**：存量图里有 4 个 .jpg 其实是 PNG，
+    # 按扩展名选解析器会读不到尺寸，这批图就一直生成不出变体（静默漏掉，很难发现）
+    if head[:8] == b'\x89PNG\r\n\x1a\n':
+        return dims_png(head)
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        return dims_webp(head)
+    if head[:2] == b'\xff\xd8':
+        return dims_jpeg(head)
     low = path.lower()
     if low.endswith('.png'):
         return dims_png(head)
