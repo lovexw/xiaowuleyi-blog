@@ -49,6 +49,41 @@ log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 die() { log "错误：$*"; exit 1; }
 warn() { log "警告：$*"; }
 
+# ---------- 可选的 Cloudflare 边缘缓存清理（部署成功后调用） ----------
+# 前台 JS 已按内容哈希版本化（src/assets.ts），改前端不再需要强刷；但 HTML 本身在 CF
+# 边缘还缓存 300 秒，旧副本里的 ?v= 仍指向上一版。配上这个文件后每次部署顺手清一次，
+# 新页面立刻生效；没配就等边缘副本自然过期（最多 5 分钟），完全不影响部署。
+# 配置文件放在服务器本地 state 目录、不进 git：
+#   CF_API_TOKEN=<具备 Zone / Cache Purge / Purge 权限的令牌>
+#   CF_ZONE_IDS=<zone_id1>,<zone_id2>
+# 注意：本函数任何失败都只记警告，绝不把已经成功的部署翻成失败（脚本 set -euo pipefail）。
+purge_edge_cache() {
+  local conf="$STATE_DIR/cf-purge.env"
+  [ -f "$conf" ] || return 0
+  # shellcheck disable=SC1091
+  . "$conf" || { warn "CF 清缓存配置读取失败，跳过"; return 0; }
+  local token=${CF_API_TOKEN:-} zones=${CF_ZONE_IDS:-}
+  if [ -z "$token" ] || [ -z "$zones" ]; then
+    warn "CF 清缓存配置不完整（需 CF_API_TOKEN / CF_ZONE_IDS），跳过"
+    return 0
+  fi
+  local zone ok=0 total=0 body
+  for zone in ${zones//,/ }; do
+    total=$((total + 1))
+    body=$(curl -sS --max-time 15 -X POST \
+      -H "Authorization: Bearer $token" \
+      -H 'Content-Type: application/json' \
+      --data '{"purge_everything":true}' \
+      "https://api.cloudflare.com/client/v4/zones/$zone/purge_cache" 2>/dev/null) || body=''
+    case "$body" in
+      *'"success":true'*|*'"success": true'*) ok=$((ok + 1)) ;;
+      *) warn "zone $zone 清缓存未成功（多半是令牌缺 Cache Purge 权限），不影响本次部署" ;;
+    esac
+  done
+  log "Cloudflare 边缘缓存清理：$ok/$total 个 zone 成功"
+  return 0
+}
+
 # ---------- 参数 ----------
 mode=deploy
 case ${1:-} in
@@ -282,6 +317,7 @@ if [ ${#failed[@]} -eq 0 ]; then
   echo "$target" >"$STATE_DIR/last-good"
   rm -f "$STATE_DIR/last-failed"
   log "部署成功：$img 已覆盖全部实例（$(git_in log -1 --format=%s)）"
+  purge_edge_cache
   prune_images
   exit 0
 fi

@@ -4,6 +4,13 @@
 
   /* 英文测试版（English 0.1）：SSR 在 <html data-edition="en"> 上标记，前台 JS 文案随语言切换 */
   var EN = document.documentElement.getAttribute('data-edition') === 'en'
+  // 前台静态资源版本：服务端按 site.js + share-card.js 内容算好后放在 <html data-av>。
+  // 按需加载的模块必须拼同一个 ?v=，否则分享卡片改了仍旧拿浏览器缓存里的旧文件。
+  // 老版本 HTML（CDN 边缘副本）没有这个属性时退回原路径，与改动前行为一致。
+  var AV = document.documentElement.getAttribute('data-av') || ''
+  function avUrl(p) {
+    return AV ? p + '?v=' + AV : p
+  }
   var EN_STR = {
     '请求失败': 'Request failed',
     '上传失败': 'Upload failed',
@@ -1171,7 +1178,7 @@
     var card = btn.closest('.wb-card')
     if (!card || btn.dataset.busy) return
     btn.dataset.busy = '1'
-    import('/share-card.js')
+    import(avUrl('/share-card.js'))
       .then(function (m) {
         return m.openShareCard(card)
       })
@@ -1196,7 +1203,7 @@
     e.preventDefault()
     if (btn.dataset.busy) return
     btn.dataset.busy = '1'
-    import('/share-card.js')
+    import(avUrl('/share-card.js'))
       .then(function (m) {
         return m.openArticleShare(btn)
       })

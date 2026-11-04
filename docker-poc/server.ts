@@ -14,10 +14,12 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
 
 import xwblog from '../src/index'
+import { assetVersion, setAssetVersion } from '../src/assets'
 import { ensureSchema } from '../src/db'
 import { DEMO_RESET_CRON } from '../src/demo-content'
 import { createD1 } from './shims/d1'
@@ -50,6 +52,24 @@ const TRUST_PROXY: 'cf' | 'proxy' | 'off' =
 // 默认值按「打包产物在 docker-poc/dist/server.js」的层级推导：dist/../.. = 仓库根、
 // dist/.. = docker-poc/；Docker 里保持同样层级，仅 TENANTS_DIR 用环境变量指到挂载卷
 const PUBLIC_ROOT = path.resolve(process.env.PUBLIC_ROOT || path.resolve(__dirname, '../../public'))
+/**
+ * 前台 JS 内容寻址版本：把 public/site.js + share-card.js 的内容哈希挂到 HTML 的 ?v= 上。
+ * 只在启动时算一次，不进请求热路径；任一文件改动 → 版本变 → 浏览器必然重新下载，
+ * 从此改前端不必让用户 Cmd+Shift+R、也不必去 CF 后台手动 Purge。
+ * 文件缺失按空算并继续启动（裁剪镜像 / 旧快照），不让静态资源拖垮整个进程。
+ */
+function computeAssetVersion(): string {
+  const hash = createHash('sha1')
+  for (const name of ['site.js', 'share-card.js']) {
+    try {
+      hash.update(fs.readFileSync(path.join(PUBLIC_ROOT, name)))
+    } catch {
+      /* 不阻断启动 */
+    }
+  }
+  return hash.digest('hex').slice(0, 12)
+}
+setAssetVersion(computeAssetVersion())
 const TENANTS_DIR = path.resolve(process.env.TENANTS_DIR || path.resolve(__dirname, '../data/tenants'))
 const TENANTS_CONFIG = path.resolve(process.env.TENANTS_CONFIG || path.resolve(__dirname, '../tenants.json'))
 
@@ -300,7 +320,7 @@ function serveStatic(pathname: string, search: string): Response | null {
       continue
     }
     if (!fst.isFile()) continue
-    return applyAssetHeaders(
+    let resp = applyAssetHeaders(
       new Response(fs.readFileSync(f), {
         headers: {
           'Content-Type': MIME[path.extname(f).toLowerCase()] || 'application/octet-stream',
@@ -309,6 +329,16 @@ function serveStatic(pathname: string, search: string): Response | null {
       }),
       decoded
     )
+    // 带「当前」内容版本的 URL 才是内容寻址，可以给一年 immutable（复访连条件请求都省掉）。
+    // 只认与启动时算出的版本一致的 v：随便拼个 ?v=x 不该被永久缓存成内容对不上的副本。
+    // Workers 形态不注入版本，assetVersion() 恒为空，这里自然不命中，行为与改动前一致。
+    const v = new URLSearchParams(search).get('v')
+    if (v && v === assetVersion() && (decoded === '/site.js' || decoded === '/share-card.js')) {
+      const h = new Headers(resp.headers)
+      h.set('Cache-Control', 'public, max-age=31536000, immutable')
+      resp = new Response(resp.body, { status: resp.status, headers: h })
+    }
+    return resp
   }
   return null
 }
@@ -548,6 +578,7 @@ server.listen(PORT, () => {
   console.log(`\nxwblog 自托管 POC 已启动：http://127.0.0.1:${PORT}`)
   console.log(`  租户：${[...tenants.keys()].join('  ')}（*.localhost 浏览器自动解析到 127.0.0.1）`)
   console.log(`  静态根：${PUBLIC_ROOT}`)
+  console.log(`  前台 JS 版本：${assetVersion() || '(未注入，Workers 形态)'}`)
   console.log(`  数据根：${TENANTS_DIR}\n`)
 })
 

@@ -1,5 +1,6 @@
 import type { CommentRow, PostRow, SettingsMap } from './types'
 import type { PostSort, WeiboVideoView } from './db'
+import { assetUrl, assetVersion } from './assets'
 import { renderFooterHtml } from './hooks'
 import { outHref } from './outlink'
 import { cstDate, esc, excerpt, extractWeiboTopics, fmtDate, fmtDateCN, fmtDateTime, isoDate, NICKNAME_CHANGE_COOLDOWN_MS, nicknameCooldown } from './utils'
@@ -103,7 +104,7 @@ export function page(o: ThemePageOptions): string {
 <html lang="${en ? 'en' : 'zh-CN'}"${en ? ' data-edition="en"' : ''}${
     // 注册人机验证（Turnstile）：sitekey 是公开值，仅 /member 页下发给 site.js 懒挂载组件
     o.path === '/member' && o.settings.turnstileSiteKey ? ` data-turnstile="${esc(o.settings.turnstileSiteKey)}"` : ''
-  }>
+  }${assetVersion() ? ` data-av="${assetVersion()}"` : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -135,7 +136,7 @@ ${seoHeadHtml(o.settings)}
 ${en ? enBetaBannerHtml() : ''}
 ${o.demo ? demoBannerHtml() : ''}
 ${o.body}
-<script src="/site.js" defer></script>
+<script src="${assetUrl('/site.js')}" defer></script>
 ${renderFooterHtml(o.settings)}
 </body>
 </html>`

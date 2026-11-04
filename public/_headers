@@ -12,8 +12,11 @@
   Cross-Origin-Opener-Policy: same-origin
 
 # 前台静态资源缓存（复访提速，2026-10-14）：assets 默认 max-age=0 must-revalidate，
-# 复访者每次导航都要发条件请求验证（跨境访客一个 RTT）。site.js / share-card.js 改动随部署
-# 发布且无构建链无版本号，max-age 只给 1 小时时效窗口（部署后旧 JS 最多滞后 1 小时）；
+# 复访者每次导航都要发条件请求验证（跨境访客一个 RTT）。
+# 2026-11 起 site.js / share-card.js 由 src/assets.ts 按内容哈希挂 ?v=，URL 随内容变化；
+# 自托管 Node 适配层只对「带当前正确版本」的 URL 覆盖成一年 immutable
+# （见 docker-poc/server.ts serveStatic）。这里保留 1 小时作为 Workers 形态（无文件系统、
+# 不注入版本）与老的无版本 URL 的兜底，避免任何未版本化路径被永久缓存住旧内容。
 # emoji PNG 是 scripts/fetch-emoji.mjs 的稳定产物（码点同名不改内容），一年 immutable。
 # 后台 Service Worker（C10）：必须每次校验最新版——SW 自身被长缓存会让卸载/更新失效
 /admin/sw.js
