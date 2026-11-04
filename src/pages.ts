@@ -54,6 +54,7 @@ import {
   page,
   plural,
   rankListHtml,
+  responsiveContentImages,
   siteBase,
   siteMode,
   toHomePost,
@@ -693,10 +694,12 @@ export async function renderPost(c: C): Promise<Response> {
   // 命中的关键词包成链接对锁文试读段同样生效（正文可见部分口径一致）
   const fullHtml = pwLocked
     ? ''
-    : renderPostContentHtml(
-        settings,
-        replaceEmoji(stripCoverDuplicate(sanitizeHtml(row.content, { origin: url.origin }), row.cover)),
-        url.origin
+    : responsiveContentImages(
+        renderPostContentHtml(
+          settings,
+          replaceEmoji(stripCoverDuplicate(sanitizeHtml(row.content, { origin: url.origin }), row.cover)),
+          url.origin
+        )
       )
   const en = isEn(settings)
   // 评论圈层可见（src/commentgate.ts）：高档位会员的评论只对同档及以上会员与管理员可见——

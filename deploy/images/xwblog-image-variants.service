@@ -1,0 +1,21 @@
+[Unit]
+# 图床 WebP 变体补齐：把 uploads 里还没生成过变体的原图补成 <原图>@192/480/960.webp。
+#
+# 为什么放在宿主机而不是容器里：镜像刻意「无任何原生模块」（连 sqlite 都用 node 内置），
+# 塞 sharp 会引入 ~30MB 原生二进制并绑死 alpine/musl 构建。变体只是同目录下的静态文件，
+# 应用侧 /images 路由按 key 直读磁盘，根本不需要知道它们是何时生成的。
+#
+# 变体缺失时路由会回退原图（带 300s 短 TTL，等下一次跑完自然切到变体），所以：
+#   - 这个任务停了不会裂图，只会退化成「传原图」
+#   - 中途被杀也不会留下坏文件（先写 .tmp 再 rename）
+Description=xwblog image WebP variants (192/480/960)
+After=local-fs.target
+ConditionPathExists=/usr/bin/cwebp
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+# 逐个租户跑；前面加 `-` 表示某租户目录不存在时继续跑下一个，不整体失败
+ExecStart=-/usr/bin/python3 /opt/xwblog-app/deploy/images/gen-variants.py /opt/xwblog-data/blog.xiaowuleyi.com/uploads --jobs 2
+ExecStart=-/usr/bin/python3 /opt/xwblog-app/deploy/images/gen-variants.py /opt/btchao-blog/data/blog.btchao.com/uploads --jobs 2

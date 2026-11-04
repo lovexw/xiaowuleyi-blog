@@ -19,7 +19,7 @@ import { siteBase } from './render'
 import { buildRobotsTxt, contentSignalValue, indexNowKeyOk, readAiPolicy } from './seo'
 import { pluginConfig } from './hooks'
 import { purgeVisits } from './stats'
-import { mimeOfKey } from './store'
+import { mimeOfKey, variantBaseKey } from './store'
 import { purgeTrash } from './trash'
 import { purgeMemberVisits, recountWeiboCount, refreshFootStats, refreshOnThisDay } from './db'
 import type { Env, SessionUser } from './types'
@@ -375,11 +375,29 @@ app.get('/images/*', async (c) => {
   // If-None-Match 复验也先在边缘层做
   const hit = await imageCacheMatch(c.req.raw)
   if (hit) return hit
-  const obj = await c.env.IMAGES.get(key)
+  let obj = await c.env.IMAGES.get(key)
+  let fellBack = false
+  if (!obj) {
+    // 响应式变体（`<原图 key>@480.webp`）是宿主机预生成的静态文件。定时器还没跑到、
+    // 或者存量图从没生成过时，这里回退取原图——宁可多传几 KB，也不能让页面出现裂图。
+    // key 换成原图键：下面的 mime 兜底要按**真实字节**的扩展名补，不能按 @480.webp 判成 webp
+    const base = variantBaseKey(key)
+    if (base) {
+      obj = await c.env.IMAGES.get(base)
+      if (obj) {
+        key = base
+        fellBack = true
+      }
+    }
+  }
   if (!obj) return c.text('Not found', 404)
   // 缓存指令尊重 R2 对象自带的 httpMetadata.cacheControl（favicon 等「同键可覆盖」目录
-  // 写的是短 TTL，刷新才能收敛）；没写才兜底内容寻址媒体的 1y immutable
-  const cacheControl = obj.httpMetadata?.cacheControl || 'public, max-age=31536000, immutable'
+  // 写的是短 TTL，刷新才能收敛）；没写才兜底内容寻址媒体的 1y immutable。
+  // 回退到原图时必须给短 TTL：变体 URL 若被 immutable 钉住，等定时器补出真变体后
+  // 浏览器和边缘一年都不会再取——图不会裂，但永远优化不到
+  const cacheControl = fellBack
+    ? 'public, max-age=300'
+    : obj.httpMetadata?.cacheControl || 'public, max-age=31536000, immutable'
   if (obj.httpEtag && c.req.header('If-None-Match') === obj.httpEtag) {
     return new Response(null, {
       status: 304,
@@ -400,7 +418,8 @@ app.get('/images/*', async (c) => {
   // 禁止浏览器嗅探内容类型：图床里只允许真正的图片被当图片渲染
   headers.set('X-Content-Type-Options', 'nosniff')
   const res = new Response(obj.body, { headers })
-  imageCachePut(c.req.raw, res, c.executionCtx)
+  // 回退响应不进边缘图片缓存：它是「变体还没生成」的临时态，缓存下来会顶掉后续的真变体
+  if (!fellBack) imageCachePut(c.req.raw, res, c.executionCtx)
   return res
 })
 

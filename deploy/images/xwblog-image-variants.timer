@@ -1,0 +1,14 @@
+[Unit]
+# 每天凌晨补一次新图变体。挑 05:10 是因为：
+#   - 03:30 的树莓派备份要拉全站（含 uploads），让 cwebp 和 rsync 错开，别抢磁盘
+#   - 00:30 有站内备份 cron
+Description=Nightly xwblog image WebP variants
+
+[Timer]
+OnCalendar=*-*-* 05:10:00
+# 关机/停机错过的那次，开机后补跑
+Persistent=true
+RandomizedDelaySec=180
+
+[Install]
+WantedBy=timers.target

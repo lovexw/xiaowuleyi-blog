@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mimeOfKey, sniffImageExt, sniffUploadExt } from '../src/store.ts'
+import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mimeOfKey, sniffImageExt, sniffUploadExt, variantBaseKey } from '../src/store.ts'
 
 // ── 上传常量与白名单（AGENTS「上传常量与落库统一走 src/store.ts」）：
 // imageExtOf 必须走 hasOwnProperty——IMAGE_MIMES['constructor'] 是继承属性，直查表可穿透 ──
@@ -74,4 +74,24 @@ test('mimeOfKey：认不出的扩展名一律返回空，保持 octet-stream', (
   assert.equal(mimeOfKey('u/x.constructor'), '')
   assert.equal(mimeOfKey('u/x.toString'), '')
   assert.equal(mimeOfKey('u/x.__proto__'), '')
+})
+
+// ── 响应式变体键：模板输出 `<原图>@480.webp`，宿主机预生成同 key 的静态文件；
+//    没生成时 /images 路由靠它回退原图，否则新上传的图会一直裂图 ──
+test('variantBaseKey：变体键还原成原图键', () => {
+  assert.equal(variantBaseKey('u/202610/a.jpg@480.webp'), 'u/202610/a.jpg')
+  assert.equal(variantBaseKey('u/202610/a.png@192.webp'), 'u/202610/a.png')
+  assert.equal(variantBaseKey('og/202610/card.png@960.webp'), 'og/202610/card.png')
+  // 非变体形态一律 null
+  assert.equal(variantBaseKey('u/202610/a.jpg'), null)
+  assert.equal(variantBaseKey('u/202610/a.webp'), null)
+  assert.equal(variantBaseKey('u/202610/a.jpg@480.avif'), null)
+  assert.equal(variantBaseKey('u/202610/a.jpg@.webp'), null)
+  assert.equal(variantBaseKey('u/202610/a.jpg@12345.webp'), null)
+  // 原图不是会生成变体的格式：GIF/SVG/无扩展名都别白跑一次 get
+  assert.equal(variantBaseKey('u/202610/a.gif@480.webp'), null)
+  assert.equal(variantBaseKey('u/202610/a.svg@480.webp'), null)
+  assert.equal(variantBaseKey('u/202610/noext@480.webp'), null)
+  // 键名可控：不能让 @ 把它带出图床前缀，也不能二次剥离
+  assert.equal(variantBaseKey('u/202610/a.jpg@480.webp@960.webp'), 'u/202610/a.jpg@480.webp')
 })

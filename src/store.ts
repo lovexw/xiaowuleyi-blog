@@ -54,6 +54,21 @@ export function mimeOfKey(key: string): string {
   return Object.prototype.hasOwnProperty.call(MIME_BY_EXT, ext) ? MIME_BY_EXT[ext] : ''
 }
 
+/** 图床变体键 → 原图键：`u/202610/a.jpg@480.webp` → `u/202610/a.jpg`。
+ *  变体是 deploy/images/gen-variants.py 预生成的纯静态文件（key 直接映射磁盘），
+ *  应用侧只负责「变体没生成好就回退原图」——否则刚上传的图在定时器跑之前会 404。
+ *  不是变体形态、或原图不是会生成变体的那几种（gif/svg/ico）时返回 null。 */
+export function variantBaseKey(key: string): string | null {
+  const m = /^(.+)@\d{2,4}\.webp$/.exec(key)
+  if (!m) return null
+  const base = m[1]
+  const dot = base.lastIndexOf('.')
+  if (dot < 0) return null
+  const ext = base.slice(dot + 1).toLowerCase()
+  // 只有这几种会生成变体；其余白跑一次 R2 get 没意义
+  return ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'webp' ? base : null
+}
+
 /** 字节进 R2 图床并登记 uploads 表，返回站内地址。
  *  ext/mime 由调用方先过白名单（imageExtOf）或魔数识别（sniffImageExt）；
  *  dir 为图床目录（普通上传 u/，OG 卡图 og/），年月子目录由这里统一拼。

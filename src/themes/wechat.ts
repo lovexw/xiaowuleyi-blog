@@ -71,10 +71,25 @@ function sideCard(title: string, sub: string, body: string): string {
   return `<section class="wx-side-card"><h2 class="wx-side-title">${title}${sub ? `<span class="wx-side-sub">${sub}</span>` : ''}</h2>${body}</section>`
 }
 
+/** 站内图床图片 → 响应式变体地址。
+ *  变体（`<原图>@480.webp`）是 deploy/images/gen-variants.py 在宿主机预生成的静态文件，
+ *  /images 路由按 key 直读磁盘；真没生成时路由会回退原图，所以这里可以无条件改写。
+ *  外链图片（非 /images/ 开头）原样返回——那不是我们能生成变体的对象。 */
+function variant(url: string, w: number): string {
+  return url.startsWith('/images/') ? `${url}@${w}.webp` : url
+}
+
+/** 正文封面是唯一「按容器宽度铺满」的图，值得给 srcset 让浏览器自己挑。
+ *  外链封面没有变体，返回空串——输出重复 URL 的多档 srcset 只会让浏览器白选一次 */
+function coverSrcset(url: string): string {
+  if (!url.startsWith('/images/')) return ''
+  return ` srcset="${esc(variant(url, 480))} 480w, ${esc(variant(url, 960))} 960w" sizes="(max-width: 780px) 100vw, 760px"`
+}
+
 /** 站点头像：设置过 avatarUrl 用图片，否则退回站名首字 */
 function avatar(s: SettingsMap): string {
   if (s.avatarUrl) {
-    return `<img class="wx-avatar wx-avatar-img" src="${esc(s.avatarUrl)}" alt="${esc(s.siteName)}">`
+    return `<img class="wx-avatar wx-avatar-img" src="${esc(variant(s.avatarUrl, 192))}" alt="${esc(s.siteName)}">`
   }
   const en = isEn(s)
   const ch = (s.siteName || (en ? 'B' : '博')).trim().charAt(0) || (en ? 'B' : '博')
@@ -134,7 +149,7 @@ export function home(d: HomeData): string {
     ${p.summary ? `<p class="wx-post-abs">${esc(p.summary)}</p>` : ''}
     ${metaHtml}
   </div>
-  ${p.cover ? `<span class="wx-post-thumb"><img src="${esc(p.cover)}" loading="lazy" alt=""></span>` : ''}
+  ${p.cover ? `<span class="wx-post-thumb"><img src="${esc(variant(p.cover, 192))}" loading="lazy" decoding="async" alt=""></span>` : ''}
 </a>`
     })
     .join('\n')
@@ -186,7 +201,7 @@ export function post(d: PostData): string {
     ${d.related
       .map(
         (r) => `<a class="wx-related-item" href="/post/${esc(r.slug)}">
-  ${r.cover ? `<div class="wx-related-cover"><img src="${esc(r.cover)}" loading="lazy" alt=""></div>` : ''}
+  ${r.cover ? `<div class="wx-related-cover"><img src="${esc(variant(r.cover, 480))}" loading="lazy" decoding="async" alt=""></div>` : ''}
   <h3>${esc(r.title)}</h3><span>${en ? fmtDateEn(r.published_at) : fmtDateCN(r.published_at)}</span>
 </a>`
       )
@@ -228,7 +243,7 @@ export function post(d: PostData): string {
       <span class="wx-date">${en ? `${fmtDateEn(p.published_at)} · ${p.readingMinutes} min read${p.aiGenerated ? ' · AI-generated' : ''}` : `${fmtDateCN(p.published_at)} · ${p.readingMinutes} 分钟${p.aiGenerated ? ' · AI 生成' : ''}`}</span>
     </div>
   </div>
-  ${p.cover ? `<div class="wx-cover"><img src="${esc(p.cover)}" alt=""></div>` : ''}
+  ${p.cover ? `<div class="wx-cover"><img src="${esc(variant(p.cover, 960))}"${coverSrcset(p.cover)} alt=""></div>` : ''}
   <article class="rich" id="rich-content">${p.contentHtml}</article>
   ${p.locked ? paywallHtml(p.minTier, en, d) : ''}
   ${tagChips || catChip ? `<div class="wx-tags">${catChip}${tagChips}</div>` : ''}

@@ -660,6 +660,38 @@ export function stripCoverDuplicate(contentHtml: string, cover: string): string 
   return withoutP !== contentHtml ? withoutP : contentHtml.replace(img[0], '')
 }
 
+/**
+ * 正文 `<img>` → 响应式：站内图床图片补 srcset（480/960）与 sizes，全部补 loading/decoding。
+ *
+ * 变体（`<原图>@480.webp`）由 deploy/images/gen-variants.py 在宿主机预生成，/images 路由
+ * 按 key 直读磁盘；万一没生成，路由会回退原图，所以这里不需要探测存在性，也不会裂图。
+ * 外链图片只补 loading/decoding——那不是我们能生成变体的对象。
+ * 已经带 srcset 的原样返回：作者手写的响应式规则优先于我们的默认值。
+ */
+export function responsiveContentImages(html: string): string {
+  if (!html || !html.includes('<img')) return html
+  return html.replace(/<img\b([^>]*)>/gi, (tag: string, rawAttrs: string) => {
+    if (/\bsrcset\s*=/i.test(rawAttrs)) return tag
+    const srcMatch = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(rawAttrs)
+    if (!srcMatch) return tag
+    const src = (srcMatch[1] ?? srcMatch[2] ?? '').trim()
+    if (!src) return tag
+
+    const selfClose = /\/\s*$/.test(rawAttrs)
+    const attrs = selfClose ? rawAttrs.replace(/\/\s*$/, '') : rawAttrs
+    let extra = ''
+    // 已经是变体地址（或懒加载库的 data-srcset 占位）就别再叠一层
+    if (src.startsWith('/images/') && !/@\d{2,4}\.webp$/i.test(src) && !/\bdata-srcset\s*=/i.test(attrs)) {
+      const set = [480, 960].map((w) => `${src}@${w}.webp ${w}w`).join(', ')
+      extra += ` srcset="${set}" sizes="(max-width: 780px) 100vw, 720px"`
+    }
+    if (!/\bloading\s*=/i.test(attrs)) extra += ' loading="lazy"'
+    if (!/\bdecoding\s*=/i.test(attrs)) extra += ' decoding="async"'
+    if (!extra) return tag
+    return `<img${attrs}${extra}${selfClose ? ' /' : ''}>`
+  })
+}
+
 export function toHomePost(row: PostRow, tags: string[], commentCount?: number, readingMinutes?: number): HomePostView {
   return {
     slug: row.slug,
