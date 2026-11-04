@@ -160,11 +160,14 @@ export interface SpendResult {
 
 /**
  * 扣积分：账本与余额同一批（防漂移），余额不足整笔不生效。
- * - 余额守卫在 UPDATE 的 WHERE 里（`points >= ?`），并发两笔不会把余额扣成负数
  * - 幂等靠 (member_id, reason, ref_id) 部分唯一索引：refId 由调用方给，一次性动作传固定值
  *   （兑换档位传 1 = 这辈子只能兑换一次），重复请求撞索引即视为已兑换过
- * - 先插账本再扣余额：扣款失败时把刚插的账本行删掉补偿——顺序反过来做不到，
- *   因为「扣款成不成功」只有 UPDATE 的 changes 知道
+ * - **两条语句的谓词在同一事务里天然互斥**（与 awardPoints 的 capped 分支同款）：
+ *   ① 只在余额够时插账本行，② 只在余额够且本批账本行已存在时扣款。batch 是单个事务，
+ *   两条读到的余额是同一份快照，不会出现「① 成功 ② 失败」的中间态。
+ * - 旧实现是「先无条件插账本 → 扣款失败再在**批外** DELETE 补偿」：补偿 DELETE 一旦失败
+ *   （DB 抖动 / isolate 被回收），就留下一行负 delta 的幽灵账本；更糟的是它占住
+ *   (member_id, reason, ref_id) 唯一索引，会员这辈子都换不了档。现在不需要任何批外补偿。
  */
 export async function spendPoints(
   db: D1Database,
@@ -176,16 +179,32 @@ export async function spendPoints(
 ): Promise<SpendResult> {
   const amount = Math.trunc(cost)
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false, balance: await memberBalance(db, memberId), reason: 'poor' }
+  // 幂等键先用显式查一次，不能光靠「INSERT 撞唯一索引」判：余额不足时下面的条件 INSERT
+  // 根本不会尝试写，重复兑换会被误报成「积分不够」而不是「已经换过」。兑换是低频动作，
+  // 多这一次读很便宜；批内 UNIQUE 兜底仍保留，挡并发双击。
+  const dup = await db
+    .prepare('SELECT 1 AS x FROM member_points_log WHERE member_id = ? AND reason = ? AND ref_id = ? LIMIT 1')
+    .bind(memberId, reason, refId)
+    .first()
+  if (dup) return { ok: false, balance: await memberBalance(db, memberId), reason: 'dup' }
   const now = Date.now()
   try {
     const res = await db.batch([
       db
-        .prepare('INSERT INTO member_points_log (member_id, delta, reason, ref_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .bind(memberId, -amount, reason, refId, note, now),
-      db.prepare('UPDATE members SET points = points - ?, updated_at = ? WHERE id = ? AND points >= ?').bind(amount, now, memberId, amount),
+        .prepare(
+          `INSERT INTO member_points_log (member_id, delta, reason, ref_id, note, created_at)
+           SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM members WHERE id = ? AND points >= ?)`
+        )
+        .bind(memberId, -amount, reason, refId, note, now, memberId, amount),
+      db
+        .prepare(
+          `UPDATE members SET points = points - ?, updated_at = ? WHERE id = ? AND points >= ?
+             AND EXISTS (SELECT 1 FROM member_points_log WHERE member_id = ? AND reason = ? AND ref_id = ? AND created_at = ?)`
+        )
+        .bind(amount, now, memberId, amount, memberId, reason, refId, now),
     ])
-    if ((res[1].meta.changes ?? 0) === 0) {
-      await db.prepare('DELETE FROM member_points_log WHERE member_id = ? AND reason = ? AND ref_id = ?').bind(memberId, reason, refId).run()
+    // ① 没插（余额不够 / 会员不存在）或 ② 没扣，都按「积分不够」处理，账本一行不剩
+    if ((res[0].meta.changes ?? 0) === 0 || (res[1].meta.changes ?? 0) === 0) {
       return { ok: false, balance: await memberBalance(db, memberId), reason: 'poor' }
     }
   } catch (e) {

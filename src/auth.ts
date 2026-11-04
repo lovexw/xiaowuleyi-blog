@@ -141,7 +141,9 @@ export async function getMemberUser(db: D1Database, req: Request): Promise<Membe
   if (!token) return null
   return db
     .prepare(
-      "SELECT m.id, m.username, m.display_name, m.avatar, m.tier, m.points FROM member_sessions s JOIN members m ON m.id = s.member_id WHERE s.token = ? AND s.expires_at > ? AND m.status = 'active'"
+      // tier_expires_at 必须随会话带出：付费墙 / 评论门槛走 canReadTiers → effectiveTier 在读侧
+      // 即时判过期，缺这一列时过期会员会一直按存档的高档位放行（直到后台手工改档）。
+      "SELECT m.id, m.username, m.display_name, m.avatar, m.tier, m.tier_expires_at, m.points FROM member_sessions s JOIN members m ON m.id = s.member_id WHERE s.token = ? AND s.expires_at > ? AND m.status = 'active'"
     )
     .bind(await tokenHash(token), Date.now())
     .first<MemberSessionUser>()

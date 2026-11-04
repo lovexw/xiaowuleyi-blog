@@ -163,12 +163,14 @@ function canonicalQuery(entries: [string, string | number | undefined | null][])
 }
 
 // 浏览量去重：同一 IP 对同一篇文章 1 小时内只计 1 次（进程内缓存，尽力而为），
-// 否则每次刷新/爬虫抓取都会 +1
+// 否则每次刷新/爬虫抓取都会 +1。key 带 host：Node 容器一个进程托管多个站点，
+// 文章 id 各自独立，不带 host 会让 A 站的第 5 篇把 B 站第 5 篇的计数吃掉。
+// 注意本函数有「写入去重表」的副作用，一次请求只能调用一次，结果要复用。
 const viewSeen = new Map<string, number>()
 const VIEW_SEEN_MAX = 5000
-function shouldCountView(ip: string, postId: number): boolean {
+function shouldCountView(host: string, ip: string, postId: number): boolean {
   const now = Date.now()
-  const key = `${ip}:${postId}`
+  const key = `${host}:${ip}:${postId}`
   const last = viewSeen.get(key)
   if (last && now - last < 3600_000) return false
   viewSeen.set(key, now)
@@ -690,8 +692,14 @@ export async function renderPost(c: C): Promise<Response> {
   if (shareQr) share.qr = packMatrix(shareQr)
 
   // 预取 / 预渲染请求（Speculation Rules，B24）不计阅读量：hover 一下就 +1 是灌水，
-  // 用户主动导航的真实点击才计（一小时同 IP 同文的去重继续兜底）
-  if (row.status === 'published' && !isSpeculativeRequest(c.req.raw) && shouldCountView(clientIp(c.req.raw), row.id)) {
+  // 用户主动导航的真实点击才计（一小时同 IP 同文的去重继续兜底）。
+  // 只判定一次、结果给下面两处共用：shouldCountView 会把本次访问写进去重表，同一请求调两次
+  // 第二处必然拿到 false——会员浏览足迹因此一直没落库（2026-11 审查发现）。
+  const countThisView =
+    row.status === 'published' &&
+    !isSpeculativeRequest(c.req.raw) &&
+    shouldCountView(url.host, clientIp(c.req.raw), row.id)
+  if (countThisView) {
     c.executionCtx.waitUntil(
       c.env.DB.prepare('UPDATE posts SET views = views + 1 WHERE id = ?').bind(row.id).run()
     )
@@ -709,9 +717,9 @@ export async function renderPost(c: C): Promise<Response> {
   const tierDefs = parseMemberTiers(settings.memberTiers)
   const minTier = normalizeMinTier(row.min_tier)
   const locked = !pwLocked && !user && !canReadTiers(tierDefs, row.min_tier, member, Date.now())
-  // 会员浏览足迹（会员 3.0 预备）：与阅读计数同一套真实访问口径（非预取、published、限频），
+  // 会员浏览足迹（会员 3.0 预备）：与阅读计数同一套真实访问口径（复用上面的 countThisView），
   // 密码墙未解锁不记（没看到正文不算「浏览过」）；同文同日只留一行，写侧幂等
-  if (member && !pwLocked && row.status === 'published' && !isSpeculativeRequest(c.req.raw) && shouldCountView(clientIp(c.req.raw), row.id)) {
+  if (member && !pwLocked && countThisView) {
     c.executionCtx.waitUntil(recordMemberVisit(c.env.DB, member.id, row.id, row.title, fanDay(), Date.now()))
   }
   // 密码墙时正文一个字节都不出：连 sanitize 都不做，fullHtml 留空（teaser 分支不会被走到）。

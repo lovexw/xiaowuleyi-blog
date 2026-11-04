@@ -57,6 +57,9 @@ export interface MemberSessionUser {
   display_name: string
   avatar: string
   tier: MemberTier
+  /** 档位到期时间（毫秒）；读侧 effectiveTier / canReadTiers 据此即时降级，NULL = 不失效。
+   *  老库 ALTER 补列前可能缺省，所以是可选字段。 */
+  tier_expires_at?: number | null
   points: number
 }
 

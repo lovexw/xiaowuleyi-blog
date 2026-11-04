@@ -24,20 +24,32 @@ const TG_FILE_LIMIT = 20 * 1024 * 1024 // Bot API getFile 上限 20MB
 
 const TG_API = 'https://api.telegram.org'
 
-// TG webhook 幂等:Telegram 是至少一次投递,处理成功但响应超时/中断时会重投同一 update_id,
-// 表现为重复发博/重复转存。按内存短窗去重(与 rateLimit 同「尽力而为」口径,isolate 重建
-// 即失效);窗口取 5 分钟——盖住超时重投的正常窗口,又不堵死「处理中抛错后 TG 间隔重试」
-// 的恢复路(堵死 = 静默丢消息,比重复更糟)
+// TG webhook 幂等：Telegram 是「至少一次」投递，处理成功但响应超时/中断时会重投同一
+// update_id，表现为重复发博/重复转存。按内存短窗去重（与 rateLimit 同「尽力而为」口径，
+// isolate 重建即失效）；窗口取 5 分钟——盖住超时重投的正常窗口。
+// **只记「已处理完」的 update_id**：旧实现一进入 webhook 就写 seen，处理中途抛错后 TG
+// 重投会被当成成功吞掉，恰好把注释里想保住的恢复路堵死了（2026-11 审查发现）。
 const TG_UPDATE_TTL_MS = 5 * 60_000
-const tgSeenUpdates = new Map<number, number>()
-function tgUpdateSeen(updateId: number): boolean {
-  const now = Date.now()
-  if (tgSeenUpdates.size > 500) {
-    for (const [k, t] of tgSeenUpdates) if (now - t > TG_UPDATE_TTL_MS) tgSeenUpdates.delete(k)
+const tgDoneUpdates = new Map<number, number>()
+function tgPruneDone(now: number): void {
+  if (tgDoneUpdates.size <= 500) return
+  for (const [k, t] of tgDoneUpdates) if (now - t > TG_UPDATE_TTL_MS) tgDoneUpdates.delete(k)
+  while (tgDoneUpdates.size > 500) {
+    const oldest = tgDoneUpdates.keys().next().value
+    if (oldest === undefined) break
+    tgDoneUpdates.delete(oldest)
   }
-  const seenAt = tgSeenUpdates.get(updateId)
-  tgSeenUpdates.set(updateId, now)
-  return seenAt !== undefined && now - seenAt < TG_UPDATE_TTL_MS
+}
+/** 是否已成功处理过（只查不写）；now 可注入便于测试 TTL */
+export function tgUpdateDone(updateId: number, now = Date.now()): boolean {
+  tgPruneDone(now)
+  const doneAt = tgDoneUpdates.get(updateId)
+  return doneAt !== undefined && now - doneAt < TG_UPDATE_TTL_MS
+}
+/** 只有 handler 正常返回 2xx 后才调用；异常路径绝不调用 */
+export function tgMarkUpdateDone(updateId: number, now = Date.now()): void {
+  tgPruneDone(now)
+  tgDoneUpdates.set(updateId, now)
 }
 
 type AppEnv = { Bindings: Env; Variables: { user: SessionUser } }
@@ -456,6 +468,20 @@ async function flushMediaGroup(env: Env, botToken: string, groupId: string, fall
   }
 }
 
+/* 幂等判定放在中间件里，借 await next() 天然区分两条路：handler 抛错时 next() 会 reject，
+ * 后面的记账代码根本不会执行；只有正常返回 2xx 才记「已完成」，Telegram 重投时由上面的
+ * 短路挡住。成功但响应超时/中断的场景，记账发生在 handler 返回之前，同样不会重复发博。 */
+telegramRoutes.use('/webhook', async (c, next) => {
+  // clone 后只窥一眼 update_id，原 body 留给 handler 正常读（Request.clone 不消费原流）；
+  // 解析失败 / 没有 update_id 就退化为不去重，行为与旧版一致
+  const probe = (await c.req.raw.clone().json().catch(() => null)) as { update_id?: unknown } | null
+  const updateId = probe && typeof probe.update_id === 'number' ? probe.update_id : null
+  if (updateId !== null && tgUpdateDone(updateId)) return c.json({ ok: true })
+  await next()
+  // 401（secret 错）/ 403（未配置）/ 404（演示站）都不记账，TG 重投仍能进正常链路
+  if (updateId !== null && c.res.status >= 200 && c.res.status < 300) tgMarkUpdateDone(updateId)
+})
+
 telegramRoutes.post('/webhook', async (c) => {
   // 演示站禁外发：TG webhook 整条路都不存在（tgApi 内部还有兜底短路）
   if (isDemo(c.env)) return c.json({ ok: false }, 404)
@@ -472,9 +498,6 @@ telegramRoutes.post('/webhook', async (c) => {
   if (!secretOk) return c.json({ ok: false, error: 'bad secret' }, 401)
 
   const update = await c.req.json<TgUpdate>().catch(() => null)
-  if (update && typeof update.update_id === 'number' && tgUpdateSeen(update.update_id)) {
-    return c.json({ ok: true })
-  }
   const msg = update?.message // edited_message / channel_post 等一律忽略
   if (!msg || !msg.chat) return c.json({ ok: true })
   const chatId = String(msg.chat.id)

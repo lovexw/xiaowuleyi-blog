@@ -22,6 +22,10 @@ const BACKUP_TABLES = [
   'member_points_log',
   'member_visits',
   'member_likes',
+  // 邀请码与核销明细是运营资产：漏了它们，换服务器后所有已发出的码与使用记录全丢
+  // （且 used_count 与 members 的档位来源对不上，无法追溯谁凭哪个码进来的）
+  'invite_codes',
+  'invite_uses',
   'posts',
   'pages',
   'comments',

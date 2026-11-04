@@ -162,10 +162,10 @@ import { getBotStats } from './bots'
 import { fetchLinkMeta, fetchableUrl } from './linkmeta'
 import { BROWSER_UA, buildCardHtml, coverProxyHostOk, coverReferer, fetchDoubanDetail, probeRelay, resolveCardCover, sanitizeMediaItem, searchMedia, subjectIdFromUrl, validateRelay, type MediaItem } from './douban'
 import { THEMES } from './themes/registry'
-import type { CommentRow, Env, MemberRow, PostRow, SessionUser } from './types'
+import type { CommentRow, Env, MemberRow, PostRow, SessionUser, SettingsMap } from './types'
 import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanNickname, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isDemo, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, nicknameCooldown, normalizeLinkUrl, pageWindowCutoff, siteVisibleCutoff, slugify, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
 
-type AppEnv = { Bindings: Env; Variables: { user: SessionUser } }
+type AppEnv = { Bindings: Env; Variables: { user: SessionUser; memberSettings?: SettingsMap } }
 
 const VIDEO_MIMES: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -409,9 +409,21 @@ function memberView(
   return v
 }
 
-api.post('/member/register', async (c) => {
+/* ---------------- 会员功能总开关：/member/* 统一守卫 ----------------
+ * 以前每个会员路由各写一遍 membersEnabled 检查，新增接口漏一行就等于「关了会员功能还能调」。
+ * 这里统一挡一层，并把这次读到的 settings 放进 c.set 给 handler 复用，不增加额外 D1 查询。
+ * logout 例外：关闭会员功能后仍应能清掉浏览器里遗留的会话 Cookie（与旧行为一致）。 */
+api.use('/member/*', async (c, next) => {
+  if (c.req.path.endsWith('/member/logout')) return next()
   const settings = await getSettings(c.env.DB)
   if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  // handler 里改用 c.get('memberSettings') 复用这次读取，不多查一次库
+  c.set('memberSettings', settings)
+  await next()
+})
+
+api.post('/member/register', async (c) => {
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const ip = clientIp(c.req.raw)
   if (!rateLimit(`mreg:${ip}`, 5, 10 * 60_000)) return jsonError('注册太频繁，请稍后再试', 429)
   const body = await c.req
@@ -484,8 +496,7 @@ api.post('/member/register', async (c) => {
 })
 
 api.post('/member/login', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const ip = clientIp(c.req.raw)
   if (!rateLimit(`mlogin:${ip}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
   const body = await c.req.json<{ username?: string; password?: string }>().catch(() => null)
@@ -528,8 +539,7 @@ api.post('/member/logout', async (c) => {
 })
 
 api.get('/member/me', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const session = await getMemberUser(c.env.DB, c.req.raw)
   if (!session) return c.json({ member: null })
   const row = await getMemberById(c.env.DB, session.id)
@@ -572,8 +582,7 @@ async function fetchQQAvatar(env: Env, qq: string): Promise<string | null> {
 /** 每日签到（铁粉体系 3.0-M1）：+2 分、连续 ≥7 天当天额外 +1（streakBonus）、活跃天数同步累计。
  *  幂等三道：前置查 last_checkin_day、ref_id 北京日序号唯一索引、日上限 cap=1——连点/并发都只记一次 */
 api.post('/member/checkin', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   if (!rateLimit(`mcheckin:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const m = await getMemberUser(c.env.DB, c.req.raw)
   if (!m) return jsonError('请先登录', 401)
@@ -593,8 +602,7 @@ api.post('/member/checkin', async (c) => {
 })
 
 api.post('/member/redeem-premium', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   // 价格 0 = 未开放（默认）。站长在「会员 → 会员设置」填个数就开通，不需要额外的启用开关
   const cost = Math.trunc(Number(settings.premiumPointsCost || 0))
   if (!Number.isFinite(cost) || cost <= 0) return jsonError('积分兑换暂未开放')
@@ -626,8 +634,7 @@ api.post('/member/redeem-premium', async (c) => {
 })
 
 api.post('/member/profile', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const session = await getMemberUser(c.env.DB, c.req.raw)
   if (!session) return jsonError('请先登录', 401)
   const body = await c.req.json<{ nickname?: string; qq?: string }>().catch(() => null)
@@ -668,8 +675,7 @@ api.post('/member/profile', async (c) => {
 })
 
 api.post('/member/password', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const session = await getMemberUser(c.env.DB, c.req.raw)
   if (!session) return jsonError('请先登录', 401)
   // PBKDF2 是慢操作：按 IP 限流防滥用（口径同 /member/login）

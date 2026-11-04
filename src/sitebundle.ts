@@ -56,6 +56,8 @@ export const BUNDLE_TABLES = [
   'member_points_log',
   'member_visits',
   'member_likes',
+  'invite_codes',
+  'invite_uses',
   'posts',
   'pages',
   'comments',
