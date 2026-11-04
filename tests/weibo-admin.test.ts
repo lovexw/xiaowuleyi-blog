@@ -155,7 +155,7 @@ test('首页微博入口卡：视频卡无正文时兜底文案为「发了一�
     total: 1,
   })
   assert.match(html, /发了一段视频/)
-  assert.match(html, /wb-home-thumb"><img src="\/images\/u\/a\.jpg"/)
+  assert.match(html, /wb-home-thumb"><img src="\/images\/u\/a\.jpg@192\.webp"/)
 })
 
 // 镜像守卫（与 tests/outlink.test.ts 同款切片手法）：site.js 无构建链，把镜像段包成工厂在 Node 里跑，

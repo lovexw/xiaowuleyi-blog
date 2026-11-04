@@ -358,7 +358,7 @@ test('评论头像位：会员出站内头像图，游客与未绑头像的会�
     allowComments: true,
     count: 3,
   })
-  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/202610\/a\.png"/)
+  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/202610\/a\.png@192\.webp"/)
   assert.match(html, /<span class="cmt-avatar" aria-hidden="true">游<\/span>/)
   assert.match(html, /<span class="cmt-avatar" aria-hidden="true">小<\/span>/)
 })
@@ -371,7 +371,7 @@ test('评论头像位：作者（管理员）评论用站点头像，未设置�
     count: 1,
     adminAvatar: '/images/u/site.png',
   })
-  assert.match(withAvatar, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/site\.png"/)
+  assert.match(withAvatar, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/site\.png@192\.webp"/)
   assert.doesNotMatch(withAvatar, /<span class="cmt-avatar" aria-hidden="true">站<\/span>/, '有站点头像不再落首字块')
   // 会员头像优先于站点头像（is_admin 评论不会有 member_avatar，此条守优先级不回归）
   const both = commentsHtml({
@@ -381,7 +381,7 @@ test('评论头像位：作者（管理员）评论用站点头像，未设置�
     count: 1,
     adminAvatar: '/images/u/site.png',
   })
-  assert.match(both, /src="\/images\/u\/m\.png"/)
+  assert.match(both, /src="\/images\/u\/m\.png@192\.webp"/)
   const noAvatar = commentsHtml({
     comments: [cmt({ id: 1, is_admin: 1, nickname: '站长' })],
     slug: 'hello',
@@ -471,7 +471,7 @@ test('排行榜头像位：有 avatarUrl 出图，否则首字块', () => {
     { rank: 1, nickname: '小明', tier: 'top', points: 30, avatarUrl: '/images/u/a.png' },
     { rank: 2, nickname: '小红', tier: 'normal', points: 10 },
   ])
-  assert.match(html, /<img class="rk-avatar rk-avatar-img" src="\/images\/u\/a\.png"/)
+  assert.match(html, /<img class="rk-avatar rk-avatar-img" src="\/images\/u\/a\.png@192\.webp"/)
   assert.match(html, /<span class="rk-avatar" aria-hidden="true">小<\/span>/)
 })
 
@@ -500,9 +500,9 @@ test('SSR 评论头像位：游客自填 QQ 的站内头像出图；与会员头
     allowComments: true,
     count: 2,
   })
-  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/202610\/guest\.png"/, '游客头像位')
-  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/m\.png"/, '会员头像优先于行内 avatar')
-  assert.ok(!html.includes('/images/u/old.png'), '行内 avatar 被会员头像遮蔽时不输出')
+  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/202610\/guest\.png@192\.webp"/, '游客头像位')
+  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/m\.png@192\.webp"/, '会员头像优先于行内 avatar')
+  assert.ok(!html.includes('/images/u/old.png@192'), '行内 avatar 被会员头像遮蔽时不输出')
   assert.ok(!/<img[^>]*src="12345"/.test(html), 'qq 本体永不进公开 HTML')
 })
 

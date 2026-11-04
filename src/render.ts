@@ -448,7 +448,7 @@ export function footCardHtml(s: SettingsMap, en = false): string {
   }
   const ch = (s.siteName || (en ? 'B' : '博')).trim().charAt(0) || (en ? 'B' : '博')
   const avatar = s.avatarUrl
-    ? `<span class="fc-avatar"><img src="${esc(s.avatarUrl)}" alt="${esc(tr(en, s.siteName))}"></span>`
+    ? `<span class="fc-avatar"><img src="${esc(variantUrl(s.avatarUrl, 192))}" alt="${esc(tr(en, s.siteName))}"></span>`
     : `<span class="fc-avatar" aria-hidden="true">${esc(ch)}</span>`
   let statsHtml = ''
   if (stats) {
@@ -661,8 +661,18 @@ export function stripCoverDuplicate(contentHtml: string, cover: string): string 
 }
 
 /**
- * 正文 `<img>` → 响应式：站内图床图片补 srcset（480/960）与 sizes，全部补 loading/decoding。
+ * 站内图床图片 → 响应式变体地址（`<原图>@<宽>.webp`）。
  *
+ * 变体由 deploy/images/gen-variants.py 在宿主机预生成，/images 路由按 key 直读磁盘；
+ * 真没生成时路由会回退原图并给 300s 短 TTL，所以这里可以无条件改写，不会裂图。
+ * 外链图片原样返回——那不是我们能生成变体的对象。
+ */
+export function variantUrl(url: string, w: number): string {
+  return url.startsWith('/images/') ? `${url}@${w}.webp` : url
+}
+
+/**
+ * 正文 `<img>` → 响应式：站内图床图片补 srcset（480/960）与 sizes，全部补 loading/decoding。
  * 变体（`<原图>@480.webp`）由 deploy/images/gen-variants.py 在宿主机预生成，/images 路由
  * 按 key 直读磁盘；万一没生成，路由会回退原图，所以这里不需要探测存在性，也不会裂图。
  * 外链图片只补 loading/decoding——那不是我们能生成变体的对象。
@@ -967,7 +977,7 @@ export function weiboHomeEntry(o: { items: WeiboItemView[]; total: number; en?: 
             : `发了 ${w.images.length} 张图`
       const thumbUrl = w.images[0] || (w.video ? w.video.poster : '')
       const thumb = thumbUrl
-        ? `<span class="wb-home-thumb"><img src="${esc(thumbUrl)}" loading="lazy" alt=""></span>`
+        ? `<span class="wb-home-thumb"><img src="${esc(variantUrl(thumbUrl, 192))}" loading="lazy" decoding="async" alt=""></span>`
         : ''
       return `<a class="wb-home-item" href="/weibo?wb=${w.id}#wb-${w.id}">
   <div class="wb-home-main">
@@ -1150,7 +1160,7 @@ export interface RankEntryView {
 
 /** 会员头像位：有 avatarUrl 用图片，否则退回昵称首字；cls 传主题侧样式类（如 mem-avatar） */
 export function memberAvatarHtml(m: MemberView, cls: string): string {
-  if (m.avatarUrl) return `<img class="${cls} ${cls}-img" src="${esc(m.avatarUrl)}" alt="${esc(m.nickname)}">`
+  if (m.avatarUrl) return `<img class="${cls} ${cls}-img" src="${esc(variantUrl(m.avatarUrl, 192))}" alt="${esc(m.nickname)}">`
   const ch = (m.nickname || '客').trim().charAt(0) || '客'
   return `<span class="${cls}" aria-hidden="true">${esc(ch)}</span>`
 }
@@ -1159,10 +1169,10 @@ export function memberAvatarHtml(m: MemberView, cls: string): string {
  *  （settings.avatarUrl，与微博卡/后台侧栏同源）；其余退回昵称首字块。
  *  site.js 的微博评论渲染是本函数的 ES5 手工镜像，改任一侧记得同步 */
 function commentAvatarHtml(c: CommentRow, adminAvatar?: string): string {
-  if (c.member_avatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(c.member_avatar)}" alt="">`
-  if (c.is_admin && adminAvatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(adminAvatar)}" alt="">`
+  if (c.member_avatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(variantUrl(c.member_avatar, 192))}" loading="lazy" decoding="async" alt="">`
+  if (c.is_admin && adminAvatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(variantUrl(adminAvatar, 192))}" alt="">`
   // 游客自填 QQ 抓取转存的站内头像（C2 扩展）：qq 本体永不出参，这里只会是 /images/ 地址
-  if (c.avatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(c.avatar)}" alt="">`
+  if (c.avatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(variantUrl(c.avatar, 192))}" loading="lazy" decoding="async" alt="">`
   const ch = (c.nickname || '客').trim().charAt(0) || '客'
   return `<span class="cmt-avatar" aria-hidden="true">${esc(ch)}</span>`
 }
