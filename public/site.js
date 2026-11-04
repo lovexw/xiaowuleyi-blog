@@ -15,6 +15,7 @@
     '发送失败，请重试': 'Failed to post — please try again',
     '还没有评论，来抢沙发～': 'No comments yet — be the first!',
     '评论加载失败，稍后再试': 'Failed to load comments — try again later',
+    '点击重试': 'Retry',
     '回复': 'Reply',
     '取消': 'Cancel',
     '作者': 'Author',
@@ -1025,17 +1026,31 @@
     listEl.innerHTML = '<ul class="wb-cmt-list">' + tops.map(function (c, i) { return item(c, false, i + 1) }).join('') + '</ul>'
   }
 
-  function loadWeiboComments(panel) {
+  // 失败可重试：以前展开时先把 dataset.loaded 打上，一次瞬时失败（容器重建、跨境链路抖动、
+  // 隐私插件拦请求）就永久卡在「评论加载失败」，收起再展开也不会重拉，只能刷新整页。
+  // 现在：加载中单独标记防并发；成功才打 loaded；首次失败 700ms 自动重试一次；
+  // 再失败给明确的「点击重试」按钮并清掉标记，下次展开仍会重拉。
+  function loadWeiboComments(panel, retried) {
     var listEl = panel.querySelector('[data-role=list]')
     var wbId = panel.getAttribute('data-wb-cmt')
-    if (!listEl || !wbId) return
+    if (!listEl || !wbId || panel.dataset.loading === '1') return
+    panel.dataset.loading = '1'
     listEl.innerHTML = '<p class="wb-cmt-loading">' + T('加载中…') + '</p>'
     Promise.all([getJSON('/api/public/weibo/' + encodeURIComponent(wbId) + '/comments'), authState()])
       .then(function (rs) {
         renderWeiboComments(panel, (rs[0] && rs[0].comments) || [], !!(rs[1] && rs[1].user), (rs[0] && rs[0].adminAvatar) || '', (rs[0] && rs[0].memberName) || '', (rs[0] && rs[0].viewerRank) || 0)
+        panel.dataset.loaded = '1'
+        delete panel.dataset.loading
       })
       .catch(function () {
-        listEl.innerHTML = '<p class="wb-cmt-empty">' + T('评论加载失败，稍后再试') + '</p>'
+        delete panel.dataset.loading
+        delete panel.dataset.loaded
+        if (!retried) {
+          setTimeout(function () { loadWeiboComments(panel, true) }, 700)
+          return
+        }
+        listEl.innerHTML = '<p class="wb-cmt-empty">' + T('评论加载失败，稍后再试') +
+          ' <button type="button" class="wb-cmt-retry" style="margin-left:6px;padding:2px 10px;border:1px solid currentColor;border-radius:999px;background:transparent;color:inherit;font-size:12px;cursor:pointer">' + T('点击重试') + '</button></p>'
       })
   }
 
@@ -1050,10 +1065,17 @@
     var willShow = panel.hidden
     panel.hidden = !willShow
     toggle.setAttribute('aria-expanded', willShow ? 'true' : 'false')
-    if (willShow && !panel.dataset.loaded) {
-      panel.dataset.loaded = '1'
+    if (willShow && !panel.dataset.loaded && panel.dataset.loading !== '1') {
       loadWeiboComments(panel)
     }
+  })
+
+  // 失败提示里的「点击重试」：直接重拉，不必刷新整页
+  document.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest ? e.target.closest('.wb-cmt-retry') : null
+    if (!btn) return
+    var panel = btn.closest('.wb-cmt')
+    if (panel) loadWeiboComments(panel)
   })
 
   // 卡片内评论的「回复」（仅管理员可见的按钮由 JS 渲染）
