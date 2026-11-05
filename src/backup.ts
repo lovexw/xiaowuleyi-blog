@@ -26,6 +26,9 @@ const BACKUP_TABLES = [
   // （且 used_count 与 members 的档位来源对不上，无法追溯谁凭哪个码进来的）
   'invite_codes',
   'invite_uses',
+  // 跨站继承流水（src/partner.ts）：换机器后 members 里的 remote_issuer/remote_subject 还在，
+  // 但流水丢了就没法回答「这个永久会员是谁给他开的」——审计数据同积分账本口径
+  'partner_grants',
   'posts',
   'pages',
   'comments',

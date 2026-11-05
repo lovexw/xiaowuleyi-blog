@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS members (
   qq            TEXT    NOT NULL DEFAULT '',          -- 绑定的 QQ 号（仅头像抓取记账位，任何公开出参不携带）
   tier          TEXT    NOT NULL DEFAULT 'normal',    -- 档位 key（src/tiers.ts 自定义档位：settings.memberTiers 定义，顺序即等级）
   tier_expires_at INTEGER,                             -- 档位有效期（毫秒；NULL = 永久/不失效）。过期在读侧即时降级为基础档（不靠 cron）
-  tier_source   TEXT    NOT NULL DEFAULT '',           -- 档位来源：register 注册自带 / invite 邀请码 / points 积分兑换 / paid 付费 / manual 后台手改（空 = 历史数据）
+  tier_source   TEXT    NOT NULL DEFAULT '',           -- 档位来源：register 注册自带 / invite 邀请码 / points 积分兑换 / paid 付费 / partner 跨站继承 / manual 后台手改（空 = 历史数据）
+  remote_issuer TEXT    NOT NULL DEFAULT '',           -- 跨站会员继承（src/partner.ts）：来源站标识，如 btchao；空 = 本地原生会员
+  remote_subject TEXT   NOT NULL DEFAULT '',           -- 来源站的会员 id（稳定不变，用户名可改但 id 不改）
   points        INTEGER NOT NULL DEFAULT 0,           -- 当前积分余额（冗余，明细在 member_points_log）
   status        TEXT    NOT NULL DEFAULT 'active',    -- active | banned（封禁后禁登录与评论，历史评论保留）
   created_at    INTEGER NOT NULL,
@@ -49,6 +51,9 @@ CREATE TABLE IF NOT EXISTS members (
   last_checkin_day TEXT  NOT NULL DEFAULT ''           -- 最近签到日（同北京墙上日期口径）
 );
 CREATE INDEX IF NOT EXISTS idx_members_points ON members (points DESC);
+-- 跨站认领按邮箱找本地会员（src/partner.ts）：注册只 trim 没 lower，历史数据大小写混着有，
+-- 比较走 LOWER(email) —— 表达式索引才对得上；空邮箱不进索引（未填邮箱的会员不参与认领）
+CREATE INDEX IF NOT EXISTS idx_members_email_lower ON members (LOWER(email)) WHERE email <> '';
 
 -- 会员会话：独立于管理员 sessions（Cookie xw_member_session），独立 TTL 与清理，互不干扰
 CREATE TABLE IF NOT EXISTS member_sessions (
@@ -61,6 +66,24 @@ CREATE TABLE IF NOT EXISTS member_sessions (
 CREATE INDEX IF NOT EXISTS idx_member_sessions_expiry ON member_sessions (expires_at);
 -- 会员登录同款膨胀防护：按 member_id 清过期 + 计活跃会话数
 CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at);
+
+-- 跨站会员继承队列 + 流水（src/partner.ts，分站模式）：来源站推送过来的一条记录。
+-- member_id 0 = 待认领（本站还没有这个邮箱的会员）/ -1 = 认领冲突（该来源会员已绑别的账号）/ 正数 = 已授予的本地会员 id。
+-- 既是队列也是审计流水，后台「跨站继承」页直接读它；两站会员表互不读写，关联只落在 members.remote_* 上
+CREATE TABLE IF NOT EXISTS partner_grants (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  issuer     TEXT    NOT NULL,                     -- 来源站标识（如 btchao）
+  subject    TEXT    NOT NULL,                     -- 来源站的会员 id
+  email      TEXT    NOT NULL DEFAULT '',          -- 认领键（归一化小写；空 = 来源站会员没填邮箱）
+  member_id  INTEGER NOT NULL DEFAULT 0,           -- 见上：0 待认领 / -1 冲突 / 正数已认领
+  tier       TEXT    NOT NULL DEFAULT '',          -- 授予的档位 key（必须存在于本站 memberTiers）
+  note       TEXT    NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  claimed_at INTEGER
+);
+-- 同一来源会员只留一条：重复推送按更新处理（来源站改档位/邮箱再推一次）
+CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_grants_subject ON partner_grants (issuer, subject);
+CREATE INDEX IF NOT EXISTS idx_partner_grants_email ON partner_grants (email, member_id);
 
 -- 积分账本：每笔变动一条（规则键常量表在 src/points.ts），余额冗余在 members.points；
 -- delta 可为负（扣减 / 管理员调整），ref_id 关联对象（评论 id 等），0 = 无

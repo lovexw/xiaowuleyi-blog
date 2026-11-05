@@ -104,6 +104,7 @@ import { awardCommentPoints, awardPoints, bumpActiveDay, normalizeMinTier, spend
 import { fanDay, fanLevel, nextStreak } from './fanrank'
 import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, upgradeTarget, type MemberTierDef } from './tiers'
 import { genInviteCode, inviteStatus, normalizeInviteCode, normalizeMaxUses } from './invite'
+import { claimPartnerGrants, cleanPartnerGrant, normalizeEmail, PARTNER_ID_RE, pushPartnerGrant, receivePartnerGrant, revokePartnerGrant, verifyPartnerSignature } from './partner'
 import { applyCommentGate, canReplyGatedComment, commentGateRank, commentGateViewerRank, threadRootTier } from './commentgate'
 import { collectRoutes } from './collect'
 import { exportRoutes } from './export'
@@ -422,6 +423,31 @@ api.use('/member/*', async (c, next) => {
   await next()
 })
 
+/* ---------------- 跨站会员继承（src/partner.ts，分站模式） ---------------- */
+
+/**
+ * 接收来源站推送的会员继承记录。鉴权走 HMAC 签名（settings.partnerPushSecret），
+ * 不要求管理员会话——推送是从对方服务器发起的，那边没有本站的 Cookie。
+ * 幂等：同 (issuer, subject) 重复推送按更新处理，来源站改了档位再推一次不会产生两条记录。
+ */
+api.post('/partner/grant', async (c) => {
+  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
+  const secret = String(settings.partnerPushSecret || '').trim()
+  // 没配密钥 = 本站不参与继承。回 404 而不是 401：不向外暴露「这个功能存在但没开」
+  if (!secret) return jsonError('未开启跨站继承', 404)
+  // 签名已挡伪造，限流只为防「大量垃圾请求刷 HMAC」；量级放宽（批量同步几十条也够用）
+  if (!rateLimit(`pgrant:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('请求过于频繁', 429)
+  const g = cleanPartnerGrant(await c.req.json().catch(() => null))
+  if (!g) return jsonError('请求格式错误或时间戳超出窗口')
+  if (!(await verifyPartnerSignature(secret, g, c.req.header('X-Partner-Signature') || '')))
+    return jsonError('签名校验失败', 401)
+  const result = await receivePartnerGrant(c.env.DB, g, parseMemberTiers(settings.memberTiers))
+  // 档位不存在是最常见的配置错误（对方用 lifetime，本站只建了「永久会员」这种改名）：
+  // 明确回 400 而不是静默丢弃，站长在来源站后台能立刻看到推送失败的原因
+  if (result === 'unknown-tier') return jsonError(`本站未定义档位 ${g.tier}，请先在「设置 → 会员」里建好这一档`)
+  return c.json({ ok: true, result })
+})
+
 api.post('/member/register', async (c) => {
   const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const ip = clientIp(c.req.raw)
@@ -478,6 +504,10 @@ api.post('/member/register', async (c) => {
       .bind(def.key, expiresAt, now, memberId)
       .run()
   }
+  // 跨站会员继承（src/partner.ts）：填了邮箱的新会员立刻认领待认领记录。
+  // 「先在 btchao 付费、后来主站注册」这条最常见的时间顺序靠这一步兜住；
+  // 认领内部是「只升不降」，和上面的邀请码授予谁先谁后都不影响结果
+  if (email) await claimPartnerGrants(c.env.DB, memberId, email, parseMemberTiers(settings.memberTiers))
   const token = await createMemberSession(c.env.DB, memberId)
   c.header('Set-Cookie', memberSessionCookie(token, isSecureRequest(c.req.raw)))
   await awardPoints(c.env.DB, memberId, 'dailyLogin')
@@ -508,6 +538,14 @@ api.post('/member/login', async (c) => {
     if (safeEqual(hash, m.password_hash)) {
       // 先验口令再报封禁：不向未持有口令的人泄露账号状态（契约 A5：403 {error:'banned'}）
       if (m.status === 'banned') return jsonError('banned', 403)
+      // 跨站会员继承（src/partner.ts）：登录时再扫一遍待认领队列，覆盖「后台先推送、
+      // 本人后来才注册且当时没填邮箱（之后在会员中心补上）」和「推送晚于注册」两种顺序。
+      // 邮箱为空直接返回，绝大多数请求不多一次查询
+      let cur = m
+      if (m.email) {
+        const n = await claimPartnerGrants(c.env.DB, m.id, m.email, parseMemberTiers(settings.memberTiers))
+        if (n > 0) cur = (await getMemberById(c.env.DB, m.id)) ?? m
+      }
       const token = await createMemberSession(c.env.DB, m.id)
       // 会员会话同款膨胀防护（每日签到每天都会登录一次，30 天有效期堆积更快）
       await c.env.DB.prepare('DELETE FROM member_sessions WHERE member_id = ? AND expires_at <= ?').bind(m.id, Date.now()).run()
@@ -523,7 +561,7 @@ api.post('/member/login', async (c) => {
       await awardPoints(c.env.DB, m.id, 'dailyLogin')
       await bumpActiveDay(c.env.DB, m.id)
       await c.env.DB.prepare('UPDATE members SET last_login_at = ? WHERE id = ?').bind(Date.now(), m.id).run()
-      return c.json({ ok: true, member: memberView(m, true) })
+      return c.json({ ok: true, member: memberView(cur, true) })
     }
   } else {
     // 用户不存在也跑一次等开销哈希：响应耗时对齐，防时序侧信道枚举用户名（同 /auth/login 口径）
@@ -794,13 +832,72 @@ api.put('/admin/members/:id', async (c) => {
   if (!(await updateMemberAdmin(c.env.DB, id, patch))) return jsonError('会员不存在', 404)
   // 拉黑即踢下线（getMemberUser 查询层已挡 banned，这里把会话 token 一并清掉）
   if (patch.status === 'banned') await destroyMemberSessionsByMember(c.env.DB, id)
-  return c.json({ ok: true })
+  // 跨站会员继承（src/partner.ts）：本次分配的是**永久档**且本站配了推送目标时，
+  // 顺手把「这个人是付费会员」推给另一站。只在改档位这一刻推——会员数量级下这是唯一有意义的触发点，
+  // 不需要定时对账。推送失败不回滚本地授予（会员已经付过费，通道抖动最多让对方晚一步认领）
+  let partner: string | undefined
+  if (patch.tier) {
+    const def = tierByKey(defs, patch.tier)
+    const url = String(settings.partnerPushUrl || '').trim()
+    const secret = String(settings.partnerPushSecret || '').trim()
+    const selfId = String(settings.partnerSelfId || '').trim()
+    if (def?.permanent && url && secret && selfId) {
+      const row = await getMemberById(c.env.DB, id)
+      if (row?.email) {
+        const r = await pushPartnerGrant(url, secret, {
+          issuer: selfId,
+          subject: String(id),
+          email: normalizeEmail(row.email),
+          tier: def.key,
+          note: `${settings.siteName || ''} 永久档`.trim().slice(0, 60),
+          exp: Date.now(),
+        })
+        partner = r.ok ? `ok:${r.result ?? ''}` : `failed:${r.error ?? ''}`
+      } else partner = 'no-email'
+    }
+  }
+  return c.json({ ok: true, partner })
 })
 
 /** 档位定义只读出口（编辑器「谁能看」等管理面用）：定义本体走设置 PUT 的 memberTiers 键 */
 api.get('/admin/member-tiers', async (c) => {
   const settings = await getSettings(c.env.DB)
   return c.json({ tiers: parseMemberTiers(settings.memberTiers) })
+})
+
+/* ---------------- 跨站继承（src/partner.ts）：后台列表与撤销 ---------------- */
+
+/**
+ * 「跨站继承」页的数据源。member_id 的三种取值直接映射成三种状态：
+ * 0 待认领（目标站还没有这个邮箱的会员）/ -1 认领冲突（该来源会员已绑了别的账号）/ 正数 已授予。
+ * 列表按 id 倒序取 200 条：这是审计流水，不是分页表格，几十人的盘子够看很久。
+ */
+api.get('/admin/partner-grants', async (c) => {
+  const settings = await getSettings(c.env.DB)
+  const { results } = await c.env.DB.prepare(
+    `SELECT g.id, g.issuer, g.subject, g.email, g.member_id, g.tier, g.note, g.created_at, g.claimed_at,
+            m.username, m.tier AS member_tier
+     FROM partner_grants g LEFT JOIN members m ON m.id = g.member_id
+     ORDER BY g.id DESC LIMIT 200`
+  ).all()
+  return c.json({
+    grants: results ?? [],
+    tiers: parseMemberTiers(settings.memberTiers),
+    selfId: String(settings.partnerSelfId || ''),
+    pushUrl: String(settings.partnerPushUrl || ''),
+  })
+})
+
+/** 撤销继承：解除绑定 + 降回基础档。冒领争议、退款、误绑都靠这一下收场 */
+api.delete('/admin/partner-grants/:memberId', async (c) => {
+  const id = parseId(c.req.param('memberId'))
+  if (!id) return jsonError('会员不存在', 404)
+  const settings = await getSettings(c.env.DB)
+  const defs = parseMemberTiers(settings.memberTiers)
+  await revokePartnerGrant(c.env.DB, id, defs[0].key)
+  // 本地档位变了，页面缓存里的会员态可能过期
+  await purgePageCache(c.env.DB)
+  return c.json({ ok: true })
 })
 
 /* ---------------- 注册邀请码（src/invite.ts） ---------------- */
@@ -2548,6 +2645,28 @@ api.put('/admin/settings', async (c) => {
     if (key === 'premiumPaidNote') {
       // 付费获取优质会员的说明文案（没有在线支付通道，站长线下收款后手动改档位；这段文案告诉读者怎么找你）
       patch[key] = v.replace(/\s+/g, ' ').trim().slice(0, 200)
+      continue
+    }
+    if (key === 'partnerSelfId') {
+      // 跨站继承（src/partner.ts）：本站标识会落库进 partner_grants.issuer 并参与签名原文，
+      // 形态必须收敛——脏值 400，不静默降级（改标识等于把已有继承记录全变成「另一个来源」）
+      if (v && !PARTNER_ID_RE.test(v)) return jsonError('本站标识需为小写字母开头、24 位以内字母数字_-')
+      patch[key] = v
+      continue
+    }
+    if (key === 'partnerPushUrl') {
+      // 推送目标会成为服务端 fetch 的地址：只收 http(s) 绝对地址，末尾斜杠归一掉
+      // （拼接处统一是 `${base}/api/partner/grant`，多一个斜杠就是双斜杠路径）
+      if (v) {
+        let u: URL
+        try {
+          u = new URL(v)
+        } catch {
+          return jsonError('推送地址不是合法 URL')
+        }
+        if (u.protocol !== 'https:' && u.protocol !== 'http:') return jsonError('推送地址必须是 http(s) 地址')
+      }
+      patch[key] = v.trim().replace(/\/+$/, '')
       continue
     }
     if (key === 'commentGateTier') {

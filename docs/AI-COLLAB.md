@@ -22,6 +22,7 @@
 | 接口契约 | `docs/API.md` | 端点出参 / 净化白名单摘要 |
 | **部署 / 运维（主线）** | **`docs/DEPLOY-ORACLE.md`** | **唯一部署真相源**：服务器定时拉取、容器、数据目录、回滚 |
 | 主题 / 插件 | `docs/THEMES.md`、`docs/PLUGINS.md` | 各子系统的协议与规矩 |
+| 会员 / 跨站继承 | `docs/PARTNER.md` | 分站模式下的单向权益通道：数据模型、签名、两站配置、风险与防线 |
 | 下一批做什么 | `docs/ROADMAP.md` | 已折叠：保留的待办 + 已上线大事记 + 不做清单 |
 | 冻结形态的旧文档 | `docs/DEPLOY.md`、`docs/DEMO.md`、`docs/PLAZA.md`、`docs/CLOUDFLARE-BASICS.md` | 已挂冻结横幅，只在考古 / 对照时读，**不作为操作依据** |
 | 历史审计 / 提案 / 契约 | `docs/archive/` | 只在考古时读，日常不用管 |

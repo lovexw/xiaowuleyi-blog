@@ -140,6 +140,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // 付费获取优质会员的说明（≤200 字，空 = 不出）：本站无在线支付通道，读者线下付款后站长手动授予档位，
   // 这段文案负责告诉他「怎么付、找谁」。与邀请码、积分兑换并列为优质会员的三条来路
   premiumPaidNote: '',
+  // 跨站会员继承（src/partner.ts，2026-11）：分站模式下「来源站付费会员 → 本站永久会员」的单向通道。
+  // partnerSelfId  本站标识（小写字母开头，如 btchao / xiaowuleyi）——推送时告诉对方「我是谁」
+  // partnerPushUrl 推给谁（对方站点根地址，如 https://blog.xiaowuleyi.com；空 = 本站不向外推送）
+  // partnerPushSecret 两端共享的 HMAC 密钥（敏感键，SECRET_SETTINGS 打码）——发与收都用它
+  partnerSelfId: '',
+  partnerPushUrl: '',
+  partnerPushSecret: '',
   // 排行榜展示条数上限（/rank 页与首页挂件共用，1-50）
   rankTopN: '10',
   // 注册人机验证（Cloudflare Turnstile，A2 根治）：两键成对填写才启用（PUT 校验成对），都留空 = 关闭；
@@ -181,6 +188,8 @@ export const SECRET_SETTINGS = [
   'plazaToken',
   'commentWebhookUrl',
   'turnstileSecret',
+  // 跨站会员继承的共享密钥（src/partner.ts）：能签出「某个会员是付费会员」的凭证，等同发卡权
+  'partnerPushSecret',
 ]
 
 // settings 读取的共享快照层（Cache API）：生产 Workers 上 caches.default 是 colo 级共享——
@@ -1221,6 +1230,11 @@ const SCHEMA_COLUMNS: { table: string; column: string; ddl: string }[] = [
   // 档位来源（2026-11 会员第五批）：register 注册自带 / invite 邀请码 / points 积分兑换 / paid 付费 / manual 后台手改。
   // 只做运营标注与后台展示，不参与任何权限判定（权限一律看 members.tier + 生效档位）
   { table: 'members', column: 'tier_source', ddl: "ALTER TABLE members ADD COLUMN tier_source TEXT NOT NULL DEFAULT ''" },
+  // 跨站会员继承（src/partner.ts，2026-11）：本站账号对应**来源站**的哪个会员。
+  // 两站会员表互不读写，所有关联只落在这两列上；(remote_issuer, remote_subject) 唯一 = 一个来源会员
+  // 只能绑一个本地账号（先到先得，后台可撤）。空串 = 本地原生会员，不走继承
+  { table: 'members', column: 'remote_issuer', ddl: "ALTER TABLE members ADD COLUMN remote_issuer TEXT NOT NULL DEFAULT ''" },
+  { table: 'members', column: 'remote_subject', ddl: "ALTER TABLE members ADD COLUMN remote_subject TEXT NOT NULL DEFAULT ''" },
   // 邀请码多次核销（2026-11 会员第五批）：max_uses 0 = 不限 / 1 = 一码一人（默认）/ N = 限量 N 次；
   // used_count 冗余计数，原子核销拿它做条件判断（UPDATE ... WHERE used_count < max_uses）
   { table: 'invite_codes', column: 'max_uses', ddl: 'ALTER TABLE invite_codes ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 1' },
@@ -1249,6 +1263,8 @@ const SCHEMA_TABLES = [
     tier          TEXT    NOT NULL DEFAULT 'normal',
     tier_expires_at INTEGER,
     tier_source   TEXT    NOT NULL DEFAULT '',
+    remote_issuer TEXT    NOT NULL DEFAULT '',
+    remote_subject TEXT   NOT NULL DEFAULT '',
     points        INTEGER NOT NULL DEFAULT 0,
     status        TEXT    NOT NULL DEFAULT 'active',
     created_at    INTEGER NOT NULL,
@@ -1265,6 +1281,20 @@ const SCHEMA_TABLES = [
     member_id  INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL
+  )`,
+  // 跨站会员继承队列 + 流水（src/partner.ts）：来源站推送过来的一条记录，
+  // member_id 0 = 待认领（目标站还没有这个邮箱的会员）/ -1 = 认领冲突（来源会员已绑别的账号）/
+  // 正数 = 已授予的本地会员 id。既是队列也是审计流水，后台「跨站继承」页直接读它
+  `CREATE TABLE IF NOT EXISTS partner_grants (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    issuer     TEXT    NOT NULL,
+    subject    TEXT    NOT NULL,
+    email      TEXT    NOT NULL DEFAULT '',
+    member_id  INTEGER NOT NULL DEFAULT 0,
+    tier       TEXT    NOT NULL DEFAULT '',
+    note       TEXT    NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    claimed_at INTEGER
   )`,
   `CREATE TABLE IF NOT EXISTS member_points_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1439,6 +1469,15 @@ export const SCHEMA_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_member_sessions_expiry ON member_sessions (expires_at)',
   // 登录膨胀防护：DELETE WHERE member_id = ? AND expires_at <= ? / COUNT WHERE member_id = ?
   'CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at)',
+  // 跨站会员继承（src/partner.ts）：remote_issuer / remote_subject 是老库 ALTER 补的列 →
+  // 索引只能在这里建（归位规矩同 idx_comments_member）。部分唯一索引 = 一个来源会员只绑一个本地账号；
+  // 空串（本地原生会员）不进索引，否则全体会员会在 ('','') 上撞唯一约束
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_members_remote ON members (remote_issuer, remote_subject) WHERE remote_issuer <> ''",
+  // 待认领队列：注册/登录时按邮箱扫 member_id = 0 的行；同 (issuer, subject) 只留一条（重复推送按更新处理）
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_grants_subject ON partner_grants (issuer, subject)',
+  'CREATE INDEX IF NOT EXISTS idx_partner_grants_email ON partner_grants (email, member_id)',
+  // 邮箱大小写不统一是历史遗留（注册只 trim 没 lower）：认领比较走 LOWER(email)，表达式索引才对得上
+  'CREATE INDEX IF NOT EXISTS idx_members_email_lower ON members (LOWER(email)) WHERE email <> \'\'',
   // 管理员会话同款（sessions.user_id）；两个会话表都按账号维度收口，避免登录路径全表扫
   'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at)',
   // 邀请码核销明细（2026-11 会员第五批）：详情回查按码取最近 N 条；表由 SCHEMA_TABLES 建，索引在这里兜底

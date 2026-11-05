@@ -2070,7 +2070,7 @@ async function viewTrash() {
 const MEMBER_TIER_LABEL = { normal: '注册会员', premium: '优质会员', coffee: '咖啡会员', top: '付费会员（旧）' }
 
 /** 档位来源的展示名（members.tier_source）：只做运营标注，不参与任何权限判定 */
-const TIER_SOURCE_LABEL = { register: '注册自带', invite: '邀请码', points: '积分兑换', paid: '付费', manual: '手动授予' }
+const TIER_SOURCE_LABEL = { register: '注册自带', invite: '邀请码', points: '积分兑换', paid: '付费', partner: '跨站继承', manual: '手动授予' }
 
 /** 邀请码展示形态（与 src/invite.ts 的 formatInviteCode 同口径：ABCD1234 → ABCD-1234）。
  *  后台是纯前端模块，拿不到服务端模块，这里保留一份极小的镜像 */
@@ -2092,7 +2092,7 @@ function memberTierName(tiers, key) {
 async function viewMembers() {
   const q = new URLSearchParams(location.hash.split('?')[1] || '')
   const tabRaw = q.get('tab') || 'list'
-  const tab = tabRaw === 'settings' || tabRaw === 'invites' ? tabRaw : 'list'
+  const tab = tabRaw === 'settings' || tabRaw === 'invites' || tabRaw === 'partner' ? tabRaw : 'list'
   const page = parseInt(q.get('page') || '1', 10)
   const kw = (q.get('q') || '').trim()
   const st = q.get('status')
@@ -2106,6 +2106,8 @@ async function viewMembers() {
       loadMemberTierDraft(state.settings.memberTiers)
     } else if (tab === 'invites') {
       d = await api(`/admin/invites?page=${page}&status=${status}`)
+    } else if (tab === 'partner') {
+      d = await api('/admin/partner-grants')
     } else {
       d = await api(`/admin/members?page=${page}${kw ? `&q=${encodeURIComponent(kw)}` : ''}`)
     }
@@ -2149,6 +2151,7 @@ async function viewMembers() {
     <button class="tab${tab === 'list' ? ' is-active' : ''}" data-mtab="list" type="button">成员${tab === 'list' && d.total ? `（${d.total}）` : ''}</button>
     <button class="tab${tab === 'settings' ? ' is-active' : ''}" data-mtab="settings" type="button">会员设置</button>
     <button class="tab${tab === 'invites' ? ' is-active' : ''}" data-mtab="invites" type="button">邀请码</button>
+    <button class="tab${tab === 'partner' ? ' is-active' : ''}" data-mtab="partner" type="button">跨站继承</button>
   </div>`
   const listHtml = `<div class="toolbar">
       <input class="input" id="mb-search" placeholder="搜索用户名 / 邮箱…" value="${esc(kw)}">
@@ -2163,7 +2166,7 @@ async function viewMembers() {
       ${tab === 'settings' ? '<button class="btn btn-primary" id="btn-mem-save">保存会员设置</button>' : ''}
     </div>
     ${tabsHtml}
-    ${tab === 'settings' ? memberSettingsPane(state.settings) : tab === 'invites' ? invitesPane(d, status) : listHtml}`
+    ${tab === 'settings' ? memberSettingsPane(state.settings) : tab === 'invites' ? invitesPane(d, status) : tab === 'partner' ? partnerPane(d) : listHtml}`
   )
 
   // tab 切换走 hash：三个 tab 数据源不同，重挂视图最省心（也不会带着半截输入跨 tab）
@@ -2178,6 +2181,10 @@ async function viewMembers() {
   }
   if (tab === 'invites') {
     bindInvites(d, status)
+    return
+  }
+  if (tab === 'partner') {
+    bindPartner(d)
     return
   }
 
@@ -2218,11 +2225,12 @@ async function viewMembers() {
   })
 }
 
-/** 会员页三个 tab 的副标题（page-head 文案随 tab 变） */
+/** 会员页四个 tab 的副标题（page-head 文案随 tab 变） */
 const MEMBERS_TAB_SUB = {
   list: '站内注册的会员 · 评论与每日登录攒积分',
-  settings: '会员体系总开关、档位定义、优质会员的三条来路',
+  settings: '会员体系总开关、档位定义、优质会员的三条来路、跨站继承配置',
   invites: '邀请码：一人一码 / 限量 N 次 / 不限次数，凭码注册直接拿到指定档位',
+  partner: '另一个站的付费会员 → 本站永久会员 · 单向授予，两站会员表互不读写',
 }
 
 /** 会员设置面板（2026-11 从「设置 → 互动」整体迁入）：开关 + 档位定义 + 注册验证。
@@ -2283,6 +2291,24 @@ function memberSettingsPane(s) {
         <div class="sec-desc" style="margin-top:4px;">选中档位<strong>及以上</strong>的会员评论，只有同档及以上会员与管理员能看到正文、能回复；游客与低档会员只看到「这里有一条 XX 会员的评论」的占位块，正文与回复都不下发（文章、留言板、微博评论三处同口径）。选「关闭」= 评论对所有人可见。档位被删后该项按最严口径（所有会员评论仅会员可见）兜底，重新选一次即可恢复</div>
       </div>
     </div>
+  </div>
+
+  <div class="panel" style="padding:20px;">
+    <div class="form-section"><h3>跨站继承</h3>
+      <div class="sec-desc">分站模式：另一个站的付费会员，在本站自动获得指定的永久档。<b>两站会员表互不读写</b>，只通过这一条单向通道传递「谁是付费会员」——本站不会因为对方站到期而收回权益，也不会把本站会员推回去。会员数量级下不需要定时对账，<b>只在分配永久档的那一刻推一条</b></div>
+      <div class="form-item" style="max-width:420px;"><label>本站标识</label>
+        <input class="input" id="st-partnerSelfId" maxlength="24" placeholder="如 btchao / xiaowuleyi" value="${esc(s.partnerSelfId || '')}">
+        <div class="sec-desc" style="margin-top:4px;">小写字母开头、24 位以内字母数字 <code>_</code> <code>-</code>。对方站的记录里靠它区分来源；改标识会让已有记录变成「另一个来源」，别随便改</div>
+      </div>
+      <div class="form-item" style="max-width:420px;"><label>推送到（选填）</label>
+        <input class="input" id="st-partnerPushUrl" placeholder="https://blog.xiaowuleyi.com" value="${esc(s.partnerPushUrl || '')}">
+        <div class="sec-desc" style="margin-top:4px;">填了才向外推送；留空 = 本站只接收。地址填对方站点根地址（末尾不带斜杠），开永久档会员时会请求它的 <code>/api/partner/grant</code></div>
+      </div>
+      <div class="form-item" style="max-width:420px;"><label>共享密钥</label>
+        <input class="input" id="st-partnerPushSecret" type="password" autocomplete="new-password" placeholder="两端填同一个值" value="${esc(s.partnerPushSecret || '')}">
+        <div class="sec-desc" style="margin-top:4px;">推与收都用它做 HMAC 签名，<b>两站必须一致</b>。能签出「某个会员是付费会员」的凭证，等同发卡权——别贴到公开的地方。显示为掩码 = 保持原值不变</div>
+      </div>
+    </div>
   </div>`
 }
 
@@ -2313,6 +2339,10 @@ function bindMemberSettings() {
       memberTiers: JSON.stringify(memberTierDraft),
       turnstileSiteKey: g('st-turnstileSiteKey').value.trim(),
       turnstileSecret: g('st-turnstileSecret').value.trim(),
+      // 跨站继承（src/partner.ts）：密钥提交的是掩码时服务端跳过，不会把真值冲掉
+      partnerSelfId: g('st-partnerSelfId').value.trim(),
+      partnerPushUrl: g('st-partnerPushUrl').value.trim(),
+      partnerPushSecret: g('st-partnerPushSecret').value.trim(),
     }
     try {
       const d = await api('/admin/settings', { method: 'PUT', body })
@@ -2327,6 +2357,67 @@ function bindMemberSettings() {
       btn.disabled = false
     }
   })
+}
+
+/** 跨站继承面板（src/partner.ts，分站模式）：来源站推来的一条记录一行，三态一眼可辨。
+ *  0 待认领（本站还没有这个邮箱的会员）/ -1 认领冲突（该来源会员已绑别的账号）/ 正数 已授予 */
+function partnerPane(d) {
+  const tiers = d.tiers || []
+  const tierName = (key) => memberTierName(tiers, key)
+  const rows = (d.grants || [])
+    .map((g) => {
+      const mid = Number(g.member_id) || 0
+      const chip =
+        mid === -1
+          ? '<span class="chip chip-warn">认领冲突</span>'
+          : mid === 0
+            ? '<span class="chip chip-gray">待认领</span>'
+            : '<span class="chip chip-green">已授予</span>'
+      return `<div class="post-row" data-mid="${mid > 0 ? mid : ''}">
+      <div class="post-main">
+        <div class="post-title">${esc(g.issuer)} · #${esc(g.subject)}${chip}</div>
+        <div class="post-meta">
+          <span>${g.email ? esc(g.email) : '未填邮箱（无法自动认领）'}</span>
+          <span>→ ${esc(tierName(g.tier) || g.tier)}</span>
+          ${g.username ? `<span>已绑 ${esc(g.username)}</span>` : ''}
+          <span>推送于 ${fmtDateTime(g.created_at)}</span>
+          ${g.claimed_at ? `<span>认领于 ${fmtDateTime(g.claimed_at)}</span>` : ''}
+        </div>
+      </div>
+      <div class="post-ops">${mid > 0 ? '<button class="btn btn-ghost btn-sm btn-danger" data-act="revoke">撤销</button>' : ''}</div>
+    </div>`
+    })
+    .join('')
+  const selfId = d.selfId || ''
+  const pushUrl = d.pushUrl || ''
+  const cfg = selfId
+    ? `本站标识 <b>${esc(selfId)}</b>${pushUrl ? `；开永久档会员时推送到 <b>${esc(pushUrl)}</b>` : '；只接收，不向别的站推送'}`
+    : '本站还没设置标识——去「会员设置 → 跨站继承」填好，这条通道才开始工作'
+  return `<div class="panel" style="padding:16px 20px;margin-bottom:14px;">
+      <div style="font-size:13px;color:var(--sub);line-height:1.75;">${cfg}。<br>
+      认领靠<b>邮箱一致</b>：对方站会员在本站注册或登录时邮箱对上，自动升到指定的永久档；对不上就一直留在下面的待认领队列。<br>
+      一个来源会员只能绑一个本站账号（先到先得）；绑错了在这里点「撤销」，只降本站档位，不影响到对方站的身份。</div>
+    </div>
+    <div class="panel">${rows || '<div class="empty-box">还没有继承记录</div>'}</div>`
+}
+
+function bindPartner() {
+  $app.querySelectorAll('[data-act=revoke]').forEach((btn) =>
+    btn.addEventListener('click', async (e) => {
+      const mid = Number(e.currentTarget.closest('.post-row')?.dataset.mid)
+      if (!mid) return
+      if (!(await confirmBox('撤销这个会员的跨站继承？本站档位会降回基础档，对方站的会员身份不受影响。'))) return
+      e.currentTarget.disabled = true
+      try {
+        await api(`/admin/partner-grants/${mid}`, { method: 'DELETE' })
+        toast('已撤销继承')
+        navigate()
+      } catch (err) {
+        e.currentTarget.disabled = false
+        toast(err.message, true)
+      }
+    })
+  )
 }
 
 /** 邀请码面板：生成表单 + 列表（可用 / 已用完 / 已过期三态由 inviteStatus 同口径现算） */
