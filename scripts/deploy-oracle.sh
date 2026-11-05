@@ -166,6 +166,11 @@ health() { # 检查当前实例
 start_container() { # $1=镜像 $2=commit，作用于当前实例
   local img=$1 sha=$2
   ${DOCKER[@]} rm -f "$C_NAME" >/dev/null 2>&1 || true
+  # TRUST_PROXY=cf：链路是 CF 橙云 → 本机 openresty(80) → 容器，openresty 用
+  # `$proxy_add_x_forwarded_for` 把「CF 边缘 IP」追加到 XFF 末尾，而默认档 proxy 取末跳
+  # → 访客 IP 变成 172.7x 的 CF 边缘地址（全站共用一个限流桶、TG 登录告警里的 IP 也是它）。
+  # CF 会强制写入 CF-Connecting-IP，且 80 端口已用 iptables `CF_ONLY` 只放行 CF 回源段
+  # （直连伪造那个头进不来），所以取 cf 档：只认 CF 写的头，其余转发头一律丢弃。
   ${DOCKER[@]} run -d --name "$C_NAME" --restart unless-stopped \
     -p "${C_ADDR}:8787" \
     -v "${C_DATA}:/data/tenants" \
@@ -176,6 +181,7 @@ start_container() { # $1=镜像 $2=commit，作用于当前实例
     -e TENANTS_CONFIG=/app/docker-poc/tenants.json \
     -e PUBLIC_ROOT=/app/public \
     -e OPS_LOG_PATH=/data/tenants/ops.log \
+    -e TRUST_PROXY=cf \
     --label "xwblog.sha=${sha}" \
     "$img" >/dev/null
 }

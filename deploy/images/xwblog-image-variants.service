@@ -16,6 +16,13 @@ ConditionPathExists=/usr/bin/cwebp
 Type=oneshot
 Nice=10
 IOSchedulingClass=idle
+# 以数据属主身份跑（uid 1000 = 宿主机 opc = 容器内 node）。这是最小权限，不是洁癖：
+# 以 root 跑时，任何一步漏掉 chown，产物就会是 root:root，容器（node）随后写不进那个目录
+# ——2026-11-04 图床上传 EACCES 就是这么一类问题。降权后这条路径从根上不存在；
+# 脚本里那句 os.chown 会静默失败（except OSError），无所谓：产物天然就是 1000:1000。
+# 改完要 cp 到 /etc/systemd/system/ 再 systemctl daemon-reload 才生效。
+User=1000
+Group=1000
 # 逐个租户跑；前面加 `-` 表示某租户目录不存在时继续跑下一个，不整体失败
 ExecStart=-/usr/bin/python3 /opt/xwblog-app/deploy/images/gen-variants.py /opt/xwblog-data/blog.xiaowuleyi.com/uploads --jobs 2
 ExecStart=-/usr/bin/python3 /opt/xwblog-app/deploy/images/gen-variants.py /opt/btchao-blog/data/blog.btchao.com/uploads --jobs 2

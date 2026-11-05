@@ -60,6 +60,14 @@ sudo git clone https://github.com/lovexw/xiaowuleyi-blog.git /opt/xwblog-app
 cd /opt/xwblog-app && ./scripts/install-oracle-deploy.sh
 ```
 
+宿主机另有两个辅助定时器，不在上面这个安装脚本里，换机器要单独装（装完都要 `systemctl daemon-reload`）：
+
+| 单元 | 干什么 | 来源 |
+|---|---|---|
+| `xwblog-image-variants.timer` | 每天 05:10 给图床补 WebP 变体（192/480/960），缺了只会退化成「传原图」 | `deploy/images/xwblog-image-variants.{service,timer}`（`User=1000`，别改回 root） |
+| `xwblog-backup-snapshot.timer` | 每 30 分钟刷 `/opt/xwblog-backup` 的「可备份视图」，树莓派来拉它（见 `docs/BACKUP-RASPBERRY.md`） | `deploy/backup/systemd/xwblog-backup-snapshot.*` + `deploy/backup/snapshot.sh` |
+
+
 ## 日常：改完推上去就行
 
 ```bash
@@ -143,9 +151,13 @@ sudo docker run -d --name xwblog-next --restart unless-stopped \
   -e TENANTS_CONFIG=/app/docker-poc/tenants.json \
   -e PUBLIC_ROOT=/app/public \
   -e OPS_LOG_PATH=/data/tenants/ops.log \
+  -e TRUST_PROXY=cf \
   --label xwblog.sha=手动回滚 \
   xwblog:sha-<上一个短 sha>
 ```
+
+`-e TRUST_PROXY=cf` 与部署脚本必须一致：少了它，访客 IP 会被记成 CF 边缘地址（172.7x），
+所有访客共用一个限流桶，TG 登录告警里的 IP 也是错的。
 
 或者干脆在 GitHub 上把坏提交 revert 掉推上去——定时器会自己部署回来，这通常更省事，
 因为服务器状态始终等于 `main`。

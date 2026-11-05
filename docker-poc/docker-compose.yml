@@ -15,6 +15,9 @@ services:
       # 控制面操作日志显式落进挂载卷：缺省路径是 TENANTS_DIR/../ops.log（容器 /data 根，
       # root 属主且不挂卷——应用以 node 跑 appendFileSync 静默 EACCES，容器重建即丢）
       - OPS_LOG_PATH=/data/tenants/ops.log
+      # 访客 IP 信任档位：挂在 Cloudflare 橙云后面时必须取 cf（否则 IP 会记成 CF 边缘地址，
+      # 全站共用一个限流桶）；Caddy/nginx 本机反代直连用默认 proxy，不要设这一项
+      # - TRUST_PROXY=cf
     volumes:
       # Linux 上宿主目录若为 root 属主，容器入口 entrypoint.sh 会自动 chown 给 node，
       # 宿主机无需任何准备；数据落在 ./data/<域名>/（blog.db + uploads/）
