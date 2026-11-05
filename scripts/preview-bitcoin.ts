@@ -64,14 +64,14 @@ const tags = [
 type Post = {
   slug: string; title: string; summary: string; cover: string; tags: string[];
   category: { name: string; slug: string }; published_at: number; views: number;
-  likes: number; comments: number; pinned?: boolean; readingMinutes: number;
+  likes: number; comments: number; pinned?: boolean;
 }
 const posts: Post[] = [
-  { slug: 'run-your-own-node', title: '运行你自己的节点：从下载到验证第一个区块', summary: '信任的起点是自己验证。一条树莓派、一块 1TB 硬盘，一个晚上就能摆脱对第三方 API 的依赖——本篇从零开始。', cover: covers.node, tags: ['自托管', '比特币'], category: categories[1], published_at: now - 2 * DAY, views: 1284, likes: 96, comments: 12, pinned: true, readingMinutes: 9 },
-  { slug: 'halving-cycle-notes', title: '减半之后：一次非线性的周期观察', summary: '历史不会重押韵的韵脚，但供给曲线是确定的。把三轮减半后的链上数据并排放在一起看。', cover: covers.halving, tags: ['比特币', '宏观'], category: categories[0], published_at: now - 9 * DAY, views: 2310, likes: 143, comments: 21, readingMinutes: 12 },
-  { slug: 'self-custody-keys', title: '自己保管钥匙的十个工程细节', summary: '备份不是抄一遍助记词就完事：介质寿命、地理冗余、继承预案，每一条都值得单独一节。', cover: covers.keys, tags: ['自托管'], category: categories[1], published_at: now - 16 * DAY, views: 1892, likes: 118, comments: 9, readingMinutes: 15 },
-  { slug: 'lightning-in-practice', title: '闪电网络实测：小额支付的日常可行性', summary: '开了三张通道跑了三个月，收发合计 400 多笔——把能撑起日常的场景和还不行的都记下来。', cover: covers.chain, tags: ['闪电网络'], category: categories[1], published_at: now - 23 * DAY, views: 956, likes: 61, comments: 6, readingMinutes: 8 },
-  { slug: 'mempool-diary-41', title: 'Mempool 日记 #41：费率低谷是最好的广播窗口', summary: '周末凌晨的 1 sat/vB 窗口、RBF 替换的实操、以及一次被卡住 36 小时的交易复盘。', cover: covers.chain, tags: ['比特币'], category: categories[2], published_at: now - 31 * DAY, views: 743, likes: 40, comments: 3, readingMinutes: 6 },
+  { slug: 'run-your-own-node', title: '运行你自己的节点：从下载到验证第一个区块', summary: '信任的起点是自己验证。一条树莓派、一块 1TB 硬盘，一个晚上就能摆脱对第三方 API 的依赖——本篇从零开始。', cover: covers.node, tags: ['自托管', '比特币'], category: categories[1], published_at: now - 2 * DAY, views: 1284, likes: 96, comments: 12, pinned: true },
+  { slug: 'halving-cycle-notes', title: '减半之后：一次非线性的周期观察', summary: '历史不会重押韵的韵脚，但供给曲线是确定的。把三轮减半后的链上数据并排放在一起看。', cover: covers.halving, tags: ['比特币', '宏观'], category: categories[0], published_at: now - 9 * DAY, views: 2310, likes: 143, comments: 21 },
+  { slug: 'self-custody-keys', title: '自己保管钥匙的十个工程细节', summary: '备份不是抄一遍助记词就完事：介质寿命、地理冗余、继承预案，每一条都值得单独一节。', cover: covers.keys, tags: ['自托管'], category: categories[1], published_at: now - 16 * DAY, views: 1892, likes: 118, comments: 9 },
+  { slug: 'lightning-in-practice', title: '闪电网络实测：小额支付的日常可行性', summary: '开了三张通道跑了三个月，收发合计 400 多笔——把能撑起日常的场景和还不行的都记下来。', cover: covers.chain, tags: ['闪电网络'], category: categories[1], published_at: now - 23 * DAY, views: 956, likes: 61, comments: 6 },
+  { slug: 'mempool-diary-41', title: 'Mempool 日记 #41：费率低谷是最好的广播窗口', summary: '周末凌晨的 1 sat/vB 窗口、RBF 替换的实操、以及一次被卡住 36 小时的交易复盘。', cover: covers.chain, tags: ['比特币'], category: categories[2], published_at: now - 31 * DAY, views: 743, likes: 40, comments: 3 },
 ]
 const postOf = (p: Post, daysAgo: number) => ({ ...p, published_at: now - daysAgo * DAY })
 
@@ -134,7 +134,6 @@ pages.push({
         published_at: posts[0].published_at,
         views: posts[0].views,
         likes: posts[0].likes,
-        readingMinutes: posts[0].readingMinutes,
       },
       category: categories[1],
       categories,

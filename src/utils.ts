@@ -64,11 +64,6 @@ export function isoDate(ts: number | null | undefined): string {
   return new Date(ts + 8 * 3600_000).toISOString().replace(/\.\d{3}Z$/, '+08:00')
 }
 
-export function readingMinutes(html: string): number {
-  const n = plainText(html).replace(/\s/g, '').length
-  return Math.max(1, Math.ceil(n / 400))
-}
-
 /** 生成 slug：纯 ASCII 标题转 kebab-case；中文等非 ASCII 标题回退 dateSlug（北京日期 + 随机位） */
 export function slugify(title: string): string {
   const ascii = title

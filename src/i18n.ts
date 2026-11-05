@@ -60,7 +60,6 @@ const ZH_EN: Record<string, string> = {
   '目录': 'Contents',
   '文章信息': 'About this post',
   '发布于': 'Published',
-  '阅读时长': 'Reading time',
   '阅读量': 'Views',
   // 评论区
   '作者': 'Author',

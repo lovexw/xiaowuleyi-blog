@@ -142,7 +142,7 @@ export function post(d: PostData): string {
   ${masthead(d.settings, en, 'article')}
   <article class="nw-paper">
     <h1 class="nw-title">${esc(p.title)}</h1>
-    <div class="nw-meta">${p.authorName ? `<span>${en ? 'By' : '文'}/${esc(p.authorName)}</span><span>·</span>` : ''}<time>${en ? fmtDate(p.published_at) : fmtDate(p.published_at)}</time><span>·</span><span>${p.readingMinutes} ${en ? 'min read' : '分钟阅读'}</span><span>·</span><span>${p.views} ${en ? 'views' : '阅读'}</span>${p.aiGenerated ? `<span>·</span><span>${en ? 'AI-generated' : 'AI 生成'}</span>` : ''}</div>
+    <div class="nw-meta">${p.authorName ? `<span>${en ? 'By' : '文'}/${esc(p.authorName)}</span><span>·</span>` : ''}<time>${en ? fmtDate(p.published_at) : fmtDate(p.published_at)}</time><span>·</span><span>${p.views} ${en ? 'views' : '阅读'}</span>${p.aiGenerated ? `<span>·</span><span>${en ? 'AI-generated' : 'AI 生成'}</span>` : ''}</div>
     ${p.cover ? `<div class="nw-cover"><img src="${esc(p.cover)}" alt=""></div>` : ''}
     <div class="rich">${p.contentHtml}</div>
     ${p.locked ? paywallHtml(p.minTier, en, d) : ''}

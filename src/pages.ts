@@ -77,7 +77,7 @@ import type { MemberData, RankData } from './themes/registry'
 import type { Env, PostRow, SessionUser, SettingsMap } from './types'
 import { packMatrix, qrMatrix } from './qrcode'
 import { fanDay, fanLevel, fanLevelName } from './fanrank'
-import { clampInt, esc, excerpt, isDemo, readingMinutes, siteVisibleCutoff, teaserHtml, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { clampInt, esc, excerpt, isDemo, siteVisibleCutoff, teaserHtml, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
 import { analyticsOrigin, breadcrumbJsonLd, contentSignalValue, isSpeculativeRequest, readAiPolicy } from './seo'
 import { needsFontSrc } from './skinpack'
 
@@ -380,7 +380,7 @@ async function renderList(
     c.env.DB,
     r.items.map((p) => p.id)
   )
-  const posts = r.items.map((p) => toHomePost(p, parseTags(p), countMap.get(p.id) ?? 0, readingMinutes(p.content)))
+  const posts = r.items.map((p) => toHomePost(p, parseTags(p), countMap.get(p.id) ?? 0))
 
   const weibo = wb
     ? {
@@ -778,7 +778,6 @@ export async function renderPost(c: C): Promise<Response> {
       published_at: row.published_at,
       views: row.views,
       likes: row.likes,
-      readingMinutes: readingMinutes(row.content),
       minTier,
       locked,
       // AI 生成标注（编辑器自愿申报）：<人工智能生成合成内容标识办法> 显式标识口径，meta 行输出

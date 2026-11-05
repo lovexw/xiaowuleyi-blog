@@ -44,7 +44,6 @@ const postView: HomePostView = {
   likes: 2,
   pinned: false,
   commentCount: 1,
-  readingMinutes: 3,
 }
 const weiboView: WeiboItemView = {
   id: 7,
@@ -82,7 +81,6 @@ const postData = (): PostData => ({
     published_at: TS,
     views: 12,
     likes: 2,
-    readingMinutes: 3,
   },
   category: cat,
   categories: [cat],

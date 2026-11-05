@@ -274,7 +274,6 @@ export interface HomePostView {
   likes: number
   pinned: boolean
   commentCount?: number
-  readingMinutes?: number
 }
 
 /** 前台导航/文章页用的分类轻量视图 */
@@ -716,7 +715,7 @@ export function responsiveContentImages(html: string): string {
   })
 }
 
-export function toHomePost(row: PostRow, tags: string[], commentCount?: number, readingMinutes?: number): HomePostView {
+export function toHomePost(row: PostRow, tags: string[], commentCount?: number): HomePostView {
   return {
     slug: row.slug,
     title: row.title,
@@ -728,7 +727,6 @@ export function toHomePost(row: PostRow, tags: string[], commentCount?: number, 
     likes: row.likes,
     pinned: !!row.pinned,
     commentCount,
-    readingMinutes,
   }
 }
 

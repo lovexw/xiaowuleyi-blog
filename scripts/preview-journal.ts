@@ -66,7 +66,7 @@ const tags = [
 ]
 
 /* ---------- 文章列表 ---------- */
-function homePost(slug: string, title: string, summary: string, cover: string, tagList: string[], daysAgo: number, opts: Partial<{ views: number; likes: number; comments: number; pinned: boolean; minutes: number }> = {}) {
+function homePost(slug: string, title: string, summary: string, cover: string, tagList: string[], daysAgo: number, opts: Partial<{ views: number; likes: number; comments: number; pinned: boolean }> = {}) {
   return {
     slug,
     title,
@@ -78,17 +78,16 @@ function homePost(slug: string, title: string, summary: string, cover: string, t
     likes: opts.likes ?? 18,
     pinned: opts.pinned ?? false,
     commentCount: opts.comments ?? 3,
-    readingMinutes: opts.minutes ?? 4,
   }
 }
 
 const posts = [
-  homePost('balcony-autumn', '在阳台上种出一小片秋天', '搬把椅子坐在花盆前，看辣椒从青转红，看风把薄荷吹得摇摇晃晃。原来秋天不用去山里找。', covers.autumn, ['日常', '生活'], 2, { views: 1280, likes: 86, comments: 12, pinned: true, minutes: 5 }),
-  homePost('midnight-bookstore', '凌晨四点的城市，和一家二十四小时书店', '失眠的夜里我总去那里坐着。店员说，凌晨来的人各有各的故事，书只是借口。', covers.night, ['读书', '夜'], 6, { views: 2360, likes: 152, comments: 21, minutes: 8 }),
-  homePost('letter-to-past', '给三年前自己的一封信', '你担心的事情大多没有发生，发生了的你也 都扛过来了。慢慢来，真的。', '', ['日常'], 11, { views: 980, likes: 64, comments: 8, minutes: 3 }),
-  homePost('west-sichuan-ride', '川西小环线骑行记：四天，三百公里', '海拔四千米上气喘吁吁，下坡时冷风灌进袖口。经幡在垭口响，那一刻觉得一切都值。', covers.ride, ['骑行', '旅行'], 18, { views: 3120, likes: 205, comments: 33, minutes: 12 }),
-  homePost('pourover-coffee', '手冲咖啡入门：从一杯失败开始', '第一杯酸得像柠檬汁，第五杯终于有了回甘。记录一下踩过的坑和买错的器具。', ph(1200, 800, '#c9a27c', '#8a6544', '手冲的早晨'), ['咖啡', '日常'], 26, { views: 1560, likes: 77, comments: 9, minutes: 6 }),
-  homePost('rainy-library', '雨天的图书馆与一本旧词典', '在旧书区翻到一本 1987 年的词典，借书卡上的名字比我的年龄还大。', covers.rain, ['读书', '日常'], 34, { views: 760, likes: 41, comments: 5, minutes: 4 }),
+  homePost('balcony-autumn', '在阳台上种出一小片秋天', '搬把椅子坐在花盆前，看辣椒从青转红，看风把薄荷吹得摇摇晃晃。原来秋天不用去山里找。', covers.autumn, ['日常', '生活'], 2, { views: 1280, likes: 86, comments: 12, pinned: true }),
+  homePost('midnight-bookstore', '凌晨四点的城市，和一家二十四小时书店', '失眠的夜里我总去那里坐着。店员说，凌晨来的人各有各的故事，书只是借口。', covers.night, ['读书', '夜'], 6, { views: 2360, likes: 152, comments: 21 }),
+  homePost('letter-to-past', '给三年前自己的一封信', '你担心的事情大多没有发生，发生了的你也 都扛过来了。慢慢来，真的。', '', ['日常'], 11, { views: 980, likes: 64, comments: 8 }),
+  homePost('west-sichuan-ride', '川西小环线骑行记：四天，三百公里', '海拔四千米上气喘吁吁，下坡时冷风灌进袖口。经幡在垭口响，那一刻觉得一切都值。', covers.ride, ['骑行', '旅行'], 18, { views: 3120, likes: 205, comments: 33 }),
+  homePost('pourover-coffee', '手冲咖啡入门：从一杯失败开始', '第一杯酸得像柠檬汁，第五杯终于有了回甘。记录一下踩过的坑和买错的器具。', ph(1200, 800, '#c9a27c', '#8a6544', '手冲的早晨'), ['咖啡', '日常'], 26, { views: 1560, likes: 77, comments: 9 }),
+  homePost('rainy-library', '雨天的图书馆与一本旧词典', '在旧书区翻到一本 1987 年的词典，借书卡上的名字比我的年龄还大。', covers.rain, ['读书', '日常'], 34, { views: 760, likes: 41, comments: 5 }),
 ]
 
 /* ---------- 微博 ---------- */
@@ -217,7 +216,6 @@ pages.push({
         published_at: posts[0].published_at,
         views: posts[0].views,
         likes: posts[0].likes,
-        readingMinutes: posts[0].readingMinutes,
       },
       category: categories[0],
       categories,

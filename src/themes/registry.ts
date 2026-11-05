@@ -137,7 +137,6 @@ export interface PostData {
   authorName?: string
     views: number
     likes: number
-    readingMinutes: number
     /** 谁能看档位（编辑器「谁能看」选择，缺省 'all' 全员可见；'member' = 登录会员可见；
      *  会员 3.0 预备起也可以是自定义档位 key（settings.memberTiers），付费墙文案由 paywallHtml 按 settings 解析） */
     minTier?: string
