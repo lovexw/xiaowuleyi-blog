@@ -1,5 +1,8 @@
 # 甲骨文自托管实例的自动部署
 
+> **这是本项目唯一的部署真相源（2026-11-05 起）。** 涉及"生产怎么跑的、怎么回滚、数据在哪"，
+> 一律以本文为准。Cloudflare 与演示站等形态已冻结，见 [MAINTENANCE.md](MAINTENANCE.md)。
+
 > 一句话：**代码只改 GitHub，服务器只负责拉取和重建。** 推送到 `main` 后，服务器上的
 > systemd 定时器会在 2 分钟内发现新提交，用 ARM 原生构建出新镜像并替换容器，健康检查失败自动回滚。
 
@@ -167,17 +170,19 @@ cd /opt/xwblog-app && ./scripts/install-oracle-deploy.sh --uninstall
 
 ## 与 Cloudflare 的关系
 
-仓库曾经连着 Cloudflare Workers Builds，push `main` 会同时部署到 CF（GitHub Actions 里的
-`deploy.yml` 因为没有 `CLOUDFLARE_API_TOKEN` 一直是 skipped，真正干活的是 Workers Builds）。
-现在部署目标是甲骨文，**需要在 Cloudflare 控制台断开 Git 集成**，否则每次 push 仍会同时更新 CF：
+仓库曾经连着 Cloudflare Workers Builds，push `main` 会同时部署到 CF。**2026-11-05 起 CF 形态冻结**，
+`.github/workflows/deploy.yml` 已删除，仓库里不再有任何指向 Cloudflare 的部署入口。
+
+但有一件事改仓库文件管不到：**Cloudflare 控制台侧的 Git 集成**。如果那个 Worker 上还连着，每次
+push 仍会同时更新 CF（白烧构建额度，还可能让 CF 上留一份旧代码）。要去断：
 
 Workers & Pages → 选中该 Worker → Settings → Build → 断开 Git / 关闭自动部署。
 
-`.github/workflows/deploy.yml` 已改为只能手动触发（`workflow_dispatch`），从此 push 不会
-再经 Actions 部署到 CF；即使哪天补上 secrets 也不会误触发。
+> 判断方法：Cloudflare 控制台 → 该 Worker → Deployments，若最近还有你 push 的时间点对应的部署记录，
+> 说明集成仍活着。
 
 注意：断开后，只要域名还解析到 Cloudflare，**线上站点会冻结在最后部署的那版**，直到把
-`blog.xiaowuleyi.com` 切到甲骨文（见下一节）。
+`blog.xiaowuleyi.com` 切到甲骨文（见下一节）。本机当前线上已由甲骨文容器服务（2026-11-05 实测）。
 
 ## 域名接入：CF 橙云回源 80
 

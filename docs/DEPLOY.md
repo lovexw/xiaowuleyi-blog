@@ -1,5 +1,10 @@
 # 博客号 BlogHao 完整部署教程
 
+> **⚠️ 已冻结（2026-11-05）**：项目已转为站长自用，**Cloudflare 部署形态不再维护更新**。
+> 现行唯一生产形态是甲骨文服务器 Docker 自托管，部署请读 **[DEPLOY-ORACLE.md](DEPLOY-ORACLE.md)**；
+> 冻结范围与理由见 [MAINTENANCE.md](MAINTENANCE.md)。本文保留作为历史参照——里面的命令不一定还能跑通，
+> 平台界面也可能已经变了，别再照着操作。
+
 从零开始，把这套博客部署到 Cloudflare（全程可使用免费套餐）。不想把代码跑在 Cloudflare 上、想用自己的服务器？见下方「方式三：Docker 自托管」。
 
 > 在线示例：**https://blog.xiaowuleyi.com**（作者实例；Worker 名 `xwblog`，数据库 `xwblog-db`，图床桶 `xwblog-images`，与仓库内 wrangler.jsonc 一致）。给自己部署一套时，资源名可以原样沿用，也可以自行替换——与你的 wrangler.jsonc 保持一致即可。

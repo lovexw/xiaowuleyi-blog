@@ -14,14 +14,16 @@
 | 任务场景 | 读哪份 | 说明 |
 | --- | --- | --- |
 | 任何改动（每次） | `AGENTS.md` + 本页 | AGENTS.md 是宪法：防线、红线、结构速查全在里面 |
+| **改之前先确认边界** | `docs/MAINTENANCE.md` | **自用项目**：只有甲骨文自托管是主线；CF 部署 / 多租户托管 / 演示站 / 广场 / 官网全部冻结，别顺手去改 |
 | 改 UI（前台 / 后台 / 编辑器） | `docs/MOBILE-UX.md` | 移动端是硬要求，改前读检查清单 |
 | 前台「微信同款」阅读增强 | `docs/WECHAT-PLAYBOOK.md` | 设计语言拆解 + 能力门槛红线，做这类功能才读 |
 | 发布新版本 | `docs/RELEASING.md` | 版本号规则、挑洗、CHANGELOG 回填 |
 | 用户功能口径 | `docs/GUIDE.md` | 使用手册；功能怎么用以它为准 |
 | 接口契约 | `docs/API.md` | 端点出参 / 净化白名单摘要 |
-| 部署 / 自托管 | `docs/DEPLOY.md`、`docs/UPDATING.md` | Cloudflare 与 Docker 两条路 + 更新中心 |
-| 广场 / 主题 / 插件 / 演示站 | `docs/PLAZA.md`、`docs/THEMES.md`、`docs/PLUGINS.md`、`docs/DEMO.md` | 各子系统的协议与规矩 |
+| **部署 / 运维（主线）** | **`docs/DEPLOY-ORACLE.md`** | **唯一部署真相源**：服务器定时拉取、容器、数据目录、回滚 |
+| 主题 / 插件 | `docs/THEMES.md`、`docs/PLUGINS.md` | 各子系统的协议与规矩 |
 | 下一批做什么 | `docs/ROADMAP.md` | 已折叠：保留的待办 + 已上线大事记 + 不做清单 |
+| 冻结形态的旧文档 | `docs/DEPLOY.md`、`docs/DEMO.md`、`docs/PLAZA.md`、`docs/CLOUDFLARE-BASICS.md` | 已挂冻结横幅，只在考古 / 对照时读，**不作为操作依据** |
 | 历史审计 / 提案 / 契约 | `docs/archive/` | 只在考古时读，日常不用管 |
 
 ---
@@ -32,11 +34,13 @@
 2. **跑基线**：`npm run typecheck` + `npm test`，确认**现在是绿的**。一开始就红，先查清是不是环境问题，别在红基线上叠改动。
 3. **说清范围**：3–5 句话说明「这次改什么、不碰什么、怎么验证」，再动手。
 
-> 为什么这么严：这个仓库**推送即上线**（Cloudflare Workers Builds 自动部署主站），没有缓冲带。
+> 为什么这么严：这个仓库**推送即上线**——`git push origin main` 后，甲骨文服务器上的 systemd 定时器
+> 最多 2 分钟就会发现新提交，自动重建镜像并替换容器（健康检查失败会自动回滚到上一个镜像）。
+> 没有灰度、没有缓冲带，测试是唯一的刹车。
 
 ## 3. 干活红线（8 条，本项目专属）
 
-1. **推送即上线，测试是唯一的刹车**——`git push origin main` 自动部署主站，CI 报红拦不住部署，所以 typecheck + test 全绿是推送前置条件；不推 `upstream`（官方仓冻结，站长明确说「发布」才走 RELEASING.md）；提交信息用中文前缀（`fix:` / `feat:` / `docs:` / `theme:`…）。
+1. **推送即上线，测试是唯一的刹车**——`git push origin main` 后服务器 2 分钟内自动拉取重建，**服务器不看 CI 状态**（CI 报红照样会部署上去），所以 typecheck + test 全绿是推送前置条件；不推 `upstream`（官方仓冻结，站长明确说「发布」才走 RELEASING.md）；提交信息用中文前缀（`fix:` / `feat:` / `docs:` / `theme:`…）。**只改主线**，冻结形态见 `docs/MAINTENANCE.md`。
 2. **新功能先想「归宿三档」，默认不进内核**——① 客户端能做（site.js / 后台原生 JS）→ ② 插件形态（hooks 总线 / 编辑器插件）→ ③ 确需进内核才新增文件；运行时依赖只有 hono，**别加 npm 包**；**禁止引入打包步骤**，前台 site.js 保持 ES5。
 3. **新「公开面」必过防泄漏清单**——站里有会员付费墙、文章密码、锁文；新增 RSS / 接口 / 导出 / 主题字段时逐条问：**锁着的内容会不会从这里漏出去？**（摘要、content:encoded、JSON-LD 描述、OG 卡图是最常见的漏点）
 4. **查 posts / weibo / pages 三表必带 `deleted_at IS NULL`**——三表是软删（回收站），漏一个条件就是泄漏；改完自查 `grep -n "FROM posts\|FROM weibo\|FROM pages" src/`（故意不过滤的例外见 AGENTS.md）。

@@ -4,21 +4,29 @@
 
 # 博客号 BlogHao
 
-**微信有公众号，你有博客号。** 写文章、发随手记、交朋友 · 全套跑在 Cloudflare 上 · 免费额度即可长期运行
+**微信有公众号，你有博客号。** 写文章、发随手记、交朋友 · 零依赖、无构建链 · 一套代码跑 Node 或 Cloudflare
 
 **在线示例：[https://blog.xiaowuleyi.com](https://blog.xiaowuleyi.com)**（作者小吴乐意自己的博客，由本系统驱动）
 
-**演示体验站：[https://demo.bloghao.com](https://demo.bloghao.com)** —— 动手部署前可以先去转一圈：预置全年仿真数据、会员 / 付费墙 / 加密文章全开着，随便折腾，每 2 小时自动重置；后台账号 `demo` / `demo1234`，打开登录页就已自动填好（机制见 [docs/DEMO.md](docs/DEMO.md)）。
-
-[![Version](https://img.shields.io/github/package-json/v/bloghao/bloghao?color=1a73e8)](https://github.com/bloghao/bloghao/blob/main/CHANGELOG.md) [![License](https://img.shields.io/badge/License-MIT-07c160) ![Cloudflare](https://img.shields.io/badge/Cloudflare-Workers%20%C2%B7%20D1%20%C2%B7%20R2-F38020) ![No Framework](https://img.shields.io/badge/%E5%89%8D%E5%90%8E%E7%AB%AF-%E6%97%A0%E6%A1%86%E6%9E%B6%E4%BE%9D%E8%B5%96-1a1a1a)](https://github.com/bloghao/bloghao)
-
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/bloghao/bloghao"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" height="36"></a>
+[![License](https://img.shields.io/badge/License-MIT-07c160)](LICENSE)
 
 </div>
 
 ---
 
-博客号（BlogHao）是一款完全运行在 Cloudflare 上的开源博客引擎：网页由 Workers 边缘渲染，文字存进 D1，图片传进 R2——服务器、运维、账单，统统不存在。写作后台对标微信公众号编辑器，截图 `⌘V` 粘贴即自动上云。
+> ### 维护状态（2026-11-05）
+>
+> 本仓库**转为作者自用**，只维护「甲骨文服务器 Docker 自托管」这一条线。
+>
+> 曾支持过的 **Cloudflare Workers 部署**、**Docker 多租户托管**、**演示站**、**广场**、**官网**均已**冻结**——
+> 代码保留、随时可取用，但**不再更新、不承诺可用**。边界与理由见 **[docs/MAINTENANCE.md](docs/MAINTENANCE.md)**。
+>
+> 仓库保持公开，因为它仍是一份完整可读的实现；但请把它当作「一份能跑的自用代码」，
+> 而不是「一个还在维护的产品」——issue 与 PR 不保证回应。
+
+---
+
+博客号（BlogHao）是一款零依赖的轻博客引擎：后端只有一个 Hono，前台原生 JS，**没有构建链，改完即生效**——轻到换博客的人敢于自己读源码、自己改。最初为 Cloudflare 而写（Workers 渲染 + D1 + R2），现在长期运行在作者自己的甲骨文 ARM 服务器上（Node + SQLite + 本地磁盘），业务代码零改动。
 
 2.0 在「写文章」的基础上，整合了作者博客沉淀的一整套**日常记录与互动**能力：短内容的「微博 / 随手记」、楼中楼评论、友情链接、首页搜索与排序、公众号文章一键采集等，七套主题全部适配，手机端同样完整可用。
 
@@ -43,10 +51,10 @@
 | 🖼️ **R2 图床** | 图片视频私有存储，Worker 鉴权输出 + 长缓存 + ETag 304，媒体库可视化管理；上传前自动压缩并转 WebP（>150KB 或 >2000px，同画质比 JPEG 约再省三成、透明不丢，旧浏览器自动回退 JPEG/PNG）；EXIF / GPS 元数据自动抹除，手机照片的拍摄位置不随图公开 |
 | 🔒 **安全默认开启** | PBKDF2 / HttpOnly 会话 / CSRF 同源校验 / HTML 白名单净化 / 评论与友链蜜罐限流 / CSP |
 | ⚡ **快** | SSR 直出、主题 CSS 内联零额外请求、边缘节点全球分发 |
-| 📡 **自带生态件** | 全文 RSS、sitemap、robots.txt、OG 分享标签（可一键生成 1200×630 专属分享卡图）、JSON-LD 结构化数据、图片灯箱、每晚自动备份到 R2、GitHub Actions 自动部署 |
+| 📡 **自带生态件** | 全文 RSS、sitemap、robots.txt、OG 分享标签（可一键生成 1200×630 专属分享卡图）、JSON-LD 结构化数据、图片灯箱、每晚自动备份、服务器定时拉取自动部署（健康检查失败自动回滚） |
 | 🚚 **数据导出与整站搬家** | 一键打包 Markdown（文章含草稿 + 微博 + 页面 + 引用的图片，front-matter 齐全）与 WordPress WXR；**整站包**一键打包 / 还原整个站点（换服务器 / 换域名不求人，配套「清空本站内容」）——数据主权随时兑现，搬家不留钳制 |
 | 🤖 **对 AI 友好** | robots.txt 三档 AI 抓取策略（默认放行 / 只许检索引用 / 全部拒绝）、`/llms.txt` 站点导读与每篇 `.md` 镜像让 AI 低成本拿到干净正文、后台统计把 AI 训练与检索引用分栏计量；更新中心一键查看「当前版本 vs 最新版更新了什么」，升级与否自己决定 |
-| 🐳 **Docker 自托管** | 同一套代码零改动跑进普通 Node 容器：文章存内置 SQLite，图片落本地磁盘或继续用 Cloudflare R2；单进程按域名托管多个独立博客站，定时发布 / 每晚备份照常（见「部署」方式三） |
+| 🐳 **Docker 自托管**（现行主线） | 同一套代码零改动跑进普通 Node 容器：文章存内置 SQLite，图片落本地磁盘或继续用 Cloudflare R2；单进程按域名托管多个独立博客站，定时发布 / 每晚备份照常。作者自己的两个站就跑在这上面（见「部署」方式一） |
 
 <details>
 <summary><b>📖 查看全部特性细节</b></summary>
@@ -83,22 +91,44 @@
 
 顶部导航（七套主题一致）：**首页 · 微博 · 归档 · 留言板 · 分类话题（折叠菜单）· 友情链接 · 自建页面 · 关于我 · 随机**（自建页面在后台「页面」创建并选择是否上导航）。
 
-## 🚀 部署自己的博客号
+## 🚀 部署
 
-**方式一：一键部署（推荐）**——点上面（或下面）的按钮，授权 GitHub 后给 Worker / 数据库 / 图床起好名字，Cloudflare 自动完成剩下的：复制一份仓库到你的账号 → 开通 D1 数据库与 R2 图床并回填配置 → 构建部署上线 → 接管 push 自动部署。全程不碰命令行。
+> **只有「方式一」是维护的。** 方式二写在这里只为留档——它是这个项目的前半生，`src/` 里那些
+> `caches.default` / D1 兼容分支都源于它。别照着一份冻结的文档去搭新站。
 
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/bloghao/bloghao"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" height="36"></a>
+**方式一：Docker 自托管（现行主线，唯一维护）**
 
-> 若账号还没用过 R2，会被要求先添加支付方式——免费额度内不扣费，只是验证。
+业务代码零改动地跑进一个 Node 容器：文章存内置 SQLite（单文件 WAL），图片存本地磁盘目录，也可以继续用 Cloudflare R2 桶（零出口流量费）。单进程按域名同时托管多个完全独立的博客站，Cloudflare 退回只做 DNS + CDN。
 
-**方式二：命令行部署**（想自己掌控每一步）
+```bash
+git clone https://github.com/lovexw/bloghao-xwblog.git
+cd bloghao-xwblog/docker-poc
+docker compose up --build -d     # 镜像约 70MB（node:26-alpine），数据落在 ./data/<域名>/
+```
 
-> 前置：Node.js 18+、一个 Cloudflare 账号。完整版教程（含自定义域名、备份、FAQ）见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+把真实域名写进 `docker-poc/tenants.json` 后重启容器，访问 `/admin/` 创建管理员；定时发布、每晚备份、回收站清理等定时任务随容器自动运行。
+
+- 架构与适配层（本地直跑、图片存储二选一、加站点）：[docker-poc/README.md](docker-poc/README.md)
+- 单机部署清单（选机、端口与反代、HTTPS、验收、升级）：[docker-poc/DEPLOY.md](docker-poc/DEPLOY.md)
+- **作者生产环境实际怎么跑的**（服务器定时拉取、镜像按 commit 打 tag、健康检查自动回滚、多实例）：
+  **[docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md)** ← 想照着搭一套，看这份最接近实战
+
+> 多租户能力（同一进程托管多个独立站）**机制保留可用**，作者的两个站就跑在上面；但「一键给别人开站」
+> 的体验不再优化，也不再写托管服务文档。
+
+<details>
+<summary><b>方式二：Cloudflare Workers 部署（⚠️ 已冻结，仅留档）</b></summary>
+
+这个项目最初完全跑在 Cloudflare 上：Workers 边缘渲染、D1 存字、R2 存图。**2026-11-05 起这条线冻结**——
+代码仍在（`wrangler.jsonc` 作参照实现保留），但不再更新、不保证还能跑通，平台接口变了也不会跟进。
+以下命令是冻结时的状态，仅供考古。
+
+> 前置：Node.js 18+、一个 Cloudflare 账号。完整版教程见 [docs/DEPLOY.md](docs/DEPLOY.md)（同样已冻结）。
 
 ```bash
 # 1. 克隆并安装
-git clone https://github.com/bloghao/bloghao.git
-cd bloghao && npm install
+git clone https://github.com/lovexw/bloghao-xwblog.git
+cd bloghao-xwblog && npm install
 npx wrangler login
 
 # 2. 创建资源（名称可自定，与 wrangler.jsonc 保持一致）
@@ -112,31 +142,24 @@ npx wrangler d1 execute DB --remote --file schema.sql
 npm run deploy
 ```
 
-打开 `https://<worker名>.<你的子域>.workers.dev/admin/`，**首次进入即创建管理员**，欢迎文章已就位，删掉它开始写你自己的第一篇吧。绑定自定义域名（如示例站的 `blog.xiaowuleyi.com`）后，记得把「设置 → 站点链接」改成新域名——RSS / sitemap 里的绝对链接都用它。
-
-<details>
-<summary><b>开启 push 自动部署</b></summary>
-
-一键部署的副本在部署时已由 Cloudflare Workers Builds 自动接管 push 部署，**无需任何配置**（仓库里内置的 GitHub Actions 部署工作流没配密钥会自动跳过，不影响）。
-
-命令行部署的想开启自动部署，两种任选：
-
-- **Workers Builds**（推荐）：Cloudflare 面板 → 你的 Worker → Settings → Git 支持，连接 GitHub 仓库即可
-- **GitHub Actions**：推上 GitHub 后，在仓库 Settings → Secrets → Actions 添加 `CLOUDFLARE_API_TOKEN`（Workers Scripts + D1 + R2 编辑权限）与 `CLOUDFLARE_ACCOUNT_ID`，仓库内置的 `.github/workflows/deploy.yml` 会在每次 push 到 `main` 时自动执行：类型检查 → 同步 schema → 部署。另有 `.github/workflows/ci.yml` 与部署并行，跑类型检查 + 回归测试（`tests/` 700+ 用例），防止已修复的 bug 悄悄复发
+打开 `https://<worker名>.<你的子域>.workers.dev/admin/`，**首次进入即创建管理员**，欢迎文章已就位。
 
 </details>
 
-**方式三：Docker 自托管**（不想把代码跑在 Cloudflare 上、手头有 VPS 时选这条）
+<details>
+<summary><b>推送后怎么自动更新</b></summary>
 
-业务代码零改动地跑进一个 Node 容器：文章存内置 SQLite（单文件 WAL），图片存本地磁盘目录，也可以继续用 Cloudflare R2 桶（零出口流量费）。单进程按域名同时托管多个完全独立的博客站，Cloudflare 退回只做 DNS + CDN。
+**现行（甲骨文自托管）**：服务器上的 systemd 定时器每 2 分钟 `git fetch` 一次，发现 `main` 有新提交就
+用 ARM 原生构建新镜像、替换容器；健康检查失败自动回滚到上一个镜像。所以 `git push` 之后什么都不用做，
+最多等 2 分钟。详见 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md)。
 
-```bash
-git clone https://github.com/bloghao/bloghao.git
-cd bloghao/docker-poc
-docker compose up --build -d     # 镜像约 70MB（node:26-alpine），数据落在 ./data/<域名>/
-```
+**CI**：`.github/workflows/ci.yml` 在每次 push 到 `main` 时跑类型检查 + 回归测试。
+注意它**拦不住部署**——服务器不看 CI 状态，红了照样会上线，所以推送前必须本地跑绿。
 
-把真实域名写进 `docker-poc/tenants.json` 后重启容器，访问 `/admin/` 创建管理员（与 Workers 版完全一致）；定时发布、每晚备份、回收站清理等定时任务随容器自动运行。端口 / 反代 / HTTPS / 图片存储二选一等完整步骤见 [docker-poc/DEPLOY.md](docker-poc/DEPLOY.md)，架构与适配层说明见 [docker-poc/README.md](docker-poc/README.md)。
+**Cloudflare 那套（已冻结）**：原来靠 Workers Builds 的 Git 集成或 `.github/workflows/deploy.yml` 部署。
+后者已于 2026-11-05 删除；若你的 CF 账号上还连着 Workers Builds，要去 Cloudflare 控制台自行断开。
+
+</details>
 
 ## 🧑‍💻 本地开发
 
@@ -144,24 +167,26 @@ docker compose up --build -d     # 镜像约 70MB（node:26-alpine），数据�
 npm install
 npm run db:init:local   # 初始化本地 D1（.wrangler/state，与线上互不影响）
 npm run dev             # http://127.0.0.1:8787
-npm run dev:demo        # 演示站本地预览（自动建表 + 播种一年仿真数据，见 docs/DEMO.md）
+npm run dev:demo        # 演示站本地预览（已冻结，仅留档；见 docs/DEMO.md）
 npm run typecheck       # TypeScript 类型检查，提交前必须通过
-npm test                # 回归测试（tests/，700+ 用例），提交前必须通过
+npm test                # 回归测试（tests/，1000+ 用例），提交前必须通过
 npm run smoke           # 本地冒烟：起 wrangler dev 逐路由断言，改 SQL 拼接/渲染后必跑
 ```
+
+> 自托管形态的本地直跑（不装 wrangler，直接 Node 起）见 [docker-poc/README.md](docker-poc/README.md)。
 
 ## 📦 目录结构
 
 ```
-bloghao/
-├── src/                # Cloudflare Worker（后端 + SSR + 主题）
+bloghao-xwblog/
+├── src/                # 后端 + SSR + 主题（Node 与 Cloudflare 共用同一份代码）
 │   ├── index.ts        # 入口与路由（页面、图床、RSS、随机阅读、Cron 调度）
 │   ├── api.ts          # 全部 JSON API（文章/微博/友链/分类/评论/设置…）
 │   ├── external.ts     # 外部发布：开放 API + Telegram 机器人 + 管理端点
 │   ├── pages.ts        # 公开页 SSR（首页/微博/友链/文章/搜索…）
 │   ├── collect.ts      # 公众号采集插件服务端
-│   ├── scheduler.ts    # 每分钟 Cron：定时发布到点自动上线
-│   ├── backup.ts       # 每晚 00:30 全量备份 D1 → R2（滚动保留 30 份）
+│   ├── scheduler.ts    # 每分钟调度：定时发布到点自动上线
+│   ├── backup.ts       # 每晚备份全量快照（R2 / 本地磁盘，滚动保留 30 份）
 │   ├── auth.ts / sanitize.ts / markdown.ts / db.ts / render.ts / rss.ts / utils.ts
 │   └── themes/         # 七套主题 + 注册表（新主题加在这里）
 ├── public/
@@ -169,79 +194,103 @@ bloghao/
 │   ├── site.js         # 前台交互（点赞/评论/楼中楼/灯箱/微博发布/折叠菜单）
 │   └── plugins/        # 编辑器插件（hello-plugin / wechat-collect / douban-media）
 ├── tests/              # 回归测试（npm test，CI 强制执行）
-├── scripts/            # smoke.mjs 本地冒烟；emlog-migrate 一次性迁移工具（留档）
+├── scripts/            # smoke.mjs 本地冒烟；deploy-oracle.sh 服务器部署；emlog-migrate（留档）
+├── docker-poc/         # ★ 现行部署：Node 单进程多站点（SQLite + 磁盘 / R2 图床）
+├── docs/               # 全部文档（部署看 DEPLOY-ORACLE.md，边界看 MAINTENANCE.md）
+├── website/            # 官网源码（⚠️ 已冻结，不再更新）
+├── plaza/              # 广场 hub 服务端（⚠️ 已冻结）
+├── demo/               # 演示站附属件（⚠️ 已冻结）
 ├── migration-memos/    # Memos 旧站 → 微博 的一次性迁移工具（已完成，留档）
-├── docker-poc/         # Docker 自托管：Node 单进程多站点（SQLite + 磁盘 / R2 图床）
-├── website/            # 「博客号」官网（bloghao.com，纯静态无构建、独立部署，与本站运行无关）
-├── docs/               # 全部文档
-└── schema.sql          # D1 表结构（幂等）
+└── schema.sql          # 表结构（幂等）
 ```
 
 ## 📚 文档
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/MAINTENANCE.md](docs/MAINTENANCE.md) | **维护状态与冻结范围**：什么还在维护、什么已冻结、为什么、想恢复怎么办（**先读这份**） |
+| [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md) | **部署真相源**：作者生产环境的实际跑法——服务器定时拉取、镜像按 commit 打 tag、健康检查自动回滚、多实例 |
 | [docs/GUIDE.md](docs/GUIDE.md) | **使用手册**：后台导览、写文章 / 发微博全流程、评论与友链管理、采集插件、设置逐项说明 |
-| [docs/DEPLOY.md](docs/DEPLOY.md) | **部署教程**：资源创建、首次上线、自定义域名、GitHub 自动部署、备份恢复、FAQ |
-| [docs/API.md](docs/API.md) | API 参考：全部公开 / 管理接口 |
-| [docs/UPDATING.md](docs/UPDATING.md) | **版本与更新**：更新中心怎么用、Cloudflare 与 Docker 两条路的升级动作 |
-| [docs/PLAZA.md](docs/PLAZA.md) | 广场：三步接入官方广场，让每篇文章与微博被更多博主看到 |
-| [docs/THEMES.md](docs/THEMES.md) | 主题开发指南：一套主题 = 八个必需渲染函数（+ 可选会员 / 排行榜）+ 全局 CSS |
-| [docs/PLUGINS.md](docs/PLUGINS.md) | 插件开发指南：编辑器插件 API 与内置「公众号采集」 |
-| [docs/DEMO.md](docs/DEMO.md) | **演示站指南**：跑一个预置一年数据、每 2 小时自动重置的在线体验站（与生产完全隔离） |
 | [docker-poc/README.md](docker-poc/README.md) | **Docker 自托管**：架构与适配层、本地直跑、图片存储二选一（本地盘 / R2）、加站点 |
 | [docker-poc/DEPLOY.md](docker-poc/DEPLOY.md) | 自托管服务器部署清单：选机、端口与反代、HTTPS 与缓存、验收与升级 |
+| [docs/API.md](docs/API.md) | API 参考：全部公开 / 管理接口 |
+| [docs/UPDATING.md](docs/UPDATING.md) | 版本与更新：更新中心怎么用、自托管形态的升级动作 |
+| [docs/THEMES.md](docs/THEMES.md) | 主题开发指南：一套主题 = 八个必需渲染函数（+ 可选会员 / 排行榜）+ 全局 CSS |
+| [docs/PLUGINS.md](docs/PLUGINS.md) | 插件开发指南：编辑器插件 API 与内置「公众号采集」 |
 | [docs/wechat-typography-spec.md](docs/wechat-typography-spec.md) | 微信排版规范落地对照 + 体检规则表 |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | 路线图：接下来做什么（排期内 / 待拍板 / 随缘）、已上线大事记与不做清单 |
-| [docs/VERSIONS.md](docs/VERSIONS.md) | **版本更新说明**：从项目诞生到今天的大版本大事记，每个版本带来了什么 |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | 路线图：接下来做什么、已上线大事记与不做清单 |
+| [docs/VERSIONS.md](docs/VERSIONS.md) | 版本更新说明：从项目诞生到今天的大版本大事记 |
+| ⚠️ [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare 部署教程（**已冻结**，仅留档） |
+| ⚠️ [docs/CLOUDFLARE-BASICS.md](docs/CLOUDFLARE-BASICS.md) | Cloudflare 平台入门（**已冻结**，仅留档） |
+| ⚠️ [docs/DEMO.md](docs/DEMO.md) | 演示站指南（**已冻结**，仅留档） |
+| ⚠️ [docs/PLAZA.md](docs/PLAZA.md) | 广场接入指南（**已冻结**，仅留档） |
+
+开发协作（AI / 多模型）另见 [AGENTS.md](AGENTS.md) 与 [docs/AI-COLLAB.md](docs/AI-COLLAB.md)。
 
 ## ❓ FAQ
 
 <details>
-<summary><b>workers.dev 域名访问慢或不通？</b></summary>
+<summary><b>现在还能用 Cloudflare 部署吗？</b></summary>
 
-绑定自己的域名：Cloudflare 面板 → Workers & Pages → 你的 Worker → Domains & Routes → Add Custom domain（示例站即 `blog.xiaowuleyi.com`）。绑定后把「设置 → 站点链接」改成新域名（影响 RSS / sitemap 绝对链接）。
+代码还在，理论上能跑，但这条线已冻结、不再跟进平台变化，别用在正经站点上。现行部署是 Docker 自托管，
+见 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md)。完整说明见 [docs/MAINTENANCE.md](docs/MAINTENANCE.md)。
 </details>
 
 <details>
 <summary><b>忘记管理员密码？</b></summary>
 
+自托管形态（SQLite，数据库在容器的 `/data/tenants/<域名>/blog.db`）：
+
 ```bash
-npx wrangler d1 execute DB --remote --command "DELETE FROM users; DELETE FROM sessions;"
+# 容器内直接用 node:sqlite，无需装 sqlite3 客户端
+docker exec -it xwblog-next node -e "const {DatabaseSync}=require('node:sqlite');\
+const d=new DatabaseSync('/data/tenants/blog.xiaowuleyi.com/blog.db');\
+d.exec('DELETE FROM users; DELETE FROM sessions;')"
 ```
 
 然后重新访问 `/admin/` 创建账号，文章 / 评论 / 图片全部保留。
+
+Cloudflare 形态原命令是 `npx wrangler d1 execute DB --remote --command "DELETE FROM users; DELETE FROM sessions;"`（已冻结）。
 </details>
 
 <details>
-<summary><b>会一直免费吗？</b></summary>
+<summary><b>要花多少钱？</b></summary>
 
-Cloudflare 免费套餐：Workers 每天十万次请求、D1 五百万行读、R2 10GB 存储——对个人博客是几个月到几年的量。用超了再考虑 $5/月的付费计划，代码无需任何改动。
+自托管跑在一台 ARM 服务器上（作者用的是甲骨文免费额度机器，4 核 24G），Cloudflare 只做 DNS + CDN，
+同样在免费额度内。除域名外基本零成本。
 </details>
 
 <details>
 <summary><b>如何升级？</b></summary>
 
+自托管形态**不需要手动升级**：服务器定时器每 2 分钟拉取 `main`、重建镜像、替换容器，
+健康检查失败自动回滚到上一个镜像。想立刻跑一轮就手动触发：
+
 ```bash
-git pull
-npm install
-npm run deploy    # schema 有更新时再执行一次 npx wrangler d1 execute DB --remote --file schema.sql（幂等）
+ssh <你的服务器> 'sudo systemctl start xwblog-deploy.service'
 ```
+
+细节（含回滚、暂停自动部署）见 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md)。
+
+Cloudflare 形态原步骤是 `git pull` → `npm install` → `npm run deploy`（已冻结）。
 </details>
 
 ## 🛣 路线图
 
+- [x] **2026-11-05 收敛：转为自用**——只维护甲骨文 Docker 自托管一条线；CF 部署、多租户托管、演示站、广场、官网全部冻结（见 [docs/MAINTENANCE.md](docs/MAINTENANCE.md)）
 - [x] 会员体系：游客注册 + 分级会员 + 积分 + 排行榜 + 专属文章付费墙（已上线，默认关闭，后台开启；用法见 [docs/GUIDE.md](docs/GUIDE.md) §15）
-- [ ] 多作者协作
 - [x] 编辑器 Markdown 快捷输入（`> ` 自动转引用等，已上线）
 - [x] 服务端插件钩子（发布 / 评论事件回调 + 页脚注入，已上线，见 [docs/PLUGINS.md](docs/PLUGINS.md)）
-- [ ] 市场远程化：皮肤 / 插件目录改为远程数据源 + 更顺畅的安装体验（后台「皮肤 / 插件」页的精选目录与启停管理已就绪）
 - [x] WebP 自动转换（上传前压缩已上线）
+- [ ] 多作者协作
+- [ ] 市场远程化：皮肤 / 插件目录改为远程数据源 + 更顺畅的安装体验（后台「皮肤 / 插件」页的精选目录与启停管理已就绪）
+
+> 冻结后的路线图只对自用主线负责。以前挂在路线图上的「对外发布 / 官网 / 广场演进」类事项已取消。
 
 ## 🤝 相关仓库
 
-- **官方仓库**：[bloghao/bloghao](https://github.com/bloghao/bloghao)（本仓库）——2.0 起整合作者实例线的全部增强，欢迎提 Issue / PR；官网源码在仓库内 `website/` 目录（**[bloghao.com](https://bloghao.com)**，纯静态无构建、独立部署，官网「博客号目录」上榜走官网表单，GitHub Issue 为兜底入口）
-- **作者实例**：[lovexw/bloghao-xwblog](https://github.com/lovexw/bloghao-xwblog)——[blog.xiaowuleyi.com](https://blog.xiaowuleyi.com) 的源仓库，官方仓库的滚动开发线（迭代先行于此，稳定后清洗发布至官方仓库），提交信息沿用 `theme:` / `mobile:` / `feat:` / `docs:` 前缀的中文风格
+- **作者实例**：[lovexw/bloghao-xwblog](https://github.com/lovexw/bloghao-xwblog)（本仓库）——[blog.xiaowuleyi.com](https://blog.xiaowuleyi.com) 与 blog.btchao.com 的源仓库，**2026-11-05 起是唯一持续的开发线**
+- **官方仓库**：[bloghao/bloghao](https://github.com/bloghao/bloghao)——项目最初的开源发布线，**已冻结**（不再同步、不再发布版本）；官网源码曾在仓库内 `website/` 目录，现同样冻结
 
 ## 📄 License
 

@@ -1,5 +1,9 @@
 # Cloudflare 基础使用教程
 
+> **⚠️ 已冻结（2026-11-05）**：Cloudflare 部署形态已冻结，本文随之一并冻结，仅作为历史参照。
+> 现行部署是甲骨文 Docker 自托管，见 [DEPLOY-ORACLE.md](DEPLOY-ORACLE.md)。
+> 站上仍在用 Cloudflare 的部分只剩 DNS 与 CDN 回源（橙云），这部分见 DEPLOY-ORACLE.md「域名接入」节。
+
 > 围绕这套博客实际用到的 Cloudflare 功能，讲清楚「是什么、在控制台哪里看、日常怎么操作」。
 > 与其它文档的分工：部署的完整步骤看 [部署教程](DEPLOY.md)，日常使用看 [使用手册](GUIDE.md)，演示站看 [演示站指南](DEMO.md)——本文只讲 Cloudflare 平台本身，不重复部署教学。
 > 文中资源名以在线示例（blog.xiaowuleyi.com：Worker `xwblog`、数据库 `xwblog-db`、图床桶 `xwblog-images`，与仓库内 wrangler.jsonc 一致）为参照；部署自己的实例时换成你自己的资源名即可。

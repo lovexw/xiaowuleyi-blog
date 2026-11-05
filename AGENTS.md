@@ -15,12 +15,16 @@
 
 ## 线上站点（文档里以此为准）
 
-- 正式地址：**https://blog.xiaowuleyi.com**（已绑定到本仓库的 Worker），后台 `/admin/`
-- 官网：**https://bloghao.com**（源码在仓库 `website/`——纯静态无构建，与博客系统运行无关；**2026-10-11 起部署在站长甲骨文服务器的 Caddy 静态直出**，改动上线 = 服务器上 git pull 同步站点目录；原 Cloudflare Pages 项目 `bloghao` 已删除，docs 里的 bloghao.pages.dev 提法仅是历史/文档概念）
-- 演示站：**https://demo.bloghao.com**（**2026-10-11 起自托管迁至甲骨文 146 服务器**：独立仓库 `bloghao-demo` 的 Docker 容器（127.0.0.1:8786，Caddy demo 站点块反代，租户 tenants.json 配 demo.bloghao.com），DNS 已切本机；此前由另一台小服务器的 nginx+容器服务（CF 账号无 xwblog-demo-db、Worker 无部署记录，旧容器已停）。DEMO_MODE 门控（自动播种 / 每 2 小时重置 / 演示守卫），机制见 docs/DEMO.md；wrangler.demo.jsonc 的 CF 部署路径保留供需要 CF 形态演示时使用（D1/R2 资源未建、database_id 是占位符、routes 已注释）；官网导航 / Hero / 快速开始 / 页脚的演示入口都指向这里）
-- Cloudflare 资源：Worker `xwblog`、D1 `xwblog-db`、R2 `xwblog-images`（binding 均见 wrangler.jsonc）。2026-10-11 清理：已删 Pages 项目 `bloghao` 与老库 D1 `bloghao-db`；R2 `bloghao-images` 非空（code 10008）暂留待站长清点后删；D1 `xwblog-db-apac`（2026-10-11 建，含博客数据副本且 24h 有 2,366 次活跃读）用途待站长确认前不动
-- 平台定位（2026-10-11 拍板）：**Cloudflare 是博客号的最终部署归宿**——文档与官网引导部署时优先指向 Cloudflare 教程（部署一键/ wrangler / Workers Builds）；甲骨文 docker 仅作体验/中转（让朋友快速感受），不是推荐的自托管长期形态
-- 使用手册 docs/GUIDE.md、部署教程 docs/DEPLOY.md——涉及访问地址、备份命令时写上面的正式域名与资源名
+**维护状态（2026-11-05 拍板，先读这条再读下面）**：本项目**转为站长自用**，只维护甲骨文自托管这一条线；Cloudflare 部署、Docker 多租户托管、演示站、广场、官网**全部冻结**（代码保留、不再维护更新）。完整边界与理由见 **docs/MAINTENANCE.md**。
+
+- 正式地址：**https://blog.xiaowuleyi.com**（甲骨文服务器容器 `xwblog-next`，CF 橙云回源），后台 `/admin/`
+- 第二站点：**https://blog.btchao.com**（同机容器 `btchao-blog`，与主站共用同一份代码和同一个镜像）
+- **部署形态（唯一主线）**：甲骨文 ARM Docker 自托管，服务器 systemd 定时器每 2 分钟拉取 `main` 自动重建部署，健康检查失败自动回滚。**唯一部署真相源是 [docs/DEPLOY-ORACLE.md](docs/DEPLOY-ORACLE.md)**——涉及服务器、容器、数据目录、回滚时以那份为准
+- 官网：**https://bloghao.com**（源码在 `website/`，纯静态无构建，**已冻结**不再更新；线上仍在，原先部署在甲骨文服务器的 openresty 静态直出）
+- 演示站：**https://demo.bloghao.com**（**已冻结**不再更新；自托管在甲骨文服务器的独立容器，机制见 docs/DEMO.md。`src/demo.ts` 的 `DEMO_MODE` 门控**保留**——它是防误操作的安全网，不是演示站专属）
+- Cloudflare 资源（**均随部署形态一并冻结，不再写入**，仅作历史记录）：Worker `xwblog`、D1 `xwblog-db`、R2 `xwblog-images`（binding 均见 wrangler.jsonc）。2026-10-11 清理：已删 Pages 项目 `bloghao` 与老库 D1 `bloghao-db`；R2 `bloghao-images` 非空（code 10008）暂留待站长清点后删；D1 `xwblog-db-apac`（2026-10-11 建，含博客数据副本且 24h 有 2,366 次活跃读）用途待站长确认前不动
+- **平台定位（2026-11-05 修正，取代 2026-10-11 的旧结论）**：**甲骨文自托管是唯一生产形态**。此前「Cloudflare 是博客号的最终部署归宿」的判断已作废——CF 形态冻结，`wrangler.jsonc` 只作参照实现保留。判断标准：只让这两个站更好的改动做，只让「别人部署这个项目」更顺的改动不做
+- 使用手册 docs/GUIDE.md、部署教程 **docs/DEPLOY-ORACLE.md**（唯一真相源）、维护边界 docs/MAINTENANCE.md——涉及访问地址、备份命令时写上面的正式域名与数据目录
 
 ## 常用命令
 
@@ -271,10 +275,12 @@ npm run videos:fix-hevc -- --site https://blog.xiaowuleyi.com --user 管理员 -
 ## Git 约定
 
 - 本工作区服务**双仓库、两角色**（2026-10-11 晚恢复原约定——当日上午曾短暂切过单仓库，同日即废，两仓内容已互结合并）：origin = `github.com/lovexw/bloghao-xwblog`（滚动开发测试仓库，日常提交只推这里），upstream = `github.com/bloghao/bloghao`（官方稳定版仓库，对外开放部署入口，main 永远保持可部署）。不做这两个仓库之外的操作
-- 本地 remote 口径：main 的 upstream 跟踪设为 origin/main（开发仓）——裸 `git push` / `git pull` 都走开发线，推官方必须显式 `git push upstream main`，防开发历史误灌官方仓；**开发仓每次推送都会自动上线**：线上主站 blog.xiaowuleyi.com 由 Cloudflare 侧的 **Workers Builds**（绑在 `xwblog` Worker 上的 Git 集成）构建部署，与仓库里的 `.github/workflows/deploy.yml` 无关——那个工作流在开发仓/官方仓都**长期跳过**（`Check Cloudflare secrets` 判 configured=false，Typecheck / Apply D1 schema / Deploy 三步 skipped；它服务的是「Deploy to Cloudflare」一键部署出来的副本），别再拿它当「生产部署只会由官方仓 push 触发」的依据（2026-10-13 核实：Actions run 的 Deploy 步骤 skipped，但 a87d8de / a35ddff 推送后线上行为随即变化）。**推论：开发线即线上线**，推送前必须自己跑过 `npm run typecheck` + `npm test`——CI 与部署是两个并行工作流，CI 红了**不会**拦下部署；本机 wrangler 已登录主站所在账号（2026-10-18 核实为 0471666@gmail.com，名下有 `xwblog-db` / `xwblog` Worker，旧记录「admin@bloghao.com 账号不对」已过时）——排查生产 D1 直接 `npx wrangler d1 insights xwblog-db --time-period 1d --sort-by reads`（按行读排 Top 查询，读放大治理的实测来源）与 `npx wrangler d1 execute xwblog-db --remote --command "SELECT ..."`（只读），但**日额度超限期间（code 7500）连只读查询都会被拒**，只能等 UTC 午夜（北京早 8 点）重置或升 Workers Paid；部署仍走推送 → Workers Builds，别拿本地 `npm run deploy` 当日常部署手段（避免双部署）
+- 本地 remote 口径：main 的 upstream 跟踪设为 origin/main（开发仓）——裸 `git push` / `git pull` 都走开发线，推官方必须显式 `git push upstream main`，防开发历史误灌官方仓
+- **部署链路（2026-11-05 修正，取代「CF Workers Builds 自动部署」的旧认知）**：**开发仓每次推送都会自动上线**——甲骨文服务器上的 systemd 定时器每 2 分钟 `git fetch` 一次，发现 `main` 有新提交就用 ARM 原生构建新镜像、替换两个容器（`xwblog-next` / `btchao-blog`），健康检查失败自动回滚到上一个镜像。**唯一依据是 docs/DEPLOY-ORACLE.md**。**推论：开发线即线上线**，推送前必须自己跑过 `npm run typecheck` + `npm test`——**服务器不看 CI 状态**，CI 红了照样会部署上去（CI 与部署完全独立）。想立刻跑一轮：`ssh oracle 'sudo systemctl start xwblog-deploy.service'`
+  - 历史（已废）：2026-11-03 之前主站由 Cloudflare 侧的 Workers Builds 部署；2026-11-05 起 CF 形态冻结，`.github/workflows/deploy.yml` 已删除。`npx wrangler d1 insights/execute` 那套排查手段现在只对冻结形态有意义——**生产数据在服务器的 SQLite 里**（`/opt/xwblog-data/blog.xiaowuleyi.com/blog.db`，容器内 `/data/tenants/<域名>/blog.db`），排查用 `docker exec` + `node:sqlite`
 - 发布流程（**upstream 默认冻结**）：日常提交**只推 origin**；**未经用户明确指示，任何改动都不同步到 upstream**——迭代稳定、攒了成批 feat、修了安全 / 数据问题，都不构成自行发布的理由，只有用户明确说「发布」才走流程：`git fetch upstream`，从 `upstream/main` 切发布分支，`git merge --squash` 本地 main（此时按需挑选/清洗，个人实例定制与实验内容不进官方版），确认 diff 后以单个版本提交推 upstream。两仓库历史允许分叉，**不要** `git push upstream origin/main:main` 直灌开发历史。**发布操作照 docs/RELEASING.md 清单执行**（版本号规则、挑洗依据「个人定制台账」、CHANGELOG 回填与镜像回开发线）；个人定制**合入 main 当天登记进台账**
 - 同步方向永远 dev→stable 单向：**不要**从 upstream pull 覆盖本地（upstream 只接收发布，永不反向流入开发线）
-- 版本线口径：开发仓 main 即最新开发版（**且推送即部署上主站**，见上条）；官方仓收到的发布提交即稳定版（发布时打 `vX.Y.Z` tag，docker 自托管分站 `git checkout <tag>` 后 `docker compose up --build -d`）——发布的意义是「官方稳定版 + 对外开放部署入口 + 自托管取 tag」，**不再是主站上线的唯一途径**；演示站从开发线 main 手动部署（`wrangler.demo.jsonc`，见 docs/DEMO.md）
+- 版本线口径：开发仓 main 即最新版（**且推送即部署到两个自托管站点**，见上条）；官方仓 `upstream` **已冻结**（2026-11-05），不再接收发布，`vX.Y.Z` tag 与 CHANGELOG 保留作历史记录；演示站同样冻结，不再部署
 - 开发线定位：xwblog 已完成「互动与创收」第一批功能（会员 / 积分 / 排行榜 / 访问密码，用法见 GUIDE §15）；后续方向见 docs/ROADMAP.md。本站专属的运营属性（收费配置、站点人设内容）落地时按规则登记个人定制台账，官方版挑洗时剔除
 - README / docs / 官网以「博客号 BlogHao」官方项目口吻书写，对两个仓库都自洽；线上地址 blog.xiaowuleyi.com 在文档中一律表述为「在线示例」
 - 仓库沿革：2026-10-05 官方发布仓库由 bloghao-blog 改名 `lovexw/bloghao`（独立官网仓库删除、内容并入 `website/`）；2026-10-10 转入 `bloghao` 组织（`lovexw/bloghao` → `bloghao/bloghao`，star / Issue / CI 随转移保留）；2026-10-11 上午曾切单仓库、开发线并入官方仓，同日晚恢复双仓库并完成两仓内容互结合并。遇到提旧仓名的文档一律以现名为准

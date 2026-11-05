@@ -2,7 +2,7 @@
   "name": "bloghao",
   "version": "2.8.0",
   "private": true,
-  "description": "博客号 BlogHao —— 轻写作博客系统，完全跑在 Cloudflare（Workers + D1 + R2）上",
+  "description": "博客号 BlogHao —— 零依赖轻写作博客系统，Node + SQLite 自托管（亦可跑 Cloudflare，已冻结）",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
