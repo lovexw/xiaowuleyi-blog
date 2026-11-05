@@ -125,7 +125,7 @@ ${jsonLdHtml}
 ${o.settings.faviconUrl ? `<link rel="icon" href="${esc(absUrl(base, o.settings.faviconUrl))}">` : `<link rel="icon" href="/favicon.svg" type="image/svg+xml">`}
 ${base ? `<link rel="alternate" type="application/rss+xml" title="${esc(siteName)}" href="${esc(base)}/rss.xml">` : ''}
 ${base ? `<link rel="alternate" type="application/feed+json" title="${esc(siteName)}" href="${esc(base)}/feed.json">` : ''}
-${base && o.path.startsWith('/post/') && readAiPolicy(o.settings.aiPolicy) !== 'deny' ? `<link rel="alternate" type="text/markdown" title="${esc(o.title || siteName)}" href="${esc(base + o.path)}.md">` : ''}
+${base && o.path.startsWith('/post/') && readAiPolicy(o.settings.aiPolicy) !== 'deny' && o.settings.siteNoindex !== '1' ? `<link rel="alternate" type="text/markdown" title="${esc(o.title || siteName)}" href="${esc(base + o.path)}.md">` : ''}
 ${o.css ? `<style>${o.css}</style>` : ''}
 ${appearanceHeadStyle(o.settings)}
 ${customCssHeadStyle(o.settings)}

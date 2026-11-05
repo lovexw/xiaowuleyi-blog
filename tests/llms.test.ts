@@ -106,3 +106,14 @@ test('llms 桩：AI 策略 deny 档文案指向策略而非演示', () => {
   assert.ok(!out.includes('演示'), '真实站点的拒绝文案不冒充演示站')
   assert.ok(!out.includes('rss.xml') && !out.includes('##'))
 })
+
+test('llms 桩：siteNoindex 真实站出「不收录」文案，不冒充演示站（P2-14）', () => {
+  const out = buildLlmsStub(S, SITE, false, true)
+  assert.ok(out.startsWith('# 测试站'))
+  assert.ok(out.includes('不希望被收录'))
+  assert.ok(!out.includes('演示'), 'noindex 的真实站不再被标成演示/预览实例')
+  assert.ok(!out.includes('rss.xml') && !out.includes('##'))
+  // deny 优先于 noindex：传了 aiDenied 仍出策略文案
+  const denied = buildLlmsStub(S, SITE, true, true)
+  assert.ok(denied.includes('不允许 AI 抓取'))
+})

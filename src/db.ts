@@ -407,7 +407,10 @@ export async function findPublishedByOldSlug(db: D1Database, slug: string, cutof
   const cond = cutoff > 0 ? 'AND COALESCE(published_at, created_at, 0) >= ?' : ''
   const binds = cutoff > 0 ? [jsonItemLikePattern(slug), cutoff] : [jsonItemLikePattern(slug)]
   return db
-    .prepare(`SELECT id, slug FROM posts WHERE old_slugs LIKE ? ESCAPE '\\' AND deleted_at IS NULL AND status = 'published' ${cond} ORDER BY COALESCE(published_at, created_at, 0) DESC LIMIT 1`)
+    // ORDER BY 表达式必须与 idx_posts_chrono 一字不差（COALESCE(published_at, created_at)）：
+    // 尾巴上多一个 `,0` 就吃不到索引排序（TEMP B-TREE），404/旧链接路径全表扫 + 排序
+    // （2026-11 审计 P3-4；created_at NOT NULL，`,0` 本就是死代码）
+    .prepare(`SELECT id, slug FROM posts WHERE old_slugs LIKE ? ESCAPE '\\' AND deleted_at IS NULL AND status = 'published' ${cond} ORDER BY COALESCE(published_at, created_at) DESC LIMIT 1`)
     .bind(...binds)
     .first<{ id: number; slug: string }>()
 }
@@ -540,10 +543,15 @@ export async function listSitemapPosts(db: D1Database, afterTs = 0): Promise<{ s
   // 可见窗口开启时窗口外文章不进 sitemap（前台 404 的页面不提交搜索引擎）
   const vis = afterTs > 0 ? 'AND COALESCE(published_at, created_at) >= ?' : ''
   const stmt = db.prepare(
-    `SELECT slug, updated_at FROM posts WHERE status = 'published' AND deleted_at IS NULL ${vis} ORDER BY updated_at DESC LIMIT 2000`
+    // 上限对齐 sitemap 协议（50,000 URL / 50MB，src/rss.ts buildSitemap 单文件输出）：
+    // 旧值 2000 会在文章数超过时把最旧的文章静默挤出提交面（2026-11 审计 P2-13）。
+    // 真逼近 5 万时应做按月分片 + sitemap index（rss.ts buildSitemap 单文件输出同一约束）
+    `SELECT slug, updated_at FROM posts WHERE status = 'published' AND deleted_at IS NULL ${vis} ORDER BY updated_at DESC LIMIT 50000`
   )
   const { results } = await (afterTs > 0 ? stmt.bind(afterTs) : stmt).all<{ slug: string; updated_at: number }>()
-  return results ?? []
+  const rows = results ?? []
+  if (rows.length >= 50000) console.warn('[sitemap] 已发布文章数达到 5 万上限，最旧文章将退出 sitemap——请改用分片 sitemap index')
+  return rows
 }
 
 /** sitemap 用：每个分类下已发布文章的最新更新时间（分类归档页的 lastmod） */

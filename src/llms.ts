@@ -121,15 +121,20 @@ export function buildLlmsFullTxt(settings: SettingsMap, posts: PostRow[], siteUr
 }
 
 /** 演示站 / 全站 noindex / AI 策略 deny 档的桩输出：与 robots.txt 整站 Disallow 同口径，不列任何内容。
- * aiDenied=true 时文案指向「不允许 AI 抓取」而非演示（对真实站点诚实） */
-export function buildLlmsStub(settings: SettingsMap, siteUrl: string, aiDenied = false): string {
+ * 三种桩因文案各异（2026-11 审计 P2-14）：aiDenied=策略拒绝；noindex=站长声明不收录的**真实站**
+ * （不能冒充演示站——那是在替站长说谎）；都不传 = 演示站文案 */
+export function buildLlmsStub(settings: SettingsMap, siteUrl: string, aiDenied = false, noindex = false): string {
   const en = isEn(settings)
   const reason = aiDenied
     ? en
       ? 'This site does not permit AI crawlers (see robots.txt).'
       : '本站已声明不允许 AI 抓取（见 robots.txt），此处不提供内容。'
-    : en
-      ? 'This site is a demo / preview instance and does not expose content to AI crawlers.'
-      : '本站为演示 / 预览实例，不向 AI 爬虫暴露内容。'
+    : noindex
+      ? en
+        ? 'This site has requested not to be indexed (see robots.txt); content is not offered here.'
+        : '本站已声明不希望被收录（见 robots.txt），此处不提供内容。'
+      : en
+        ? 'This site is a demo / preview instance and does not expose content to AI crawlers.'
+        : '本站为演示 / 预览实例，不向 AI 爬虫暴露内容。'
   return `# ${oneLine(tr(en, settings.siteName))}\n\n> ${reason}\n`
 }

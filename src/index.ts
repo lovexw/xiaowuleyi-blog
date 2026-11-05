@@ -304,7 +304,10 @@ app.get('/sitemap.xml', async (c) => {
  *  演示站固定整站 Disallow（种子数据与闭站状态不该进索引），追加段不参与 */
 app.get('/robots.txt', async (c) => {
   const settings = await getSettings(c.env.DB)
-  return c.text(buildRobotsTxt(settings, new URL(c.req.url).origin, isDemo(c.env)))
+  // Sitemap 行必须走 siteBase（settings.siteUrl 优先）：sitemap 本体 / RSS / canonical /
+  // llms 全站绝对 URL 都以 siteUrl 为准，robots 跟请求 Host 会在别名域名 / 错误 Host /
+  // 反代漏传 XFP（scheme 降级）时把爬虫引去错误主机（2026-11 审计 P1-4）
+  return c.text(buildRobotsTxt(settings, siteBase(settings, new URL(c.req.url).origin), isDemo(c.env)))
 })
 
 /* ---------------- AI 索引导读（llms.txt / llms-full.txt，B28）----------------
@@ -318,9 +321,11 @@ const llmsHandler = (full: boolean): PublicHandler => async (c) => {
   c.header('Content-Type', 'text/markdown; charset=utf-8')
   c.header('Cache-Control', 'public, max-age=600')
   setSignalHeader(c, settings)
-  // AI 策略 deny 档：llms 面本就是给 AI 看的导读，robots 全拒时整体关闭（桩文案指向策略而非演示）
+  // AI 策略 deny 档：llms 面本就是给 AI 看的导读，robots 全拒时整体关闭（桩文案指向策略而非演示）。
+  // siteNoindex 的真实站单独出「不收录」文案，不冒充演示站（2026-11 审计 P2-14）
   const aiDenied = readAiPolicy(settings.aiPolicy) === 'deny'
-  if (isDemo(c.env) || settings.siteNoindex === '1' || aiDenied) return c.body(buildLlmsStub(settings, siteUrl, aiDenied))
+  const noindex = !isDemo(c.env) && settings.siteNoindex === '1'
+  if (isDemo(c.env) || noindex || aiDenied) return c.body(buildLlmsStub(settings, siteUrl, aiDenied, noindex))
   const [feed, pages, tags] = await Promise.all([
     listPosts(c.env.DB, { status: 'published', limit: full ? 50 : 100, afterTs: siteVisibleCutoff(settings) }),
     listPages(c.env.DB, { status: 'published' }),

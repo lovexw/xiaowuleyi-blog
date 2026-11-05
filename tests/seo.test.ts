@@ -154,6 +154,17 @@ test('robots 追加段：超长按整行截断，不产出半行指令', () => {
 // 内置段基线（2026-10-23 起含微博分页禁令：薄聚合页 + OFFSET 深翻页读放大，?wb= 深链与 ?topic= 照旧可爬）
 const ROBOTS_BASELINE = 'User-agent: *\nAllow: /\nDisallow: /admin\nDisallow: /weibo?page=\nSitemap: https://blog.example.com/sitemap.xml\n'
 
+test('P1-4：robots 路由的 Sitemap 基座必须走 siteBase（settings.siteUrl 优先），不跟请求 Host', async () => {
+  // buildRobotsTxt 本身只负责拼装（Sitemap 行 = 传入 origin）；收口点在 index.ts 调用处
+  // 传 siteBase(settings, …)——与 sitemap 本体 / RSS / canonical 同一域名口径。
+  // 没有全 app 测试基建，这里用源码切片守卫（同仓库镜像守卫惯例）钉住调用面
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../src/index.ts', import.meta.url), 'utf8')
+  const m = src.match(/app\.get\('\/robots\.txt'[\s\S]*?\n\}\)/)
+  assert.ok(m, 'robots 路由存在')
+  assert.ok(m[0].includes('siteBase(settings'), 'robots 路由必须传 siteBase（别名域名/错误 Host/漏传 XFP 不再带偏 Sitemap 行）')
+})
+
 test('robots.txt 组装：内置段含微博分页禁令，追加段附在内置段后，演示站固定 Disallow', () => {
   const builtin = ROBOTS_BASELINE
   assert.equal(buildRobotsTxt(S, 'https://blog.example.com'), builtin)

@@ -593,10 +593,12 @@ export async function renderPostMarkdown(c: C, slug: string): Promise<Response> 
   const settings = await getSettings(c.env.DB)
   const row = await getPostBySlug(c.env.DB, slug)
   const visibleCutoff = siteVisibleCutoff(settings)
-  // AI 策略 deny 档：.md 镜像属 AI 面，随策略整体 404（与 llms 出桩、robots 全拒同口径）
+  // AI 策略 deny 档：.md 镜像属 AI 面，随策略整体 404（与 llms 出桩、robots 全拒同口径）。
+  // 全站 noindex 同口径收口（2026-11 审计 P2-14）：llms 桩声明「不提供内容」时 .md 不再吐全文
   const aiDenied = readAiPolicy(settings.aiPolicy) === 'deny'
   const hidden =
     aiDenied ||
+    settings.siteNoindex === '1' ||
     !row ||
     row.status !== 'published' ||
     isProtected(row) ||
