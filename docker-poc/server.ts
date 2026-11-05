@@ -589,6 +589,10 @@ server.listen(PORT, () => {
   console.log(`  租户：${[...tenants.keys()].join('  ')}（*.localhost 浏览器自动解析到 127.0.0.1）`)
   console.log(`  静态根：${PUBLIC_ROOT}`)
   console.log(`  前台 JS 版本：${assetVersion() || '(未注入，Workers 形态)'}`)
+  // 2026-11-05 起页面 / 图床缓存有了 Node 实现（src/memory-cache.ts）。
+  // 这行是为了让「缓存到底活没活」一眼可见——之前 sharedCache() 恒 null，
+  // 整层静默短路，日志里完全看不出，问题藏了整整一个版本。
+  console.log('  页面缓存：进程内（单条 ≤2MB / 总量 32MB / 300 条，LRU）')
   console.log(`  数据根：${TENANTS_DIR}\n`)
 })
 

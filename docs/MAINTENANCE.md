@@ -75,7 +75,9 @@ docs/DEPLOY-ORACLE.md   唯一部署真相源
 
 这不是待办清单，是**许可**：碰到时可以直着走，不必再为另一条线留余地。
 
-- `pagecache` 的 `caches.default` 分支在 Node 下恒 miss，可以退化成进程内 LRU（单进程，无 30 分钟 TTL 约束）
+- `pagecache` 的 `caches.default` 分支在 Node 下恒 miss —— **已兑现（2026-11-05）**：新增
+  `src/memory-cache.ts` 提供进程内实现，自托管形态的页面 / 图床缓存从「整层短路」变成真生效。
+  这条是自用红利的第一笔，也是「只维护一条线」最直接的回报
 - 定时任务可以用 systemd timer / crontab 直管，不必再走 Cron Triggers 的口径
 - 备份可以只考虑本地磁盘 + 树莓派，不必再为 R2 留路径
 - 可以放心依赖 `node:sqlite` 的特性（语句缓存、WAL 调优已在用）

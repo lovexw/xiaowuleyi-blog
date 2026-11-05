@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
 import { MEMBER_SESSION_COOKIE, SESSION_COOKIE } from './auth'
 import { getSettings, PAGE_CACHE_EPOCH_KEY, saveSettings } from './db'
+import { nodeMemoryCache } from './memory-cache'
 import { PP_COOKIE } from './protect'
 import type { Env, SessionUser } from './types'
 import { isDemo } from './utils'
@@ -41,7 +42,9 @@ import { isDemo } from './utils'
  * 直接边缘命中，省掉每次 Worker→R2 的跨境回源（图片是文章页的流量大头）。键不带 epoch：
  * 内容寻址永不失效，TTL 由 R2 对象自带的 immutable 头（1y）决定。
  *
- * Node 测试与 docker-poc 无 caches.default：整层自动退化为直查直渲染，无需 shim。
+ * Node 测试与 docker-poc 没有 caches.default：sharedCache() 自动退到进程内实现
+ * （src/memory-cache.ts，LRU + 单条 2MB / 总量 32MB 上限），自托管形态同样吃这层缓存。
+ * 测试要隔离时调 resetMemoryCache()。
  * 访客统计不受影响：visit_log 走 /api/public/track POST（永不缓存），bot_log 中间件注册
  * 在缓存之前照常记录；posts.views 阅读数只在回源渲染时 +1，边缘命中不计数——属预期取舍。
  */
@@ -128,7 +131,9 @@ export async function purgePageCache(db: D1Database): Promise<void> {
 
 function sharedCache(): Cache | null {
   const c = (globalThis as { caches?: { default?: Cache } }).caches
-  return c?.default ?? null
+  // Workers 走原生 Cache API（colo 级共享）；Node 自托管没有这个全局对象，
+  // 退到进程内实现——否则整层短路，那 1800 秒缓存从上线起就没生效过。
+  return c?.default ?? nodeMemoryCache()
 }
 
 /** 缓存键判定（纯函数，tests 直接导入）：可缓存返回键 URL，否则 null */
@@ -248,7 +253,7 @@ export function isImageStorable(res: Response): boolean {
 type WaitUntil = { waitUntil(promise: Promise<unknown>): void }
 
 /** 图床边缘缓存读：命中返回副本（带 If-None-Match 先在边缘复验 304，不再回 R2），未命中
- *  返回 null 让调用方回 R2。Node / docker-poc 无 caches.default 恒 null（直查直渲染）。
+ *  返回 null 让调用方回 R2。Node / docker-poc 退到进程内实现（行为与 Workers 一致）。
  *  Range 续传（视频 seek）：cache.match 返回整份 200 或切片 206，都兼容——回源 R2 的
  *  现状本来就是整份 200，无回归 */
 export async function imageCacheMatch(req: Request): Promise<Response | null> {
@@ -297,7 +302,7 @@ export function imageCachePut(req: Request, res: Response, ctx: WaitUntil): void
 /** 图床边缘缓存定向清理（2026-10-15 审计 F2）：删除媒体 / 更新可覆盖键（favicon）后调用，
  *  不然边缘副本（immutable 1y）会继续把已删/旧内容发给持旧 URL 的访客。缓存键带 host——
  *  这里按当前请求的 origin 清理（最佳努力口径：站长平时用的域名立即生效，其它 host 的
- *  副本等边缘逐出或 TTL 到期）。Node / docker-poc 无 caches.default 直接空操作 */
+ *  副本等边缘逐出或 TTL 到期）。Node / docker-poc 同样生效（进程内 delete）。 */
 export async function purgeImageCache(origin: string, keys: string[]): Promise<void> {
   const cache = sharedCache()
   if (!cache || !keys.length) return
