@@ -2474,10 +2474,13 @@ api.get('/admin/comments', async (c) => {
   else if (type === 'weibo') where.push('c.weibo_id > 0')
   else if (type === 'guestbook') where.push('c.post_id = 0 AND c.weibo_id = 0')
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
+  // guestbook 等值分支强制走 idx_comments_post（P0-3 防线，2026-11 审计 P2-2 补口）：
+  // 规划器会误选 idx_comments_weibo——weibo_id=0 会扫进全部文章评论（EQP 实测），别信规划器
+  const indexHint = type === 'guestbook' ? 'INDEXED BY idx_comments_post' : ''
   const [listRes, countRes, pendingRes] = await Promise.all([
     c.env.DB.prepare(
       `SELECT c.*, p.title AS post_title, p.slug AS post_slug, w.content AS weibo_content, pc.nickname AS parent_nickname
-       FROM comments c
+       FROM comments c ${indexHint}
        LEFT JOIN posts p ON p.id = c.post_id
        LEFT JOIN weibo w ON w.id = c.weibo_id
        LEFT JOIN comments pc ON pc.id = c.parent_id
@@ -2485,7 +2488,7 @@ api.get('/admin/comments', async (c) => {
     )
       .bind(...binds, limit, (page - 1) * limit)
       .all(),
-    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM comments c ${whereSql}`)
+    c.env.DB.prepare(`SELECT COUNT(*) AS n FROM comments c ${indexHint} ${whereSql}`)
       .bind(...binds)
       .first<{ n: number }>(),
     // 全局待审数：侧栏「评论」角标在审核操作后随本接口刷新

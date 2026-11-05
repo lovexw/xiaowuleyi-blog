@@ -2049,23 +2049,79 @@ export async function listMemberReplies(
   db: D1Database,
   memberId: number,
   limit = 30
-): Promise<{ id: number; parentId: number; postId: number; weiboId: number; nickname: string; content: string; isAdmin: number; created_at: number; mineContent: string; postSlug: string | null; postTitle: string | null; weiboContent: string | null }[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT r.id, r.parent_id AS parentId, c.post_id AS postId, c.weibo_id AS weiboId, r.nickname, r.content, r.is_admin AS isAdmin, r.created_at,
-              c.content AS mineContent, p.slug AS postSlug, p.title AS postTitle, w.content AS weiboContent
-       FROM comments r
+): Promise<{ id: number; parentId: number; postId: number; weiboId: number; nickname: string; content: string; isAdmin: number; created_at: number; mineContent: string; postSlug: string | null; postTitle: string | null; weiboContent: string | null; rootTier: string | null; rootTierExpires: number | null }[]> {
+  // 两步锚点查询（2026-11 审计 P2-3 读放大收口）：旧写法 `r.member_id IS NOT ?` 是非索引
+  // 谓词，r 侧每次渲染扫全部已审评论。扁平楼中楼下回复的 parent_id 恒指线程根，
+  // 「我参与过的线程」= 我发过的评论 id ∪ 我回复的 parent_id（都是等值可索引集合）；
+  // 第二步按锚点 IN 走 idx_comments_parent（MULTI-INDEX 同族，INDEXED BY 硬约束）。
+  // 附带 rootTier/rootTierExpires（线程根作者档位）：/member「收到的回复」的圈层过滤
+  // （P3-26）在 pages.ts 按 commentgate 判定，不在这里做（db 层不读 settings）
+  const anchors = new Set<number>()
+  {
+    const mine = await db.prepare('SELECT id FROM comments WHERE member_id = ? LIMIT 500').bind(memberId).all<{ id: number }>()
+    for (const r of mine.results ?? []) anchors.add(r.id)
+    const replied = await db
+      .prepare('SELECT DISTINCT parent_id AS id FROM comments WHERE member_id = ? AND parent_id > 0 LIMIT 500')
+      .bind(memberId)
+      .all<{ id: number }>()
+    for (const r of replied.results ?? []) anchors.add(r.id)
+  }
+  if (!anchors.size) return []
+  const anchorList = [...anchors]
+  const out: {
+    id: number
+    parentId: number
+    postId: number
+    weiboId: number
+    nickname: string
+    content: string
+    isAdmin: number
+    created_at: number
+    mineContent: string
+    postSlug: string | null
+    postTitle: string | null
+    weiboContent: string | null
+    rootTier: string | null
+    rootTierExpires: number | null
+  }[] = []
+  // 分块 90 个锚点（D1 单条 SQL 变量上限 100：90 锚点 + member_id + LIMIT = 92）
+  for (let i = 0; i < anchorList.length; i += 90) {
+    const chunk = anchorList.slice(i, i + 90)
+    const ph = chunk.map(() => '?').join(',')
+    const res = await db
+      .prepare(
+        `SELECT r.id, r.parent_id AS parentId, c.post_id AS postId, c.weibo_id AS weiboId, r.nickname, r.content, r.is_admin AS isAdmin, r.created_at,
+              c.content AS mineContent, p.slug AS postSlug, p.title AS postTitle, w.content AS weiboContent,
+              m2.tier AS rootTier, m2.tier_expires_at AS rootTierExpires
+       FROM comments r INDEXED BY idx_comments_parent
        JOIN comments c ON c.id = r.parent_id
+       LEFT JOIN members m2 ON m2.id = c.member_id
        LEFT JOIN posts p ON c.post_id > 0 AND p.id = c.post_id AND p.deleted_at IS NULL
        LEFT JOIN weibo w ON c.weibo_id > 0 AND w.id = c.weibo_id AND w.deleted_at IS NULL
-       WHERE r.status = 'approved' AND r.member_id IS NOT ? AND r.id != c.id
-         AND (c.member_id = ?
-              OR r.parent_id IN (SELECT parent_id FROM comments WHERE member_id = ? AND parent_id > 0))
+       WHERE r.parent_id IN (${ph}) AND r.status = 'approved' AND r.member_id != ? AND r.id != c.id
        ORDER BY r.created_at DESC LIMIT ?`
-    )
-    .bind(memberId, memberId, memberId, limit)
-    .all<{ id: number; parentId: number; postId: number; weiboId: number; nickname: string; content: string; isAdmin: number; created_at: number; mineContent: string; postSlug: string | null; postTitle: string | null; weiboContent: string | null }>()
-  return results ?? []
+      )
+      .bind(...chunk, memberId, limit)
+      .all<{
+        id: number
+        parentId: number
+        postId: number
+        weiboId: number
+        nickname: string
+        content: string
+        isAdmin: number
+        created_at: number
+        mineContent: string
+        postSlug: string | null
+        postTitle: string | null
+        weiboContent: string | null
+        rootTier: string | null
+        rootTierExpires: number | null
+      }>()
+    out.push(...(res.results ?? []))
+  }
+  out.sort((a, b) => b.created_at - a.created_at)
+  return out.slice(0, limit)
 }
 
 /** 浏览足迹滚动清理（index.ts 备份 cron 顺带）：保留窗口与 visit_log 同为 90 天 */

@@ -239,6 +239,10 @@ async function runListComments(deps: McpDeps, args: Record<string, unknown>): Pr
   else if (typeArg === 'weibo') where.push('c.weibo_id > 0')
   else if (typeArg === 'guestbook') where.push('c.post_id = 0 AND c.weibo_id = 0')
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
+  // guestbook 等值分支必须强制走 idx_comments_post（P0-3 防线，2026-11 审计 P2-2 补口）：
+  // 规划器会误选 idx_comments_weibo（weibo_id=0 等于扫进全部文章评论）——管理面/MCP 是
+  // 可被自动化循环调用的端点，别信规划器
+  const indexHint = typeArg === 'guestbook' ? 'INDEXED BY idx_comments_post' : ''
   // 出参只给审核需要的列：email / qq / ip / avatar 不出（qq 是内部记账列，ip 与头像无审核用途）
   const [listRes, countRes] = await Promise.all([
     deps.db
@@ -246,7 +250,7 @@ async function runListComments(deps: McpDeps, args: Record<string, unknown>): Pr
         `SELECT c.id, c.post_id, c.weibo_id, c.parent_id, c.is_admin, c.member_id, c.nickname, c.website,
                 c.content, c.status, c.created_at,
                 p.title AS post_title, p.slug AS post_slug, w.content AS weibo_content, pc.nickname AS parent_nickname
-         FROM comments c
+         FROM comments c ${indexHint}
          LEFT JOIN posts p ON p.id = c.post_id
          LEFT JOIN weibo w ON w.id = c.weibo_id
          LEFT JOIN comments pc ON pc.id = c.parent_id
@@ -254,7 +258,7 @@ async function runListComments(deps: McpDeps, args: Record<string, unknown>): Pr
       )
       .bind(...binds, limit)
       .all(),
-    deps.db.prepare(`SELECT COUNT(*) AS n FROM comments c ${whereSql}`).bind(...binds).first<{ n: number }>(),
+    deps.db.prepare(`SELECT COUNT(*) AS n FROM comments c ${indexHint} ${whereSql}`).bind(...binds).first<{ n: number }>(),
   ])
   return ok({ total: countRes?.n ?? 0, items: listRes.results ?? [] })
 }

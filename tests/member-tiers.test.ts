@@ -154,6 +154,8 @@ test('会员回复链路：会员可回复楼中楼、游客回复被拒、被�
   assert.equal(repliesA[0].content, 'B 回复 A')
   assert.equal(repliesA[0].nickname, 'replyb')
   assert.equal(repliesA[0].postSlug, 'open-post')
+  // 线程根作者档位随行带出（P3-26 圈层过滤的数据契约）：B 是默认注册档、线程根是 A
+  assert.ok('rootTier' in repliesA[0], 'rootTier 字段必须在场（pages.ts 圈层过滤依赖）')
   const repliesB = await listMemberReplies(d1, (db.prepare("SELECT id FROM members WHERE username = 'replyb'").get() as { id: number }).id)
   assert.equal(repliesB.length, 0, '自己发的回复不进自己的收件箱')
 

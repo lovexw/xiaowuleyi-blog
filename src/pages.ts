@@ -70,7 +70,7 @@ import { extractOgImage, sanitizeHtml } from './sanitize'
 import { hasValidUnlock, isProtected, PP_COOKIE, PP_CSS, passwordFormHtml, protectedDescription } from './protect'
 import { normalizeMinTier } from './points'
 import { canReadTiers, effectiveTier, parseMemberTiers, upgradeTarget, type MemberTierDef } from './tiers'
-import { applyCommentGate, commentGateContext } from './commentgate'
+import { applyCommentGate, commentGateContext, commentGateText, threadRootTier, type GateContext } from './commentgate'
 import { renderPostContentHtml } from './hooks'
 import { getTheme } from './themes/registry'
 import type { MemberData, RankData } from './themes/registry'
@@ -1236,8 +1236,13 @@ async function rankEntries(c: C, settings: SettingsMap, sessionId: number | null
 }
 
 /** 会员活动中心数据（会员 3.0 预备）：四组查询转统一条目（href = 目标活链，目标已删只出文字）。
- *  只服务会员本人（/member 页 SSR 直出），无公开出参 */
-async function memberActivity(db: D1Database, memberId: number): Promise<MemberActivityView> {
+ *  只服务会员本人（/member 页 SSR 直出），无公开出参。
+ *  gate = 评论圈层上下文（调用方用同一套 commentGateContext 组装）：高档位线程的回复正文不下发 */
+async function memberActivity(
+  db: D1Database,
+  memberId: number,
+  gate?: GateContext
+): Promise<MemberActivityView> {
   const [visits, likes, comments, replies] = await Promise.all([
     listMemberVisits(db, memberId),
     listMemberLikes(db, memberId),
@@ -1292,8 +1297,23 @@ async function memberActivity(db: D1Database, memberId: number): Promise<MemberA
         : r.weiboId > 0
           ? tr(false, '微博评论')
           : tr(false, '留言板')
+      // 圈层过滤（2026-11 审计 P3-26）：「收到的回复」是本人私有页，但高档位线程的回复
+      // 正文同样不能下发——线程根档位（db 带出的 rootTier）高于读者等级时出占位文案。
+      // 管理员 / 门槛关闭 / 等级足够：原样
+      let title = excerpt(r.content, 60)
+      if (gate) {
+        const root = threadRootTier(gate.defs, {
+          id: r.parentId,
+          is_admin: r.isAdmin,
+          member_tier: r.rootTier,
+          member_tier_expires_at: r.rootTierExpires,
+        }, gate.now)
+        if (gate.gateRank > 0 && root.rank >= gate.gateRank && gate.viewerRank < root.rank && !gate.admin) {
+          title = commentGateText(root.name, gate.viewerRank).title
+        }
+      }
       return {
-        title: excerpt(r.content, 60),
+        title,
         href: isPost ? postHref(r.postSlug) : r.weiboId > 0 ? `/weibo?wb=${r.weiboId}#wb-${r.weiboId}` : '/guestbook',
         sub: `${r.isAdmin ? tr(false, '作者') : r.nickname} · ${context}`,
         ts: r.created_at,
@@ -1357,7 +1377,13 @@ export async function renderMember(c: C): Promise<Response> {
         upgradeCost: canUpgrade && redeemCost > 0 ? redeemCost : undefined,
         paidNote: canUpgrade && settings.premiumPaidNote?.trim() ? settings.premiumPaidNote.trim() : undefined,
         notice: settings.memberNotice?.trim() || undefined,
-        activity: await memberActivity(c.env.DB, row.id),
+        // 「收到的回复」的圈层上下文：管理员会话也传（gate.admin 无视遮罩）——
+        // getSessionUser 在未登录时为 null，与游客一致按 viewerRank=0 处理
+        activity: await memberActivity(
+          c.env.DB,
+          row.id,
+          commentGateContext(defs, settings.commentGateTier, row, !!(await getSessionUser(c.env.DB, c.req.raw)), Date.now())
+        ),
       }
     }
   }

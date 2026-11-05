@@ -98,10 +98,24 @@ function listAllKeys(root: string): string[] {
   return out.sort()
 }
 
+/** 缺 .meta.json 时的 etag 兜底记忆化（2026-11 审计 P2-16）：同步 md5 全文件读很贵
+ *  （25MB ≈ 46ms，事件循环逐请求付费），按 (路径, mtime, size) 记忆化——文件没变直接复用。
+ *  gen-variants.py 现在会给产物补写旁车，这条兜底只剩残文件/手工拷贝会走到 */
+const etagMemo = new Map<string, { etag: string; mtimeMs: number; size: number }>()
+const ETAG_MEMO_MAX = 512
+function diskEtag(file: string, st: fs.Stats): string {
+  const memo = etagMemo.get(file)
+  if (memo && memo.mtimeMs === st.mtimeMs && memo.size === st.size) return memo.etag
+  const etag = crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex')
+  if (etagMemo.size >= ETAG_MEMO_MAX) etagMemo.clear()
+  etagMemo.set(file, { etag, mtimeMs: st.mtimeMs, size: st.size })
+  return etag
+}
+
 function makeObject(file: string, key: string, withBody: boolean, range?: { start: number; end: number } | null) {
   const meta = readMeta(file)
   const st = fs.statSync(file)
-  const etag = `"${meta.etag ?? crypto.createHash('md5').update(fs.readFileSync(file)).digest('hex')}"`
+  const etag = `"${meta.etag ?? diskEtag(file, st)}"`
   const size = range ? range.end - range.start + 1 : st.size
   const readSlice = (): Buffer => {
     if (!range) return fs.readFileSync(file)

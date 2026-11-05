@@ -5,8 +5,10 @@
 1. 产物直接落在图床目录：`<原 key>@<宽>.webp`，例如
    `u/202610/abc.jpg` → `u/202610/abc.jpg@480.webp`。
    应用侧 /images/* 路由按 key 直读磁盘，所以**不需要注册、不需要改路由**就能服务。
-   不写 .meta.json 旁车：r2disk 读不到元数据时，路由会按扩展名补 image/webp，
-   并兜底 `public, max-age=31536000, immutable`——正是我们想要的。
+   产物会补写 .meta.json 旁车（etag + image/webp，2026-11 审计 P2-16）：
+   r2disk 缺旁车时每次请求都要同步全文件读算 etag（大文件毫秒级阻塞事件循环），
+   有旁车则 /images 直接命中元数据零额外读。就算旁车缺失，路由也会按扩展名
+   兜底 image/webp + immutable——功能不依赖旁车，只是性能优化。
 2. **绝不放大**：内容宽度取 min(槽位宽, 原图宽)。72px 的头像不会变成 192px 的模糊图。
 3. 可重入：已存在的变体一律跳过（原图 key 含时间戳+随机数，同 key 永不覆盖）。
 4. 元数据全剥（-metadata none）：存量图里有 72×72 却有 293KB 的，几乎全是 EXIF/内嵌缩略图。
@@ -17,6 +19,8 @@
 """
 
 import argparse
+import hashlib
+import json
 import os
 import struct
 import subprocess
@@ -155,6 +159,17 @@ def work(path, widths, quality):
         os.replace(tmp, out)
         produced.add(target)
         os.chmod(out, 0o644)
+        # 补写 .meta.json 旁车（2026-11 审计 P2-16）：r2disk 缺旁车时每次请求会同步
+        # 全文件读算 etag（25MB 46ms vs 0.13ms，360 倍）——变体是最高频的缺旁车对象，
+        # 这里补上 etag 与 Content-Type，/images 直接吃旁车零额外读
+        try:
+            with open(out, 'rb') as f:
+                etag = hashlib.md5(f.read()).hexdigest()
+            with open(out + '.meta.json', 'w') as f:
+                json.dump({'etag': etag, 'contentType': 'image/webp'}, f)
+            os.chmod(out + '.meta.json', 0o644)
+        except OSError:
+            pass
         # 属主跟原图走：定时器以 root 跑，产物若都是 root:root，将来容器改用非 root
         # 用户或运维脚本按属主筛文件时会别扭
         try:
