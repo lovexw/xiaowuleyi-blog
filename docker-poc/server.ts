@@ -16,8 +16,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { Readable } from 'node:stream'
-import { pipeline } from 'node:stream/promises'
+// pipeline 用 node:stream 的回调版：stream/promises 版在 Node ≥22 的三参形态
+// （source, destination, callback）会把回调误当「destination function」再解析一遍，
+// 抛 ERR_INVALID_RETURN_VALUE（冒烟实测 2026-11-05，repro 见审计记录）——
+// 回调版语义相同且两参/三参都稳定
+import { Readable, pipeline } from 'node:stream'
 
 import xwblog from '../src/index'
 import { assetVersion, injectAdminAssetVersion, setAssetVersion, VERSIONED_ASSET_PATHS } from '../src/assets'

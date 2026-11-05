@@ -15,6 +15,11 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFile as execFileCb } from 'node:child_process'
 import { randomToken, hashPassword, safeEqual, rateLimit } from '../src/auth'
+
+/** 控制面自身的 rateLimit 作用域（单例对象）：控制面不经过租户请求路径、没有 env，
+ *  rateLimit 第一参必须是对象（WeakMap key），别传字符串——smoke 实测会抛
+ *  「Invalid value used as weak map key」把整个控制面打成 500（2026-11-05） */
+const CONTROL_SCOPE = {}
 import { parseSemver, updateStatus, validateUpdateManifest, UPDATE_GUIDE_URL, UPDATE_MANIFEST_URL, type UpdateStatus } from '../src/update'
 import { APP_VERSION } from '../src/version'
 
@@ -1383,9 +1388,11 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
   const path = url.pathname
   startedAt ||= Date.now() - Number(process.uptime() * 1000)
 
-  // 登录：账户名 + 密码 双字段，限流 10 次 / 10 分钟（复用 src/auth.ts 的进程内限流桶）
+  // 登录：账户名 + 密码 双字段，限流 10 次 / 10 分钟（复用 src/auth.ts 的进程内限流桶）。
+  // 作用域传 CONTROL_SCOPE 单例对象（P0-1 防线）：控制面是全局单例（非租户请求路径），
+  // env 作用域在这层不存在——rateLimit 的第一参必须是对象，字符串当 WeakMap key 会抛
   if (method === 'POST' && path === '/login') {
-    if (!rateLimit(`control-login:${deps.host}`, 10, 10 * 60_000)) {
+    if (!rateLimit(CONTROL_SCOPE, `control-login:${deps.host}`, 10, 10 * 60_000)) {
       return sendHtml(res, loginPage('尝试次数过多，请 10 分钟后再试。'), 429)
     }
     const body = await readBody(req)
