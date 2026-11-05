@@ -86,7 +86,7 @@ async function registerMember(d1: D1Database, username: string): Promise<string>
   const ec = { waitUntil: (p: Promise<unknown>) => tasks.push(p), passThroughOnException: () => {} } as never
   const res = await api.request(
     'https://x.example.com/member/register',
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username, password: 'member-pass-123' }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username, password: 'member-pass-123', email: `${username}@example.com` }) },
     env,
     ec
   )
@@ -322,4 +322,42 @@ test('设置 PUT：memberTiers 走 cleanMemberTiers 校验（合法入库 / 非�
     ec
   )
   assert.equal(bad.status, 400, '保留字 key 必须被拒')
+})
+
+test('注册邮箱：必填 / 格式 / 一邮箱一账号 / 入库转小写', async () => {
+  const { db, d1 } = await setupDb()
+  const { api } = await import('../src/api')
+  const env = { DB: d1, IMAGES: {}, ASSETS: {} } as never
+  const ec = { waitUntil: () => {}, passThroughOnException: () => {} } as never
+  // 每次换 IP：注册限流是「每 IP 10 分钟 5 次」，本用例会超这个额度
+  let seq = 0
+  const reg = (body: Record<string, unknown>) =>
+    api.request(
+      'https://x.example.com/member/register',
+      { method: 'POST', headers: { ...JSON_HEADERS, 'CF-Connecting-IP': `10.77.0.${++seq}` }, body: JSON.stringify(body) },
+      env,
+      ec
+    )
+
+  // 缺邮箱：邮箱是跨站会员继承唯一的身份凭据，不能空着注册
+  const noMail = await reg({ username: 'nomail01', password: 'member-pass-123' })
+  assert.equal(noMail.status, 400)
+  assert.match(((await noMail.json()) as { error: string }).error, /邮箱/)
+
+  const badMail = await reg({ username: 'badmail01', password: 'member-pass-123', email: 'not-a-mail' })
+  assert.equal(badMail.status, 400)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM members WHERE username = 'badmail01'").get<{ n: number }>()?.n, 0)
+
+  // 正常注册：前后空白与大小写归一后入库
+  const ok = await reg({ username: 'MixedMail', password: 'member-pass-123', email: '  MiXeD@Example.COM  ' })
+  assert.equal(ok.status, 200, await ok.clone().text())
+  const row = db.prepare("SELECT email FROM members WHERE username = 'MixedMail'").get() as { email: string }
+  assert.equal(row.email, 'mixed@example.com', '入库统一小写：跨站认领按 LOWER(email) 比对')
+
+  // 同邮箱（大小写不同也算同一个）不能注册第二个账号：
+  // 跨站认领是先到先得，同邮箱双账号会让「谁拿权益」变成竞态
+  const dup = await reg({ username: 'mixedmail2', password: 'member-pass-123', email: 'MIXED@example.com' })
+  assert.equal(dup.status, 400)
+  assert.match(((await dup.json()) as { error: string }).error, /邮箱已被/)
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM members WHERE username = 'mixedmail2'").get<{ n: number }>()?.n, 0, '被拒的注册不留半成品会员')
 })

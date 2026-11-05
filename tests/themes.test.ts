@@ -293,6 +293,8 @@ for (const [themeId, theme] of Object.entries(THEMES as Record<string, ThemeModu
     checkPage(themeId, 'member(anon)', anon)
     assert.ok(anon.includes('data-member-form="login"'), '未登录应有登录表单')
     assert.ok(anon.includes('data-member-form="register"'), '未登录应有注册表单')
+    assert.ok(anon.includes('name="emailConfirm"'), '注册邮箱要二次输入（防手误，且它是跨站继承的凭据）')
+    assert.ok(/name="email"[^>]*required/.test(anon) && /name="emailConfirm"[^>]*required/.test(anon), '邮箱与确认框都是必填')
     assert.ok((anon.match(/class="cmt-hp"/g) || []).length >= 2, '两个表单都要带蜜罐字段')
     const loggedIn = theme.member!({ ...memberData(), member: memberView })
     checkPage(themeId, 'member(logged)', loggedIn)

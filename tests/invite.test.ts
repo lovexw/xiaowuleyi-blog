@@ -158,7 +158,7 @@ test('邀请码链路：生成 → 凭码注册拿档位 → 一码一人 → �
   // 凭码注册：带连字符输入也能认（前端展示形态与存库形态不同）
   const reg = await api.request(
     `${ORIGIN}/member/register`,
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip1', password: 'pass12345', inviteCode: formatInviteCode(code1) }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip1', password: 'pass12345', email: 'vip1@example.com', inviteCode: formatInviteCode(code1) }) },
     env,
     ec
   )
@@ -170,7 +170,7 @@ test('邀请码链路：生成 → 凭码注册拿档位 → 一码一人 → �
   // 同一个码再用一次 → 400（一次性）
   const again = await api.request(
     `${ORIGIN}/member/register`,
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip2', password: 'pass12345', inviteCode: code1 }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip2', password: 'pass12345', email: 'vip2@example.com', inviteCode: code1 }) },
     env,
     ec
   )
@@ -181,14 +181,14 @@ test('邀请码链路：生成 → 凭码注册拿档位 → 一码一人 → �
   await saveSettings(d1, { memberRegOpen: '0' })
   const noCode = await api.request(
     `${ORIGIN}/member/register`,
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip3', password: 'pass12345' }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip3', password: 'pass12345', email: 'vip3@example.com' }) },
     env,
     ec
   )
   assert.equal(noCode.status, 403, '关注册后没码进不来')
   const withCode = await api.request(
     `${ORIGIN}/member/register`,
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip4', password: 'pass12345', inviteCode: code2 }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'vip4', password: 'pass12345', email: 'vip4@example.com', inviteCode: code2 }) },
     env,
     ec
   )
@@ -230,7 +230,7 @@ test('邀请码过期：过了码有效期再注册 → 400', async () => {
     .run()
   const res = await api.request(
     `${ORIGIN}/member/register`,
-    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'late1', password: 'pass12345', inviteCode: 'QRTY2345' }) },
+    { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ username: 'late1', password: 'pass12345', email: 'late1@example.com', inviteCode: 'QRTY2345' }) },
     env,
     ec
   )
@@ -254,7 +254,7 @@ function registerWith(
     {
       method: 'POST',
       headers: { ...JSON_HEADERS, 'CF-Connecting-IP': ip },
-      body: JSON.stringify({ username, password: 'pass12345', ...(code ? { inviteCode: code } : {}) }),
+      body: JSON.stringify({ username, password: 'pass12345', email: `${username}@example.com`, ...(code ? { inviteCode: code } : {}) }),
     },
     env,
     ec

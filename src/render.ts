@@ -1391,7 +1391,8 @@ export function memberAuthHtml(en = false, o?: { settings?: SettingsMap }): stri
     <input class="mem-input" name="username" maxlength="24" placeholder="${tr(en, '用户名（2-24 位字母、数字、_ 或 -）')}" autocomplete="username" required aria-label="${tr(en, '用户名')}">
     <input class="mem-input" name="nickname" maxlength="24" placeholder="${tr(en, '昵称（选填，中英文均可）')}" aria-label="${tr(en, '昵称（选填，中英文均可）')}">
     <input class="mem-input" type="password" name="password" maxlength="72" placeholder="${en ? 'Password (min 8 characters)' : '密码（至少 8 位）'}" autocomplete="new-password" required aria-label="${tr(en, '密码')}">
-    <input class="mem-input" type="email" name="email" maxlength="120" placeholder="${tr(en, '邮箱（选填）')}" autocomplete="email" aria-label="${tr(en, '邮箱（选填）')}">
+    <input class="mem-input" type="email" name="email" maxlength="100" placeholder="${tr(en, '邮箱（必填，用于识别会员身份）')}" autocomplete="email" required aria-label="${tr(en, '邮箱（必填）')}">
+    <input class="mem-input" type="email" name="emailConfirm" maxlength="100" placeholder="${tr(en, '再次输入邮箱')}" autocomplete="off" spellcheck="false" required aria-label="${tr(en, '再次输入邮箱')}">
     <input class="mem-input" name="inviteCode" maxlength="12" placeholder="${en ? 'Invite code (optional)' : '邀请码（选填，填了可直接获得对应档位）'}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;" aria-label="${en ? 'Invite code' : '邀请码'}">
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
     <button class="mem-btn" type="submit">${tr(en, '注册并登录')}</button>

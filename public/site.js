@@ -64,6 +64,8 @@
     '注册成功，正在进入…': 'Account created — signing you in…',
     '登录成功，正在进入…': 'Logged in — redirecting…',
     '请先完成人机验证': 'Please complete the verification first',
+    '请填写邮箱': 'Please enter your email',
+    '两次输入的邮箱不一致，请核对': 'The two email addresses do not match — please check them',
     '人机验证还没就绪，请稍候再试': 'Verification is still loading — please wait a moment and retry',
     '操作失败，请重试': 'Something went wrong — please try again',
     '昵称不能为空': 'Display name cannot be empty',
@@ -3102,8 +3104,29 @@
         var username = form.querySelector('[name=username]')
         var password = form.querySelector('[name=password]')
         var email = form.querySelector('[name=email]')
+        var emailConfirm = form.querySelector('[name=emailConfirm]')
         var link = form.querySelector('[name=link]')
         if (!username || !username.value.trim() || !password || !password.value) return
+        /* 邮箱必填（服务端也拦）+ 二次输入防手误：它是跨站会员继承唯一的身份凭据，
+         * 填错等于认领不到权益。两次比对忽略大小写（地址本身大小写不敏感），不一致就地停下，
+         * 不发注定失败的请求。 */
+        if (kind === 'register') {
+          var mailIn = email ? email.value.trim() : ''
+          var mailAgain = emailConfirm ? emailConfirm.value.trim() : ''
+          if (!mailIn) {
+            if (tip) tip.textContent = T('请填写邮箱')
+            if (email) email.focus()
+            return
+          }
+          if (mailIn.toLowerCase() !== mailAgain.toLowerCase()) {
+            if (tip) tip.textContent = T('两次输入的邮箱不一致，请核对')
+            if (emailConfirm) {
+              emailConfirm.focus()
+              emailConfirm.select()
+            }
+            return
+          }
+        }
         var label = btn.textContent
         btn.textContent = kind === 'register' ? T('注册中…') : T('登录中…')
         btn.disabled = true
@@ -3111,7 +3134,7 @@
         if (kind === 'register') {
           var nick = form.querySelector('[name=nickname]')
           if (nick && nick.value.trim()) body.nickname = nick.value.trim()
-          if (email && email.value.trim()) body.email = email.value.trim()
+          if (email) body.email = email.value.trim() // emailConfirm 只在前端比对，不上送（它只防手误，不是数据）
           // 邀请码（选填）：一码一人，服务端核销后直接把会员提到码上指定的档位；
           // 关闭开放注册时它就是唯一入口，留空会被服务端拒绝
           var inv = form.querySelector('[name=inviteCode]')

@@ -112,7 +112,7 @@ test('端到端：注册即活跃 1 天 → 签到 +2 且 streak=1 → 重复签
 
   const reg = await api.request('https://x.example.com/member/register', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'fan01', password: 'fan-pass-123' }),
+    body: JSON.stringify({ username: 'fan01', password: 'fan-pass-123', email: 'fan01@example.com' }),
   }, env, ec)
   assert.equal(reg.status, 200)
   const cookie = (reg.headers.get('set-cookie') || '').split(';')[0]

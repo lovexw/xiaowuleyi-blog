@@ -475,13 +475,24 @@ api.post('/member/register', async (c) => {
   }
   const username = String(body?.username || '').trim()
   const password = String(body?.password || '')
-  const email = String(body?.email || '').trim().slice(0, 100)
+  const email = normalizeEmail(body?.email)
   // 昵称选填（中英文均可，仅展示不做唯一约束）；注册时填写不占用 30 天修改窗口
   const nickname = cleanNickname(body?.nickname)
   if (!/^[a-zA-Z0-9_-]{2,24}$/.test(username)) return jsonError('用户名需为 2-24 位字母、数字、_ 或 -')
   if (password.length < 8 || password.length > 64) return jsonError('密码长度需为 8-64 位')
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError('邮箱格式不正确')
+  // 邮箱必填：跨站会员继承只认邮箱（src/partner.ts），没有它就没法认领权益。
+  // 不做邮箱验证（本站无邮件服务），所以只做格式 + 两次输入（前端）两道防手误
+  if (!email) return jsonError('请填写邮箱')
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError('邮箱格式不正确')
   if (await getMemberByUsername(c.env.DB, username)) return jsonError('用户名已被占用')
+  // 邮箱唯一：跨站认领是「先到先得」，同邮箱两个账号会让谁拿权益变成竞态。
+  // 历史数据可能已有重复，因此不强制 UNIQUE 索引，只在新注册这一道拦
+  if (
+    await c.env.DB.prepare('SELECT id FROM members WHERE LOWER(email) = ? LIMIT 1')
+      .bind(email)
+      .first<{ id: number }>()
+  )
+    return jsonError('该邮箱已被其他账号使用')
   const { hash, salt } = await hashPassword(password)
   let memberId: number
   try {
