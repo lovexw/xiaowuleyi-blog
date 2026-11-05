@@ -239,6 +239,7 @@ ssh ... 'tail -5 /opt/1panel/apps/openresty/openresty/www/sites/blog.xiaowuleyi.
 | 切域名后是应用自己的 404 | openresty 没透传 `Host`，应用按 Host 找不到租户 |
 | 构建慢或失败 | `/opt/xwblog-deploy/state/build.log`，多为 npm 网络或磁盘满（`df -h /`） |
 | 数据像丢了 | 基本不会：`ls /opt/xwblog-data/blog.xiaowuleyi.com/`，容器只是挂载它 |
+| 图片/视频传不上去（界面报 `Unexpected token '服'`） | 数据目录被 root 动过。`sudo docker exec xwblog-next ls -lnd /data/tenants/*/uploads/u/*`，属主不是 1000 就 `sudo chown -R 1000:1000 /opt/xwblog-data/<站点>/uploads`（btchao 是 `/opt/btchao-blog/data/<站点>/uploads`）。应用进程是 `node`(1000)，写 root 目录会 EACCES。entrypoint 启动时会把这一层自愈，但仅限 `*/uploads`、`*/uploads/u`、`*/uploads/u/<月份>` 三级；若是更深的子目录被 root 弄脏，手工 chown。**别用 `docker exec` 默认的 root 去写数据目录** |
 
 ## 想改成「推送即部署」（GitHub Actions → SSH）
 
