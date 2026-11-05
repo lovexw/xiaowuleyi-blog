@@ -415,3 +415,32 @@ test('P2-18：runAudit 报告磁盘孤儿与孤儿变体（只报告不删除）
   assert.ok(d.orphans.sample.includes('u/gone.png@480.webp'))
   assert.ok(r2.has('u/orphan.bin'), '只报告不自动删')
 })
+
+test('P2-18 补充：孤儿扫描翻到单次上限就收工，并报出已翻数量（旧版只写「截断于 2 万」）', async () => {
+  // 每页都是全新的媒体 key 且永远 truncated：扫描必须自己停下来，不能无限翻
+  let calls = 0
+  const bucket = {
+    list: async (opts: { limit?: number; cursor?: string } = {}) => {
+      calls++
+      const start = Number(opts.cursor) || 0
+      const limit = opts.limit ?? 1000
+      return {
+        objects: Array.from({ length: limit }, (_, i) => ({ key: `u/bulk/${start + i}.jpg`, size: 1, uploaded: new Date() })),
+        truncated: true,
+        cursor: String(start + limit),
+      }
+    },
+  } as unknown as R2Bucket
+  const d = await runAudit({ DB: fakeDb(auditTables()), IMAGES: bucket } as unknown as Env)
+  assert.equal(d.orphans.truncated, true)
+  assert.equal(d.orphans.scanned, d.orphans.limit, '恰好翻到上限')
+  assert.equal(d.orphans.count, d.orphans.limit, '这一批全是孤儿')
+  assert.equal(calls, d.orphans.limit / 1000, '按页数停，不多翻一页')
+})
+
+test('P2-18 补充：truncated 却没给 cursor 的实现在此收口（否则原地打转）', async () => {
+  const bucket = { list: async () => ({ objects: [], truncated: true }) } as unknown as R2Bucket
+  const d = await runAudit({ DB: fakeDb(auditTables()), IMAGES: bucket } as unknown as Env)
+  assert.equal(d.orphans.count, 0)
+  assert.equal(d.orphans.truncated, true, '没扫完就如实说没扫完')
+})

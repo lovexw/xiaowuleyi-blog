@@ -98,6 +98,31 @@ function listAllKeys(root: string): string[] {
   return out.sort()
 }
 
+/**
+ * key 索引记忆化（2026-11 复核）：listAllKeys 是全树同步遍历 + 排序，2.2 万个文件约 70ms，
+ * 而 node:sqlite/HTTP 都在同一个事件循环上——逐页重走的话，媒体体检翻 20 页就把进程
+ * 卡住 1.4 秒，期间所有请求排队。体检是连续翻页，一页一页都是同一棵树，给索引加个
+ * 短 TTL 就能让整轮扫描只走一次。
+ *
+ * 为什么按时间失效而不是写入时主动作废：
+ *  - cursor 是数组下标（见 list 的 offset 口径），索引一旦在两页之间变短，
+ *    下一页的下标就会跳过后半段；不主动作废 + 短 TTL 才能保证一轮翻页看到的是同一份快照。
+ *  - 变体服务是外部进程写盘，本来也不经过这里，只能靠 TTL 兜底。
+ * 代价：刚写入的对象最多 2 秒内不会出现在 list 结果里。list 的三个调用方（体检、备份
+ * 滚动清理、整站包列表）都能容忍这一点，备份自己写的 key 还会被显式排除。
+ */
+const KEY_INDEX_TTL_MS = 2000
+const keyIndex = new Map<string, { keys: string[]; at: number }>()
+
+function cachedKeys(root: string): string[] {
+  const hit = keyIndex.get(root)
+  const now = Date.now()
+  if (hit && now - hit.at < KEY_INDEX_TTL_MS) return hit.keys
+  const keys = listAllKeys(root)
+  keyIndex.set(root, { keys, at: now })
+  return keys
+}
+
 /** 缺 .meta.json 时的 etag 兜底记忆化（2026-11 审计 P2-16）：同步 md5 全文件读很贵
  *  （25MB ≈ 46ms，事件循环逐请求付费），按 (路径, mtime, size) 记忆化——文件没变直接复用。
  *  gen-variants.py 现在会给产物补写旁车，这条兜底只剩残文件/手工拷贝会走到 */
@@ -230,16 +255,27 @@ export function createR2Disk(root: string) {
     async list(opts?: { prefix?: string; limit?: number; cursor?: string }) {
       const prefix = opts?.prefix ?? ''
       const limit = opts?.limit ?? 1000
-      const keys = listAllKeys(root).filter((k) => k.startsWith(prefix))
-      // cursor round-trip（demo.ts wipeBucket 分页删光）：磁盘实现无并发写，offset 即安全
+      // 走记忆化索引（见 cachedKeys）：filter 另开数组，缓存里的快照不会被裁剪
+      const all = cachedKeys(root)
+      const keys = prefix ? all.filter((k) => k.startsWith(prefix)) : all
+      // cursor round-trip（demo.ts wipeBucket 分页删光、体检翻页）：磁盘实现没有并发写，
+      // 下标直接当游标；索引缓存保证一轮翻页期间这份列表不会中途变短
       const start = Number(opts?.cursor) || 0
       const page = keys.slice(start, start + limit)
       const next = start + page.length
-      return {
-        objects: page.map((k) => {
+      const objects: { key: string; size: number; uploaded: Date }[] = []
+      for (const k of page) {
+        // 索引可能比磁盘旧最多 2 秒：这期间被删掉的对象 stat 会抛 ENOENT，
+        // 与真 R2 一样「列不出来就跳过」，不让一次体检整个 500
+        try {
           const st = fs.statSync(path.resolve(root, k))
-          return { key: k, size: st.size, uploaded: st.mtime }
-        }),
+          if (st.isFile()) objects.push({ key: k, size: st.size, uploaded: st.mtime })
+        } catch {
+          /* 已被删除：跳过 */
+        }
+      }
+      return {
+        objects,
         truncated: next < keys.length,
         cursor: next < keys.length ? String(next) : undefined,
       }

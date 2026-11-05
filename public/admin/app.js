@@ -3081,12 +3081,17 @@ async function renderAuditReport(body) {
     </div>`
     : ''
 
+  // 扫到上限也照样出这一栏：否则「没扫完但没发现孤儿」会被当成「全站干净」
+  const orphans = d.orphans
+  const scanNote = orphans && orphans.truncated
+    ? `（本轮已翻 ${orphans.scanned ?? '?'} 个图床对象，到单次上限 ${orphans.limit ?? '?'} 个就停了，可能还有更多）`
+    : ''
   const orphanHtml =
-    d.orphans && d.orphans.count
+    orphans && (orphans.count || orphans.truncated)
       ? `<div class="audit-sec">
       <div class="audit-sec-head"><span>磁盘孤儿<span class="audit-sec-sub">　磁盘里有、媒体库里没有登记（上传中断残留 / 手工拷贝 / 变体残留）；只报告不自动删，确认无引用后可在图床目录手动清理</span></span></div>
-      <div class="audit-footnote">共 ${d.orphans.count} 个${d.orphans.truncated ? '（扫描截断于 2 万个文件，可能有更多）' : ''}${d.orphans.staleVariants ? `，其中 ${d.orphans.staleVariants} 个是原图已删除却残留的变体（<code>@尺寸.webp</code>）——继续公开可访问，建议优先清理` : ''}。</div>
-      <div class="audit-grid">${(d.orphans.sample || [])
+      <div class="audit-footnote">共 ${orphans.count} 个${scanNote}${orphans.staleVariants ? `，其中 ${orphans.staleVariants} 个是原图已删除却残留的变体（<code>@尺寸.webp</code>）——继续公开可访问，建议优先清理` : ''}。</div>
+      <div class="audit-grid">${(orphans.sample || [])
         .map(
           (k) => `<div class="audit-item is-ghost">
         <div class="audit-item-info"><div class="audit-name" title="${esc(k)}">${esc(k)}</div></div>
@@ -3096,7 +3101,8 @@ async function renderAuditReport(body) {
     </div>`
       : ''
 
-  const allClean = !free.length && !d.duplicateGroups.length && !d.ghosts.length && !(d.orphans && d.orphans.count)
+  // 扫到上限时不算「很干净」：没扫完就下结论会让人错过剩下的文件
+  const allClean = !free.length && !d.duplicateGroups.length && !d.ghosts.length && !(d.orphans && (d.orphans.count || d.orphans.truncated))
   body.innerHTML =
     sum +
     (allClean ? '<div class="empty-box">🎉 很干净：没有未引用、重复或失踪的文件</div>' : '') +

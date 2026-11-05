@@ -184,22 +184,41 @@ export interface AuditReport {
   ghosts: AuditItem[]
   /** 磁盘有而库无（2026-11 审计 P2-18）：上传中断残文件 / 手工拷贝 / 变体残留。
    *  只报告不自动删——「宁少删不错删」；staleVariants 是原 key 已不在库的孤儿变体（P1-7 清理后应为 0） */
-  orphans: { count: number; staleVariants: number; sample: string[]; truncated: boolean }
+  orphans: {
+    count: number
+    staleVariants: number
+    sample: string[]
+    /** 达到单次扫描上限、还有对象没看（此时 count 只会偏少，不会偏多） */
+    truncated: boolean
+    /** 实际翻过的对象数（含 backups/ 等非媒体前缀）与本轮上限，前端据此说清「扫到哪了」 */
+    scanned: number
+    limit: number
+  }
 }
 
-/** 磁盘有而库无：翻页遍历图床对象（u/ og/ 前缀），与 uploads 全集做差。
- *  只读不删；单次最多扫 2 万个 key（r2disk.list 每页全树遍历，封顶防大图床拖垮体检） */
+/** 单次体检最多翻多少个图床对象（R2 list 每页 1000，即最多 50 次调用）。
+ *  2026-11 复核：旧上限 2 万 —— 生产图床已有 22586 个文件，超出的 2586 个永远看不到，
+ *  报告却只在角落写一句「截断于 2 万个」，孤儿数被无声低估。抬到 5 万（仍封顶：
+ *  病态大桶不该把一次体检拖成几十秒）。磁盘实现的重复全树遍历另在 r2disk.list 里用
+ *  索引缓存解决，翻页不再逐页重走整棵树。 */
+const ORPHAN_SCAN_MAX = 50_000
+const ORPHAN_PAGE = 1000
+
+/** 磁盘有而库无：翻页遍历图床对象，与 uploads 全集做差。只读不删。 */
 async function scanDiskOrphans(env: Env, knownKeys: Set<string>): Promise<AuditReport['orphans']> {
   let cursor: string | undefined
-  let scannedDisk = 0
+  let scanned = 0
   let count = 0
   let staleVariants = 0
   const sample: string[] = []
-  for (let page = 0; page < 20; page++) {
-    const res = await env.IMAGES.list({ limit: 1000, cursor })
+  const maxPages = Math.ceil(ORPHAN_SCAN_MAX / ORPHAN_PAGE)
+  for (let page = 0; page < maxPages; page++) {
+    const res = await env.IMAGES.list({ limit: ORPHAN_PAGE, cursor })
+    // 计数口径按「翻过多少对象」而非「多少媒体文件」：成本在翻页本身，
+    // 按媒体数封顶时备份文件多的桶会一直翻到页数上限才停
+    scanned += res.objects.length
     for (const o of res.objects) {
       if (!isMediaKey(o.key)) continue
-      scannedDisk++
       if (knownKeys.has(o.key)) continue
       const base = variantBaseKey(o.key)
       if (base) {
@@ -214,12 +233,13 @@ async function scanDiskOrphans(env: Env, knownKeys: Set<string>): Promise<AuditR
       count++
       if (sample.length < 50) sample.push(o.key)
     }
-    if (!res.truncated || scannedDisk >= 20000) {
-      return { count, staleVariants, sample, truncated: !!res.truncated && scannedDisk >= 20000 }
-    }
+    // 没有下一页，或已到上限：收工。res.truncated 为真但没给 cursor 属异常实现，
+    // 继续翻会原地打转，一律按「已截断」返回
+    if (!res.truncated || scanned >= ORPHAN_SCAN_MAX) return { count, staleVariants, sample, truncated: !!res.truncated, scanned, limit: ORPHAN_SCAN_MAX }
+    if (!res.cursor) return { count, staleVariants, sample, truncated: true, scanned, limit: ORPHAN_SCAN_MAX }
     cursor = res.cursor
   }
-  return { count, staleVariants, sample, truncated: true }
+  return { count, staleVariants, sample, truncated: true, scanned, limit: ORPHAN_SCAN_MAX }
 }
 
 export async function runAudit(env: Env): Promise<AuditReport> {
