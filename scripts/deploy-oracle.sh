@@ -21,6 +21,12 @@
 #    INSTANCES 用「容器|绑定地址|健康检查域名|数据目录」描述，分号分隔多个；
 #    一次 git reset + 一次 docker build，再逐个替换容器——镜像共用，省时省磁盘。
 #    某个实例健康检查失败只回滚它自己，不影响其它实例。
+# 7. 改「这个脚本自己」时注意：一次部署里脚本先 `git reset` 再继续往下跑，而 bash 读的是
+#    打开时那个 inode（git reset 换的是新文件）——所以**本次部署执行的仍是旧版脚本**，
+#    脚本改动要等下一次部署才生效。2026-11-05 实测：给 start_container 加
+#    `-e TRUST_PROXY=cf` 的那次提交上线后，容器里根本没这个变量，手动
+#    `./scripts/deploy-oracle.sh --force` 重跑一次才补上。改完 env / 启动参数，
+#    推完要么 `--force` 跑一轮，要么等下一个提交顺带把它带上去。
 
 set -euo pipefail
 

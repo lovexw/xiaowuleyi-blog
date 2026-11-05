@@ -76,6 +76,10 @@ git add -A && git commit -m "..." && git push origin main
 
 服务器 2 分钟内自动完成构建与替换。期间站点中断约 2–5 秒（停旧容器到新容器起来）。
 
+**改的是部署脚本本身时**，那次部署跑的还是旧版（脚本先 `git reset` 再往下跑，bash 读的是旧 inode），
+所以脚本改动要等下一次部署才生效。推完补一条 `./scripts/deploy-oracle.sh --force` 即可立刻生效 ——
+2026-11-05 给 `start_container` 加 `TRUST_PROXY=cf` 就是这么漏掉一次的。
+
 想立刻部署、不等定时器：
 
 ```bash
