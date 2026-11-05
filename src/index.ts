@@ -441,6 +441,12 @@ app.notFound((c) => renderNotFound(c))
 
 app.onError((err, c) => {
   console.error('Unhandled error:', err)
+  // /api 一律回 JSON：前端 postJSON 直接 r.json()，纯文本会让它抛
+  // 「Unexpected token '服'…」这种完全看不懂的解析错误（真实踩过：上传目录 EACCES）。
+  // 页面路径仍回纯文本——那时浏览器显示什么都比一段 JSON 强
+  if (new URL(c.req.url).pathname.startsWith('/api/')) {
+    return c.json({ error: '服务器开小差了，请稍后再试' }, 500)
+  }
   return c.text('服务开小差了，请稍后再试。', 500)
 })
 

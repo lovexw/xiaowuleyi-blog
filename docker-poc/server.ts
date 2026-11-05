@@ -579,7 +579,18 @@ const tenants = await loadTenants()
 const server = http.createServer((req, res) => {
   handle(req, res, tenants).catch((e) => {
     console.error('[server] unhandled', e)
-    if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+    if (res.headersSent) {
+      res.end()
+      return
+    }
+    // /api 回 JSON：前端 postJSON 直接解析 JSON，纯文本会炸成「Unexpected token '服'」
+    // （真实踩过：上传目录 EACCES，界面只显示一句看不懂的解析错误）
+    if ((req.url || '').split('?')[0].startsWith('/api/')) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' })
+      res.end(JSON.stringify({ error: '服务器开小差了，请稍后再试' }))
+      return
+    }
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
     res.end('服务开小差了，请稍后再试。')
   })
 })

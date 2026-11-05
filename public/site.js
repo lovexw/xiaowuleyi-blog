@@ -66,6 +66,10 @@
     '请先完成人机验证': 'Please complete the verification first',
     '请填写邮箱': 'Please enter your email',
     '两次输入的邮箱不一致，请核对': 'The two email addresses do not match — please check them',
+    '文件太大了，换小一点的试试': 'That file is too large — try a smaller one',
+    '服务器正忙，请稍后重试': 'The server is busy — please try again in a moment',
+    '服务器开小差了，请稍后再试': 'The server hiccuped — please try again',
+    '服务器返回了意外的内容，请刷新重试': 'The server returned something unexpected — please refresh and retry',
     '人机验证还没就绪，请稍候再试': 'Verification is still loading — please wait a moment and retry',
     '操作失败，请重试': 'Something went wrong — please try again',
     '昵称不能为空': 'Display name cannot be empty',
@@ -120,26 +124,36 @@
     location.replace('/weibo?wb=' + wbHash[1] + '#wb-' + wbHash[1])
   }
 
+  /* 响应不一定是 JSON：源站的 500 兜底曾经是纯文本、CF 的 502/524 是 HTML 出错页，
+   * 直接 r.json() 会把「Unexpected token '服', "服务开小..."」这种原始解析错误糊到用户脸上
+   * （真实踩过：图床目录 EACCES）。先读文本再尝试解析，解析不出就按状态码给人话。 */
+  function readJSON(r) {
+    return r.text().then(function (raw) {
+      var d = null
+      try {
+        d = raw ? JSON.parse(raw) : null
+      } catch (e) {
+        d = null
+      }
+      if (d && d.error) throw new Error(d.error)
+      if (r.status === 413) throw new Error(T('文件太大了，换小一点的试试'))
+      if (r.status === 502 || r.status === 503 || r.status === 504) throw new Error(T('服务器正忙，请稍后重试'))
+      if (!r.ok) throw new Error(T('服务器开小差了，请稍后再试'))
+      if (!d) throw new Error(T('服务器返回了意外的内容，请刷新重试'))
+      return d
+    })
+  }
+
   function postJSON(url, data) {
     return fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data || {}),
-    }).then(function (r) {
-      return r.json().then(function (d) {
-        if (!r.ok) throw new Error((d && d.error) || T('请求失败'))
-        return d
-      })
-    })
+    }).then(readJSON)
   }
 
   function getJSON(url) {
-    return fetch(url).then(function (r) {
-      return r.json().then(function (d) {
-        if (!r.ok) throw new Error((d && d.error) || T('请求失败'))
-        return d
-      })
-    })
+    return fetch(url).then(readJSON)
   }
 
   function esc(s) {
@@ -270,12 +284,12 @@
   function uploadImage(file) {
     var fd = new FormData()
     fd.append('file', file)
-    return fetch('/api/admin/upload', { method: 'POST', body: fd }).then(function (r) {
-      return r.json().then(function (d) {
-        if (!r.ok) throw new Error((d && d.error) || T('上传失败'))
+    // 走 readJSON：非 JSON 响应（源站 500 兜底 / CF 出错页）不再抛「Unexpected token」
+    return fetch('/api/admin/upload', { method: 'POST', body: fd })
+      .then(readJSON)
+      .then(function (d) {
         return d.url
       })
-    })
   }
 
   // 上传前压缩（compressImage 定义在上方）
@@ -439,7 +453,7 @@
           d = {}
         }
         if (xhr.status >= 200 && xhr.status < 300 && d.url) return resolve(d)
-        var serverMsg = d.error || (xhr.responseText || '').trim()
+        var serverMsg = d.error || (xhr.status >= 500 ? T('服务器开小差了，请稍后再试') : (xhr.responseText || '').trim())
         reject(new Error(serverMsg ? serverMsg.slice(0, 80) : T('上传失败') + '（HTTP ' + xhr.status + '）'))
       }
       xhr.onerror = function () {
