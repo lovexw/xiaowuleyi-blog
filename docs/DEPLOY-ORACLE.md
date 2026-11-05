@@ -50,7 +50,7 @@ GitHub main  ──(git fetch, 每 2 分钟)──▶  /opt/xwblog-app    代码
 
 ```bash
 # 1. 拿代码（服务器上已有 /opt/xwblog-app）
-sudo git clone https://github.com/lovexw/bloghao-xwblog.git /opt/xwblog-app
+sudo git clone https://github.com/lovexw/xiaowuleyi-blog.git /opt/xwblog-app
 
 # 2. 数据目录与租户配置（已有，勿覆盖）
 #    /opt/xwblog-data/blog.xiaowuleyi.com/{blog.db,uploads/}

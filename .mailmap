@@ -1,0 +1,17 @@
+# 提交者身份统一（.mailmap）
+#
+# 只影响 git log / shortlog / blame 的「显示名」，不改写任何历史提交，
+# 也不改变已有 commit 的 SHA——所以可以随时增删，零风险。
+#
+# 背景（2026-11-05）：这个仓库由一个人 + 多个 AI 协作开发，不同环境留下了
+# 不同的 git 身份，shortlog 里看起来像有 5 个人在提交。C / zwork 是本地
+# 环境自动生成的默认值（@team.local / @local），不是真实贡献者。
+#
+# 格式：显示用身份 <邮箱>  历史记录里的身份 <邮箱>
+# 左侧统一指向作者本人，右侧是历史上实际出现过的写法。
+
+lovexw <xiaowuleyi@gmail.com> lovexw <0471666@gmail.com>
+lovexw <xiaowuleyi@gmail.com> lovexw <17755423+lovexw@users.noreply.github.com>
+lovexw <xiaowuleyi@gmail.com> xw <xw@users.noreply.github.com>
+lovexw <xiaowuleyi@gmail.com> C <c@team.local>
+lovexw <xiaowuleyi@gmail.com> zwork <zwork@local>

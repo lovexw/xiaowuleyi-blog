@@ -101,7 +101,7 @@
 业务代码零改动地跑进一个 Node 容器：文章存内置 SQLite（单文件 WAL），图片存本地磁盘目录，也可以继续用 Cloudflare R2 桶（零出口流量费）。单进程按域名同时托管多个完全独立的博客站，Cloudflare 退回只做 DNS + CDN。
 
 ```bash
-git clone https://github.com/lovexw/bloghao-xwblog.git
+git clone https://github.com/lovexw/xiaowuleyi-blog.git
 cd bloghao-xwblog/docker-poc
 docker compose up --build -d     # 镜像约 70MB（node:26-alpine），数据落在 ./data/<域名>/
 ```
@@ -127,7 +127,7 @@ docker compose up --build -d     # 镜像约 70MB（node:26-alpine），数据�
 
 ```bash
 # 1. 克隆并安装
-git clone https://github.com/lovexw/bloghao-xwblog.git
+git clone https://github.com/lovexw/xiaowuleyi-blog.git
 cd bloghao-xwblog && npm install
 npx wrangler login
 
@@ -289,7 +289,7 @@ Cloudflare 形态原步骤是 `git pull` → `npm install` → `npm run deploy`�
 
 ## 🤝 相关仓库
 
-- **作者实例**：[lovexw/bloghao-xwblog](https://github.com/lovexw/bloghao-xwblog)（本仓库）——[blog.xiaowuleyi.com](https://blog.xiaowuleyi.com) 与 blog.btchao.com 的源仓库，**2026-11-05 起是唯一持续的开发线**
+- **作者实例**：[lovexw/xiaowuleyi-blog](https://github.com/lovexw/xiaowuleyi-blog)（本仓库）——[blog.xiaowuleyi.com](https://blog.xiaowuleyi.com) 与 blog.btchao.com 的源仓库，**2026-11-05 起是唯一持续的开发线**
 - **官方仓库**：[bloghao/bloghao](https://github.com/bloghao/bloghao)——项目最初的开源发布线，**已冻结**（不再同步、不再发布版本）；官网源码曾在仓库内 `website/` 目录，现同样冻结
 
 ## 📄 License
