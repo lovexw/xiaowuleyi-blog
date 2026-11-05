@@ -123,7 +123,6 @@ export function home(d: HomeData): string {
     .map((p) => {
       const date = en ? fmtDateEn(p.published_at) : fmtDate(p.published_at)
       const meta: string[] = []
-      if (p.readingMinutes) meta.push(en ? `${p.readingMinutes} min read` : `${p.readingMinutes} 分钟`)
       if (p.views > 0) meta.push(en ? `${p.views} views` : `${p.views} 次阅读`)
       if (p.commentCount) meta.push(en ? `${p.commentCount} ${plural(p.commentCount, 'comment', 'comments')}` : `${p.commentCount} 条留言`)
       const dateHtml = date
@@ -218,7 +217,6 @@ export function post(d: PostData): string {
       ? `<div class="wx-side-row"><span>${tr(en, '分类')}</span><a href="${categoryLink(d.category)}">${esc(d.category.name)}</a></div>`
       : '',
     `<div class="wx-side-row"><span>${tr(en, '发布于')}</span><b>${en ? fmtDateEn(p.published_at) : fmtDateCN(p.published_at)}</b></div>`,
-    `<div class="wx-side-row"><span>${tr(en, '阅读时长')}</span><b>${en ? `${p.readingMinutes} min` : `${p.readingMinutes} 分钟`}</b></div>`,
     `<div class="wx-side-row"><span>${tr(en, '阅读量')}</span><b>${p.views}</b></div>`,
   ]
     .filter(Boolean)
@@ -233,7 +231,7 @@ export function post(d: PostData): string {
     <a class="wx-meta-avatar" href="/" aria-label="${en ? 'Back to home' : '返回首页'}">${avatar(s)}</a>
     <div class="wx-meta-main">
       <a class="wx-account" href="/">${esc(p.authorName ? tr(en, `${s.siteName} · ${p.authorName}`) : tr(en, s.siteName))}</a>
-      <span class="wx-date">${en ? `${fmtDateEn(p.published_at)} · ${p.readingMinutes} min read${p.aiGenerated ? ' · AI-generated' : ''}` : `${fmtDateCN(p.published_at)} · ${p.readingMinutes} 分钟${p.aiGenerated ? ' · AI 生成' : ''}`}</span>
+      <span class="wx-date">${en ? `${fmtDateEn(p.published_at)}${p.aiGenerated ? ' · AI-generated' : ''}` : `${fmtDateCN(p.published_at)}${p.aiGenerated ? ' · AI 生成' : ''}`}</span>
     </div>
   </div>
   ${p.cover ? `<div class="wx-cover"><img src="${esc(variantUrl(p.cover, 960))}"${coverSrcset(p.cover)} loading="eager" fetchpriority="high" decoding="async" alt=""></div>` : ''}
