@@ -435,8 +435,9 @@ api.post('/partner/grant', async (c) => {
   const secret = String(settings.partnerPushSecret || '').trim()
   // 没配密钥 = 本站不参与继承。回 404 而不是 401：不向外暴露「这个功能存在但没开」
   if (!secret) return jsonError('未开启跨站继承', 404)
-  // 签名已挡伪造，限流只为防「大量垃圾请求刷 HMAC」；量级放宽（批量同步几十条也够用）
-  if (!rateLimit(`pgrant:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('请求过于频繁', 429)
+  // 签名已挡伪造，限流只为防「大量垃圾请求刷 HMAC」；量级放宽（批量同步几十条也够用）。
+  // 限流带 env 作用域（P0-1 防线）：单进程多租户下同 IP 桶不跨站点共享
+  if (!rateLimit(c.env, `pgrant:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('请求过于频繁', 429)
   const g = cleanPartnerGrant(await c.req.json().catch(() => null))
   if (!g) return jsonError('请求格式错误或时间戳超出窗口')
   if (!(await verifyPartnerSignature(secret, g, c.req.header('X-Partner-Signature') || '')))

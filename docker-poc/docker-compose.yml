@@ -8,9 +8,10 @@ services:
       dockerfile: docker-poc/Dockerfile
     ports:
       # 本地默认 8787；独占机器排练期挂 80：XWLBLOG_PORT=80 docker compose up -d
-      # 与其他 Web 服务共存的机器（1Panel/openresty 等占 80）只绑回环给反代：
-      #   XWLBLOG_BIND=127.0.0.1 docker compose up -d
-      - '${XWLBLOG_BIND:-0.0.0.0}:${XWLBLOG_PORT:-8787}:8787'
+      # 默认只绑回环给反代（2026-11 审计 P2-8：0.0.0.0 直连时 TRUST_PROXY=proxy 档的
+      # 访客 IP 由请求头说了算，限流身份可被伪造）；要公网直连显式传
+      #   XWLBLOG_BIND=0.0.0.0 docker compose up -d
+      - '${XWLBLOG_BIND:-127.0.0.1}:${XWLBLOG_PORT:-8787}:8787'
     environment:
       # 控制面操作日志显式落进挂载卷：缺省路径是 TENANTS_DIR/../ops.log（容器 /data 根，
       # root 属主且不挂卷——应用以 node 跑 appendFileSync 静默 EACCES，容器重建即丢）
