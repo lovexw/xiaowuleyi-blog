@@ -1364,9 +1364,16 @@ function originOk(req: import('node:http').IncomingMessage, url: URL): boolean {
   }
 }
 
-async function readBody(req: import('node:http').IncomingMessage): Promise<URLSearchParams> {
+async function readBody(req: import('node:http').IncomingMessage, maxBytes = 262_144): Promise<URLSearchParams> {
+  // 体积上限（2026-11 审计 P2-7）：表单远小于 256KB，无上限的 for-await 是公开端点的
+  // 内存面（控制面与业务进程同进程，拖累全部租户）
   const chunks: Buffer[] = []
-  for await (const c of req) chunks.push(c as Buffer)
+  let total = 0
+  for await (const c of req) {
+    total += (c as Buffer).length
+    if (total > maxBytes) throw new Error('body too large')
+    chunks.push(c as Buffer)
+  }
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'))
 }
 
@@ -1410,7 +1417,13 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
       res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' })
       return res.end(JSON.stringify({ error: 'bad origin' }))
     }
-    const body = await readBody(req)
+    let body: URLSearchParams
+    try {
+      body = await readBody(req, 16_384)
+    } catch {
+      res.writeHead(413, { 'Content-Type': 'application/json; charset=utf-8' })
+      return res.end(JSON.stringify({ error: '提交内容过大' }))
+    }
     const rawUrl = (body.get('url') || '').trim()
     const rawName = (body.get('name') || '').trim().slice(0, 40)
     let submitHost = ''
@@ -1442,6 +1455,9 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
       return res.end(JSON.stringify({ ok: true, dup: true }))
     }
     list.push({ ts: now, ip, url: rawUrl, name: rawName || submitHost })
+    // FIFO 封顶 500 条（P2-7）：文件由公开端点写入，无上限会随每次投稿的
+    // 同步全量读写一起膨胀（每个后续请求的事件循环代价随之放大）
+    if (list.length > 500) list = list.slice(-500)
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, JSON.stringify(list, null, 2))
     opsLog('站点投稿', rawUrl)
@@ -1573,7 +1589,16 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
     if (cfg) {
       delete cfg.disabled
       deps.writeTenantsConfig(cfgAll)
-      deps.tenants.set(host, await deps.createTenantFor(host, cfg, cfgAll.r2))
+      try {
+        deps.tenants.set(host, await deps.createTenantFor(host, cfg, cfgAll.r2))
+      } catch (e) {
+        // 失败回滚（与 /create 同款，2026-11 审计 P2-11）：配置已写但路由未挂 = 该站
+        // 对外 404「未登记域名」直到重启。失败就回写 disabled，让配置与路由一致
+        cfg.disabled = true
+        deps.writeTenantsConfig(cfgAll)
+        opsLog('启用失败', host)
+        return flashRedirect(res, `✗ 启用失败：${esc(String(e instanceof Error ? e.message : e))}；已回滚为停用状态`)
+      }
       opsLog('启用', host)
       // 启用即补收录（覆盖「收录功能上线前建的老站」与此前被停用过的站）
       const plaza = await plazaEnsureSite(deps, host, cfg)

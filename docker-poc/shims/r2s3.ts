@@ -9,9 +9,12 @@
  * 租户间互相不可见——与本地盘「每租户一个目录」同等的隔离语义，迁移时也只搬自己的前缀。
  *
  * 与 r2disk 的差异（有意为之）：
- * - get 会把对象整体读进内存再封流：上传上限 25MB（MAX_UPLOAD_BYTES），瞬时缓冲可接受，
- *   换取 arrayBuffer()/text()/json()/body 四种读法共用一次网络请求
+ * - get/put 会把对象整体读进内存再封流/发送：上传上限 25MB（MAX_UPLOAD_BYTES，整站包
+ *   100MB 由 api.ts 预检封顶），瞬时缓冲可接受，换取 arrayBuffer()/text()/json()/body
+ *   四种读法共用一次网络请求；S3 非分段上传需要已知长度，真正的流式直传要 aws-chunked
+ *   签名（复杂度不成比例）——大文件流式落盘是 r2disk（磁盘）的职责
  * - list 单页最多 1000 条（ListObjectsV2 上限）；回收站滚动清理、备份列表的量级远够
+ * - s3fetch 带 30s AbortSignal 超时（2026-11 审计 P2-12）：僵死连接不该挂住请求与 cron
  */
 import crypto from 'node:crypto'
 
@@ -72,11 +75,31 @@ export function signAuthorization(
   return `AWS4-HMAC-SHA256 Credential=${accessKeyId}/${scope},SignedHeaders=${signedHeaders},Signature=${signature}`
 }
 
-function toBuffer(value: unknown): Buffer {
-  if (typeof value === 'string') return Buffer.from(value, 'utf8')
-  if (value instanceof ArrayBuffer) return Buffer.from(new Uint8Array(value))
-  if (ArrayBuffer.isView(value)) return Buffer.from(value as Uint8Array)
-  throw new Error('[r2s3] put 只支持 string / ArrayBuffer / TypedArray')
+function toBuffer(value: unknown): Promise<Buffer> {
+  if (typeof value === 'string') return Promise.resolve(Buffer.from(value, 'utf8'))
+  if (value instanceof ArrayBuffer) return Promise.resolve(Buffer.from(new Uint8Array(value)))
+  if (ArrayBuffer.isView(value)) return Promise.resolve(Buffer.from(value as Uint8Array))
+  // ReadableStream（整站包上传直传 c.req.raw.body，2026-11 审计 P2-6）：缓冲后走普通
+  // PUT——此前直接 throw，r2 存储租户的整站包上传/还原双双必断
+  if (isReadableStream(value)) {
+    const chunks: Uint8Array[] = []
+    const reader = (value as ReadableStream<Uint8Array>).getReader()
+    const pull = async (): Promise<Buffer> => {
+      for (;;) {
+        const { done, value: v } = await reader.read()
+        if (done) break
+        chunks.push(v as Uint8Array)
+      }
+      return Buffer.concat(chunks)
+    }
+    return pull()
+  }
+  return Promise.reject(new Error('[r2s3] put 只支持 string / ArrayBuffer / TypedArray / ReadableStream'))
+}
+
+/** 是不是 Web ReadableStream（与 r2disk 同款判定） */
+function isReadableStream(v: unknown): v is ReadableStream<Uint8Array> {
+  return !!v && typeof v === 'object' && typeof (v as { getReader?: unknown }).getReader === 'function'
 }
 
 function xmlUnescape(s: string): string {
@@ -107,6 +130,8 @@ export function createR2S3(cfg: R2S3Config) {
       method,
       headers: { authorization, 'x-amz-content-sha256': opts.body ? sha256hex(opts.body) : sha256hex(''), ...opts.headers },
       body: opts.body,
+      // 30s 超时（P2-12）：R2 连接僵死不该无限挂住请求——cron 串行备份会被卡住后续租户全跳过
+      signal: AbortSignal.timeout(30_000),
     })
     return res
   }
@@ -144,7 +169,7 @@ export function createR2S3(cfg: R2S3Config) {
 
   return {
     async put(key: string, value: unknown, opts?: { httpMetadata?: { contentType?: string; cacheControl?: string } }) {
-      const buf = toBuffer(value)
+      const buf = await toBuffer(value)
       const headers: Record<string, string> = {}
       if (opts?.httpMetadata?.contentType) headers['content-type'] = opts.httpMetadata.contentType
       if (opts?.httpMetadata?.cacheControl) headers['cache-control'] = opts.httpMetadata.cacheControl
@@ -153,9 +178,21 @@ export function createR2S3(cfg: R2S3Config) {
       return makeObject(key, buf, res.headers)
     },
 
-    async get(key: string) {
-      const res = await s3fetch('GET', full(key))
+    async get(key: string, opts?: { range?: { offset?: number; length?: number; suffix?: number } }) {
+      // Range 读（P2-6，与 r2disk 同接口语义）：整站包导入按分片读 zip（中央目录在末尾）。
+      // 服务器不吃 Range / 区间越界 → 与 r2disk 同口径返回 null（调用方按「抓不到」退化）
+      const headers: Record<string, string> = {}
+      const r = opts?.range
+      if (r) {
+        if (typeof r.suffix === 'number') headers.range = `bytes=-${r.suffix}`
+        else {
+          const start = r.offset ?? 0
+          headers.range = typeof r.length === 'number' ? `bytes=${start}-${start + r.length - 1}` : `bytes=${start}-`
+        }
+      }
+      const res = await s3fetch('GET', full(key), { headers })
       if (res.status === 404) return null
+      if (r && res.status !== 206) return null
       if (!res.ok) fail('GET', key, res)
       return makeObject(key, Buffer.from(await res.arrayBuffer()), res.headers)
     },

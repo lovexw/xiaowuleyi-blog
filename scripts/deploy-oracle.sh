@@ -189,6 +189,7 @@ start_container() { # $1=镜像 $2=commit，作用于当前实例
     -e OPS_LOG_PATH=/data/tenants/ops.log \
     -e TRUST_PROXY=cf \
     --label "xwblog.sha=${sha}" \
+    --log-driver json-file --log-opt max-size=10m --log-opt max-file=3 \
     "$img" >/dev/null
 }
 

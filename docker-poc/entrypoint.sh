@@ -9,6 +9,8 @@
 # 属主检查用 find -user（BSD/GNU/BusyBox 三家通吃）；顶层目录已属 node 时跳过
 # 递归 chown——大图床（百万文件级）重启不做全量扫描。
 set -e
+# 容器必须绑 0.0.0.0 才能被端口映射转发（裸 Node 形态的回环默认在 server.ts 里，不冲突）
+export HOST="${HOST:-0.0.0.0}"
 DATA_DIR="${TENANTS_DIR:-/data/tenants}"
 mkdir -p "$DATA_DIR"
 # 注意不能用 find 判断属主：find 没匹配到也退出 0（退出码只反映操作错误，

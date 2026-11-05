@@ -17,6 +17,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 import xwblog from '../src/index'
 import { assetVersion, injectAdminAssetVersion, setAssetVersion, VERSIONED_ASSET_PATHS } from '../src/assets'
@@ -34,6 +35,10 @@ import SCHEMA_SQL from '../schema.sql'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT || 8787)
+/** 监听地址：裸 Node 默认只绑回环（反代同机才是标准形态——公网直连会让 TRUST_PROXY=proxy
+ *  档的访客 IP 完全由请求头决定，限流身份可被伪造，2026-11 审计 P2-8/P1-6）。
+ *  容器形态必须绑 0.0.0.0 才能被端口映射转发——entrypoint.sh 统一 export HOST=0.0.0.0 */
+const HOST = process.env.HOST || '127.0.0.1'
 /**
  * 访客 IP 信任档位（auth.ts clientIp 优先读 CF-Connecting-IP / X-Forwarded-For，这里决定
  * 哪些入站头可信、哪些剥掉后以可靠来源重新注入）：
@@ -117,7 +122,20 @@ function readTenantsConfig(): { r2?: R2SharedConfig; tenants: Record<string, Ten
     tenantsCache = { mtimeMs: st.mtimeMs, cfg }
     return cfg
   } catch (e) {
-    // 半截 JSON（并发写窗口）/ 瞬时读失败：回落上次成功配置，别让整站 500 突刺
+    // 半截 JSON（并发写窗口）/ 瞬时读失败：先试 .bak（writeTenantsConfig 留的副本），
+    // 再回落上次成功配置，别让整站 500 突刺
+    if (tenantsCache) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(TENANTS_CONFIG + '.bak', 'utf8'))
+        const cfg =
+          raw && typeof raw === 'object' && !Array.isArray(raw) && raw.tenants
+            ? { r2: raw.r2, tenants: raw.tenants }
+            : { tenants: raw }
+        return cfg
+      } catch {
+        /* .bak 也没有：回落内存缓存 */
+      }
+    }
     if (tenantsCache) return tenantsCache.cfg
     throw e
   }
@@ -397,7 +415,15 @@ function sendToNode(req: http.IncomingMessage, res: http.ServerResponse, appRes:
     res.end()
     return
   }
-  Readable.fromWeb(appRes.body as never).pipe(res)
+  // pipeline 带 error 回调（2026-11 审计 P2-10）：裸 .pipe() 无 error 处理，源流错误
+  // （r2disk 读文件中途消失、客户端中止后的写事件）会上抛成未捕获异常崩掉整个
+  // 多租户进程——单租户的一次异常 = 全部站点同时下线。出错只销毁当前响应
+  pipeline(Readable.fromWeb(appRes.body as never), res, (err) => {
+    if (err && !(err as NodeJS.ErrnoException).code?.startsWith('ERR_STREAM_PREMATURE')) {
+      console.error('[http] 流转发失败', err)
+    }
+    res.destroy()
+  })
 }
 
 /**
@@ -595,7 +621,9 @@ const server = http.createServer((req, res) => {
   handle(req, res, tenants).catch((e) => {
     console.error('[server] unhandled', e)
     if (res.headersSent) {
-      res.end()
+      // 已发头的流式响应中途抛错：不追加任何文本（错误串会污染二进制流尾部，审计 P3-12），
+      // 直接销毁连接——截断的图/包让客户端按网络错误重试，比「正常结束的残缺体」干净
+      res.destroy()
       return
     }
     // /api 回 JSON：前端 postJSON 直接解析 JSON，纯文本会炸成「Unexpected token '服'」
@@ -610,8 +638,20 @@ const server = http.createServer((req, res) => {
   })
 })
 
-server.listen(PORT, () => {
-  console.log(`\nxwblog 自托管 POC 已启动：http://127.0.0.1:${PORT}`)
+// 进程级兜底（2026-11 审计 P2-10）：多租户共进程，一处未捕获异常 = 全部站点同时下线
+// 且无人拉起。记日志后以非零码退出，交给 systemd Restart= / docker --restart 拉起——
+// 「带病运行」比「干净重启」风险更大。正常路径的异常都有各自的 catch，这里只兜真漏网
+process.on('uncaughtException', (e) => {
+  console.error('[fatal] uncaughtException', e)
+  process.exit(1)
+})
+process.on('unhandledRejection', (e) => {
+  console.error('[fatal] unhandledRejection', e)
+  process.exit(1)
+})
+
+server.listen(PORT, HOST, () => {
+  console.log(`\nxwblog 自托管 POC 已启动：http://${HOST}:${PORT}`)
   console.log(`  租户：${[...tenants.keys()].join('  ')}（*.localhost 浏览器自动解析到 127.0.0.1）`)
   console.log(`  静态根：${PUBLIC_ROOT}`)
   console.log(`  前台 JS 版本：${assetVersion() || '(未注入，Workers 形态)'}`)
