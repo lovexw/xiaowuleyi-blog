@@ -272,6 +272,21 @@ npm run videos:fix-hevc -- --site https://blog.xiaowuleyi.com --user 管理员 -
 - **入站体积预检（2026-10-12 审计新增，api.ts 全局中间件）**：非 GET/HEAD/OPTIONS 先看 `Content-Length`——常规 2MB、上传类端点 30MB，超限 413；公开端点的 `json()/parseBody()` 都在这道闸之后（Workers 平台请求体上限 100MB 远大于 isolate 128MB 内存，不预检整读可被超大 body 打爆 isolate）。**豁免清单必须写全路径前缀**（api 路由挂在 `/api` 下，`c.req.path` 是完整路径，常量见 api.ts `UPLOAD_PATH_PREFIXES`）：`/api/admin/upload`、`/api/admin/og-image`、`/api/external/weibo`——2026-10-13 曾因少写 `/api` 前缀，让这三个端点一直按 2MB 预检：超过 2MB 的视频 / 大图 / 开放接口配图一律 413（前端只显示「上传失败」，站长 20MB 视频失败暴露；前台图片因先压缩到几百 KB 才一直没暴露）。新增大 body 端点记得进这张表，冒烟「上传体积预检链路」守着（3MB 放行 / 31MB 拒绝）。chunked 无 CL 放行属登记过的残余风险。TG webhook 按 `update_id` 做**内存 5 分钟幂等**（external.ts，防 Telegram 超时重投重复发博；窗口故意不盖「处理抛错后间隔重试」的恢复路——别改成标记即永久跳过，那会静默丢消息）。本轮安全审计全记录与遗留项见 docs/archive/SECURITY-AUDIT-2026-10-12.md
 - 一键闭站（src/closed.ts，index.ts 挂中间件）的白名单是「关站后自己进得去」的底线：`/admin`、`/api/admin`、`/api/auth`、`/api/meta`、`/api/health`、`/images` 必须放行，其余（页面 / RSS / sitemap / 公开 API）一律 503 + Retry-After（保搜索收录），已登录管理员放行预览——tests/site-status.test.ts 与冒烟「一键闭站链路」守着，动入口中间件先跑；闭站与灰度中间件都注册在页面缓存（pageCacheMiddleware）**之前**——503 短路与去色特殊状态永远不走缓存副本；灰度开关是 render.ts 往 `<html>` 注入 `filter:grayscale(100%)`，filter 会改 fixed 后代的定位基准，新主题引入 fixed 元素时先复查
 
+## 2026-11 全项目审计新增防线（2026-11-05/06，修复批次 R1-R9 落地）
+
+> 全项目深度审计（8 路专项 + 逐条亲核）产出三份报告在仓库根：`AUDIT_REPORT.md`（问题清单 P0×1 P1×13 P2×27 P3×30）/ `REMEDIATION_PLAN.md`（修复计划）/ `ARCHITECTURE_REPORT.md`（生产架构摸底）；过程台账 `AUDIT_PROGRESS.md`。以下是从这批修复里立起来的新防线：
+
+- **内存限流一律带作用域**：`rateLimit(scope, key, limit, windowMs)` 第一参必须是**对象**（租户请求路径传 `c.env`，控制面传 `CONTROL_SCOPE` 单例；字符串当 WeakMap key 会抛「Invalid value used as weak map key」——control.ts /login 实测把控制面打成全 500）。docker-poc 单进程多租户下 key 无作用域 = 全部站点共享限流桶（A 站登录失败锁死 B 站、`backup:global` 字面量桶跨站互斥，审计 P0-1）；新增调用点漏传 `c.env` 会直接 TypeError，老调用点字符串 key 的报错在冒烟才暴露——**新增端点后必跑 `docker-poc/smoke.sh`**
+- **跨租户共享的内存幂等/去重键必须含租户维度**：同款 WeakMap-by-env 口径（TG webhook 幂等键 `tgDoneScopes`、审计 P1-2——Telegram update_id 是 per-bot 序列，裸键会丢别的租户的消息）
+- **publicComment 的会员分支必须挂 `membersEnabled` 门控**（api.ts 一处，tests/member-tiers.test.ts「会员开关守卫」守着）——新增公开留言形态接线时照抄，关了会员开关残留会话要按游客发言不计分（审计 P1-3）
+- **meta.changes 禁用精确值判定**：涉及 posts/weibo/pages 的写语句，node:sqlite 不计触发器内命令（=1）、D1 计入（=2）——判定「确有删除」用 `< 1` / `> 0` 口径；全部既有 `=== 1` 判定点都在 FTS 触发器 OF 清单之外，新增 OF 列时先 grep 这两类判定（审计 P3-2 实验钉死）
+- **schema.sql 索引只准引用 schema.sql 建表列体里的列**：ALTER 补列的索引只进 SCHEMA_INDEXES；反过来，schema.sql 索引引用的列**必须同时登记 SCHEMA_COLUMNS 的 ALTER**（posts.pinned / posts.published_at / weibo.published_at 三列曾无迁移路，老库升级 exec 必炸——审计 P1-1）。docker-poc/server.ts 的建表顺序是「exec 失败 → ensureSchema 补列 → 幂等重放」（核心九表唯一来源是 schema.sql，ensureSchema 单独跑会被 no such table: settings 炸掉；SCHEMA_TABLES 首位的 settings 建表兜着），**别调序**；tests/schema-upgrade.test.ts 四形态守着
+- **媒体删除口径必须走 `store.ts mediaDeleteKeys`**（原图 + @192/@480/@960 变体全集）：媒体删除/合并/清理/清空本站四条路已接线，新增删除路径漏接 = 已删图经变体 URL 永久可达（审计 P1-7）；gen-variants.py 槽位宽与 `IMAGE_VARIANT_WIDTHS` 两处同改。**新增存图片地址的字段必须同步 audit.ts 的 pullReferenceTexts + REF_TABLES**（comments.avatar / members.avatar 曾漏登记，「清理未引用」会打瘫评论区头像——审计 P1-8）
+- **listMemberReplies 是锚点两步查询**（我发过的评论 id ∪ 我回复的 parent_id，90 锚点分块走 INDEXED BY idx_comments_parent）：改它先跑 tests/member-tiers.test.ts；「收到的回复」的圈层过滤依赖 db 带出的 rootTier/rootTierExpires（审计 P2-3/P3-26）
+- **docker-poc/server.ts 进程与流**：uncaughtException/unhandledRejection 兜底（记日志后 exit(1) 交给 restart 拉起）；响应流转发用 **node:stream 回调版 pipeline**（stream/promises 版 Node ≥24 三参形态会把回调误当 destination function 抛 ERR_INVALID_RETURN_VALUE，冒烟实测）；`server.listen` 默认 127.0.0.1（容器形态 entrypoint.sh export HOST=0.0.0.0）；tenants.json 写前留 .bak
+- **审计报告的「需生产验证清单」**（AUDIT_REPORT §3）与「站长已亲自修掉项」（TRUST_PROXY=cf + iptables、进程内页缓存 memory-cache.ts、后台壳页缓存、数据目录属主自愈、变体服务降权 User=1000、文档口径冻结）都在台账里对过账
+
+
 ## Git 约定
 
 - 本工作区服务**双仓库、两角色**（2026-10-11 晚恢复原约定——当日上午曾短暂切过单仓库，同日即废，两仓内容已互结合并）：origin = `github.com/lovexw/xiaowuleyi-blog`（原 `bloghao-xwblog`，2026-11-05 改名，GitHub 对旧地址 301 重定向；滚动开发仓库，日常提交只推这里），upstream = `github.com/bloghao/bloghao`（官方稳定版仓库，**2026-11-05 起冻结，不再发布**）。不做这两个仓库之外的操作

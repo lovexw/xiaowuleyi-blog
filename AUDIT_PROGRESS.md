@@ -3,7 +3,9 @@
 > 全项目深度审计（2026-11-04 启动，2026-11-05 阶段 A/B 完成）。最终产出：
 > `ARCHITECTURE_REPORT.md`（架构摸底）、`AUDIT_REPORT.md`（阶段 A 只读审计）、`REMEDIATION_PLAN.md`（阶段 B 修复计划，编号 R1-R11）。
 
-## 状态：阶段 A ✅ / 阶段 B ✅ / 阶段 C（实施修复）未开始——等站长确认
+## 状态：阶段 A ✅ / 阶段 B ✅ / 阶段 C ✅（R1-R5/R9/R11 落地并全绿）/ 待推送上线（站长已授权）
+
+> 2026-11-05 站长并行推进：12 个提交（864c73f..13e8295）亲自修掉了一批审计发现并拍板平台口径（0442f33 冻结对外形态、只维护甲骨文 Docker 自托管线）。审计分支已 rebase 到 13e8295 并完成语义合并——双方改动零丢失：站长的 TRUST_PROXY=cf/JSON 错误响应/entrypoint 属主自愈 与审计的进程兜底/日志轮转/HOST 回环共存。
 
 ## 已完成
 
@@ -35,12 +37,29 @@
 - **备份一致性正确**：sqlite3 .backup + integrity_check + sha256（非裸拷贝）
 - **口径冲突待拍板**：任务书（裸 Node）vs 仓库文档（双实例 Docker，2026-11-03 起）vs AGENTS.md（CF 归宿，已过时）
 
-## 下一步（阶段 C，待站长指令）
+## 阶段 C 执行记录（2026-11-05/06，分支 audit/2026-full-project-review）
 
-1. 站长答复 REMEDIATION_PLAN §2 的 6 项拍板事项（生产形态 / 域名接入 / 插件信任 / Pi 加固 / R6 授权 / archives 分片）
-2. 按建议顺序执行 R1 → R2 → R4 → R3 → R9 → R5 → R11 → R8 → R7 →（R6/R10 依拍板）
-3. 每批次独立提交、全绿合并；**未经明确「推送」指令不 push**（推送触发生产部署）
-4. 全部完成后按任务书出 `FINAL_AUDIT_REPORT.md`（阶段 E）
+| 批次 | 提交 | 内容 | 验证 |
+|---|---|---|---|
+| R1 | e44ca3c | P0-1 限流租户作用域 / P1-2 TG 幂等键 / P1-3 会员开关门控 | 1008 全绿 |
+| R2 | 64f8d57 | P1-1 建表顺序（exec 失败→补列→重放）/ P3-10 ensureSchemaOnce / posts.pinned 等三列补迁移路 | 1012 全绿 |
+| R4 | a8e9383 | P1-4 robots Sitemap 域名收口 / P2-13 sitemap 5 万 / P2-14 llms 桩三态 / P3-4 ORDER BY | 1014 全绿 |
+| R3 | 32484fe | P1-7 变体级联删 / P1-8 头像引用源 / P2-17 u-fav 入库 / P2-18 孤儿体检 / P3-14 | 1019 全绿 |
+| R9 | 731e3e5 | P2-2 管理面 INDEXED BY / P2-3 收件箱锚点化 / P3-26 圈层过滤 / P2-16 etag 记忆化+meta 旁车 | 1019 全绿 |
+| R11 | 2da56b2 | P3-1 stats 固定时钟 | 1019 全绿 |
+| R5 | 2550c91(rebase→bf8fdd6) | P2-10 进程兜底+pipeline / P2-8 HOST 回环 / P2-9 日志轮转 / P2-7 控制面收口 / P2-11 enable 回滚 / P2-12 r2s3 超时 / P2-6 Range+流式 / P3-7 .bak / P3-12 | — |
+| rebase 合并 | d5bcd5c | 站长新端点 pgrant 限流补作用域 + compose 默认回环 | 1044 全绿 |
+| 冒烟修复 | 914a93d | pipeline 回调版（Node≥24 三参缺陷）+ CONTROL_SCOPE | **smoke 71/71** |
+
+**站长并行修复对账（已在审计台账销账）**：P1-5（TRUST_PROXY=cf + iptables，865ac25）✅｜P1-6/P2-25（平台口径冻结，0442f33——Docker 即生产、CF/演示站/广场/官网冻结）✅｜P3-8（进程内页缓存 memory-cache.ts，435aebb）✅｜上传 EACCES 自愈（c38f438）✅｜变体服务降权（865ac25）✅｜deploy.yml 删除（冻结线）✅
+
+**未做（按冻结口径降级/后置）**：R6 备份 shell（生产侧落地需登机，脚本改动已随仓库走）、R7 视频 GPS 字节手术（后置，文档提示路径保留）、R8 news.css 补齐等主题打磨（后置）、R2-13 分片 sitemap（规模未到）、插件信任弹窗（产品决策，冻结线下影响面小）
+
+## 下一步
+
+1. 推送上线（站长已授权「提交推送上线」）：audit 分支合并 main → push origin（甲骨文 systemd 2 分钟内拉取部署，健康检查失败自动回滚）
+2. 上线后观察：限流行为（cf 档 + 作用域）、变体 meta 旁车落盘、控制面
+3. 阶段 E：`FINAL_AUDIT_REPORT.md`（本台账 + AUDIT_REPORT 已覆盖大半，按任务书第十七部分收敛成文）
 
 ## 纪律备忘（全程遵守记录）
 
