@@ -129,7 +129,9 @@ function d1FromSqlite(db: DatabaseSync): D1Database {
 test('getVisitStats 聚合：pv/uv、逐日补零、topPages/topRefs、去空分组、今日小时分布', async () => {
   const raw = new DatabaseSync(':memory:')
   raw.exec(SCHEMA_SQL)
-  const now = Date.now()
+  // 固定时钟（P3-1）：2026-06-15 04:00 UTC = 北京时间 12:00——所有相对时刻的「今天/昨天」
+  // 归属不再随真实钟点漂移（此前真钟在 00:00-01:00 跑必挂：now-1h 落到昨天）
+  const now = Date.UTC(2026, 5, 15, 4, 0, 0)
   const dayMs = 86_400_000
   const ins = raw.prepare('INSERT INTO visit_log (ts, day, vid, path, title, ref, dev, br, country) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
   // 今天：3 个访客、2 个页面、1 个来源、设备/浏览器/国家各两组（含应被排除的空串）
@@ -147,7 +149,7 @@ test('getVisitStats 聚合：pv/uv、逐日补零、topPages/topRefs、去空分
   const old = now - 40 * dayMs
   ins.run(old, fmtDate(old), 'v9', '/post/old', '旧文', '', 'desktop', 'Chrome', 'CN')
 
-  const s = await getVisitStats(d1FromSqlite(raw), 30)
+  const s = await getVisitStats(d1FromSqlite(raw), 30, now)
   assert.equal(s.days, 30)
   assert.equal(s.pv, 5) // 窗口外那条不计
   assert.equal(s.uv, 3)

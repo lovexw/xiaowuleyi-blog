@@ -109,8 +109,9 @@ export interface VisitStats {
  *  visit_log 是量最大的日志表，站长每刷一次统计页 = 窗口行数 × 8 次行读。改为按 ≤7 天分片取回
  *  （响应体与内存有界，总行读 = 窗口行数 × 1）、一次遍历聚合全部分组维度；分组计数流过即弃，
  *  内存只随分组数与 vid 集合增长。 */
-export async function getVisitStats(db: D1Database, days: number): Promise<VisitStats> {
-  const now = Date.now()
+export async function getVisitStats(db: D1Database, days: number, now = Date.now()): Promise<VisitStats> {
+  // now 可注入（2026-11 审计 P3-1）：统计窗口/北京日聚合依赖当前时刻，测试用固定时钟钉住，
+  // 不再在北京时间 00:00-01:00（「今天」翻页窗口）出现真钟 flake
   const today = fmtDate(now)
   const totalVids = new Set<string>()
   const dayAgg = new Map<string, { pv: number; vids: Set<string> }>()
