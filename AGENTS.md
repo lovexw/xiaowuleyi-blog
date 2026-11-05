@@ -274,7 +274,7 @@ npm run videos:fix-hevc -- --site https://blog.xiaowuleyi.com --user 管理员 -
 
 ## 2026-11 全项目审计新增防线（2026-11-05/06，修复批次 R1-R9 落地）
 
-> 全项目深度审计（8 路专项 + 逐条亲核）产出三份报告在仓库根：`AUDIT_REPORT.md`（问题清单 P0×1 P1×13 P2×27 P3×30）/ `REMEDIATION_PLAN.md`（修复计划）/ `ARCHITECTURE_REPORT.md`（生产架构摸底）；过程台账 `AUDIT_PROGRESS.md`。以下是从这批修复里立起来的新防线：
+> 全项目深度审计（8 路专项 + 逐条亲核）产出三份报告 + 过程台账，2026-11-06 已归档到 `docs/archive/audit-2026-11/`（原先散在仓库根）：`AUDIT_REPORT.md`（问题清单 P0×1 P1×13 P2×27 P3×30）/ `REMEDIATION_PLAN.md`（修复计划）/ `ARCHITECTURE_REPORT.md`（生产架构摸底）/ `AUDIT_PROGRESS.md`（台账），进门先看该目录的 README。以下是从这批修复里立起来的新防线：
 
 - **内存限流一律带作用域**：`rateLimit(scope, key, limit, windowMs)` 第一参必须是**对象**（租户请求路径传 `c.env`，控制面传 `CONTROL_SCOPE` 单例；字符串当 WeakMap key 会抛「Invalid value used as weak map key」——control.ts /login 实测把控制面打成全 500）。docker-poc 单进程多租户下 key 无作用域 = 全部站点共享限流桶（A 站登录失败锁死 B 站、`backup:global` 字面量桶跨站互斥，审计 P0-1）；新增调用点漏传 `c.env` 会直接 TypeError，老调用点字符串 key 的报错在冒烟才暴露——**新增端点后必跑 `docker-poc/smoke.sh`**
 - **跨租户共享的内存幂等/去重键必须含租户维度**：同款 WeakMap-by-env 口径（TG webhook 幂等键 `tgDoneScopes`、审计 P1-2——Telegram update_id 是 per-bot 序列，裸键会丢别的租户的消息）
@@ -284,6 +284,7 @@ npm run videos:fix-hevc -- --site https://blog.xiaowuleyi.com --user 管理员 -
 - **媒体删除口径必须走 `store.ts mediaDeleteKeys`**（原图 + @192/@480/@960 变体全集）：媒体删除/合并/清理/清空本站四条路已接线，新增删除路径漏接 = 已删图经变体 URL 永久可达（审计 P1-7）；gen-variants.py 槽位宽与 `IMAGE_VARIANT_WIDTHS` 两处同改。**新增存图片地址的字段必须同步 audit.ts 的 pullReferenceTexts + REF_TABLES**（comments.avatar / members.avatar 曾漏登记，「清理未引用」会打瘫评论区头像——审计 P1-8）
 - **listMemberReplies 是锚点两步查询**（我发过的评论 id ∪ 我回复的 parent_id，90 锚点分块走 INDEXED BY idx_comments_parent）：改它先跑 tests/member-tiers.test.ts；「收到的回复」的圈层过滤依赖 db 带出的 rootTier/rootTierExpires（审计 P2-3/P3-26）
 - **docker-poc/server.ts 进程与流**：uncaughtException/unhandledRejection 兜底（记日志后 exit(1) 交给 restart 拉起）；响应流转发用 **node:stream 回调版 pipeline**（stream/promises 版 Node ≥24 三参形态会把回调误当 destination function 抛 ERR_INVALID_RETURN_VALUE，冒烟实测）；`server.listen` 默认 127.0.0.1（容器形态 entrypoint.sh export HOST=0.0.0.0）；tenants.json 写前留 .bak
+- **媒体体检的孤儿扫描是「有上限的分页遍历 + 只报告」**（src/audit.ts `scanDiskOrphans`）：单次最多翻 `ORPHAN_SCAN_MAX`（5 万）个对象，`truncated/scanned/limit` 三个字段一起下发，前端据此说清「扫到哪停的」——扫到上限时**不下「全站干净」的结论**（旧实现 2 万上限 < 生产图床 22586 个文件，一直静默少算；只报数量不说扫了多少）。调整上限别按「多少个媒体文件」算，成本在翻页本身。docker-poc 侧 `r2disk.list` 用 2 秒 TTL 的 key 索引缓存（`cachedKeys`）：**不能改成写入时主动作废**——cursor 是数组下标，索引在两页之间变短就会跳过后半段；外部进程（变体服务）写的文件只能靠 TTL 被看见，列到已被删的对象要跳过而不是抛错。tests/audit.test.ts + tests/r2disk-list-cache.test.ts 守着
 - **审计报告的「需生产验证清单」**（AUDIT_REPORT §3）与「站长已亲自修掉项」（TRUST_PROXY=cf + iptables、进程内页缓存 memory-cache.ts、后台壳页缓存、数据目录属主自愈、变体服务降权 User=1000、文档口径冻结）都在台账里对过账
 
 
