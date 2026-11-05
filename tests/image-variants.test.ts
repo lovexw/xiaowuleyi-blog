@@ -48,3 +48,18 @@ test('responsiveContentImages：没有 img 的 HTML 原样返回（含空串）'
   // 没有 src 的 img（占位符）不动，避免拼出无意义属性
   assert.equal(responsiveContentImages('<img alt="占位">'), '<img alt="占位">')
 })
+
+test('mediaDeleteKeys：原图展开全部变体槽位；变体 key 幂等回原图；多 key 去重（P1-7）', async () => {
+  const { mediaDeleteKeys } = await import('../src/store.ts')
+  assert.deepEqual(
+    [...mediaDeleteKeys(['u/202611/abc.jpg'])].sort(),
+    ['u/202611/abc.jpg', 'u/202611/abc.jpg@192.webp', 'u/202611/abc.jpg@480.webp', 'u/202611/abc.jpg@960.webp'].sort()
+  )
+  // 传变体 key 进来按原图展开（幂等）
+  assert.deepEqual(
+    [...mediaDeleteKeys(['u/x.png@480.webp'])].sort(),
+    ['u/x.png', 'u/x.png@192.webp', 'u/x.png@480.webp', 'u/x.png@960.webp'].sort()
+  )
+  // 多 key 去重
+  assert.equal(new Set(mediaDeleteKeys(['u/a.jpg', 'u/a.jpg@480.webp'])).size, 4)
+})

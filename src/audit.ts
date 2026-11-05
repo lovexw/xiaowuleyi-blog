@@ -1,4 +1,5 @@
 import { sha256Hex } from './utils'
+import { mediaDeleteKeys, variantBaseKey } from './store'
 import type { Env } from './types'
 
 /* ---------------- 媒体体检（后台「媒体 → 体检」的服务端逻辑） ----------------
@@ -11,7 +12,9 @@ import type { Env } from './types'
  * 引用源清单（新增存图片地址的字段时必须同步 pullReferenceTexts）：
  *   posts.content（含 <meta data-og-image>）与 posts.cover、pages.content、weibo.images、
  *   weibo.video（视频地址与封面帧，B19）、
- *   users.avatar、friend_links.icon、settings.value（favicon/头像/OG 默认图）、tg_buffer（待合并的 TG 相册）。
+ *   users.avatar、comments.avatar / members.avatar（评论头像 C2 / 会员 QQ 头像——
+ *   2026-11 审计 P1-8 补登记，此前体检会把在用头像误判成未引用并清理掉）、
+ *   friend_links.icon、settings.value（favicon/头像/OG 默认图）、tg_buffer（待合并的 TG 相册）。
  *   评论正文是纯文本不存 HTML，不构成引用源。
  */
 
@@ -148,6 +151,10 @@ async function pullReferenceTexts(db: D1Database): Promise<string[]> {
   const small = await db.batch([
     db.prepare("SELECT cover AS v FROM posts WHERE cover LIKE '%/images/%' LIMIT 20000"),
     db.prepare("SELECT avatar AS v FROM users WHERE avatar LIKE '%/images/%'"),
+    // 评论头像 C2 / 会员 QQ 头像：都经 saveUpload 落 /images/，不进引用源会被体检误判
+    // 为「未被引用」，一键清理即打瘫评论区头像（2026-11 审计 P1-8）
+    db.prepare("SELECT avatar AS v FROM comments WHERE avatar LIKE '%/images/%' LIMIT 20000"),
+    db.prepare("SELECT avatar AS v FROM members WHERE avatar LIKE '%/images/%'"),
     db.prepare("SELECT icon AS v FROM friend_links WHERE icon LIKE '%/images/%' LIMIT 20000"),
     db.prepare("SELECT value AS v FROM settings WHERE value LIKE '%/images/%'"),
     db.prepare("SELECT content AS v FROM tg_buffer WHERE content LIKE '%/images/%'"),
@@ -175,6 +182,44 @@ export interface AuditReport {
   duplicateBytes: number
   /** 图床里已不存在、只剩库记录的失踪文件（多半是手动清过 R2） */
   ghosts: AuditItem[]
+  /** 磁盘有而库无（2026-11 审计 P2-18）：上传中断残文件 / 手工拷贝 / 变体残留。
+   *  只报告不自动删——「宁少删不错删」；staleVariants 是原 key 已不在库的孤儿变体（P1-7 清理后应为 0） */
+  orphans: { count: number; staleVariants: number; sample: string[]; truncated: boolean }
+}
+
+/** 磁盘有而库无：翻页遍历图床对象（u/ og/ 前缀），与 uploads 全集做差。
+ *  只读不删；单次最多扫 2 万个 key（r2disk.list 每页全树遍历，封顶防大图床拖垮体检） */
+async function scanDiskOrphans(env: Env, knownKeys: Set<string>): Promise<AuditReport['orphans']> {
+  let cursor: string | undefined
+  let scannedDisk = 0
+  let count = 0
+  let staleVariants = 0
+  const sample: string[] = []
+  for (let page = 0; page < 20; page++) {
+    const res = await env.IMAGES.list({ limit: 1000, cursor })
+    for (const o of res.objects) {
+      if (!isMediaKey(o.key)) continue
+      scannedDisk++
+      if (knownKeys.has(o.key)) continue
+      const base = variantBaseKey(o.key)
+      if (base) {
+        // 变体：原图还在库 = 正常派生文件；原图已不在库 = 孤儿变体（删除路径漏网的）
+        if (!knownKeys.has(base)) {
+          staleVariants++
+          count++
+          if (sample.length < 50) sample.push(o.key)
+        }
+        continue
+      }
+      count++
+      if (sample.length < 50) sample.push(o.key)
+    }
+    if (!res.truncated || scannedDisk >= 20000) {
+      return { count, staleVariants, sample, truncated: !!res.truncated && scannedDisk >= 20000 }
+    }
+    cursor = res.cursor
+  }
+  return { count, staleVariants, sample, truncated: true }
 }
 
 export async function runAudit(env: Env): Promise<AuditReport> {
@@ -182,10 +227,12 @@ export async function runAudit(env: Env): Promise<AuditReport> {
     'SELECT id, key, name, mime, size, created_at, hash FROM uploads ORDER BY created_at DESC'
   ).all<UploadRow>()
   const uploads = results ?? []
+  const knownKeys = new Set(uploads.map((u) => u.key))
   const referenced = await scanReferencedKeys(
     env,
     uploads.map((u) => u.key)
   )
+  const orphans = await scanDiskOrphans(env, knownKeys)
 
   const unreferenced: AuditItem[] = []
   const ghosts: AuditItem[] = []
@@ -214,6 +261,7 @@ export async function runAudit(env: Env): Promise<AuditReport> {
     duplicateGroups,
     duplicateBytes: duplicateGroups.reduce((s, g) => s + g.wasteBytes, 0),
     ghosts,
+    orphans,
   }
 }
 
@@ -261,6 +309,8 @@ export interface MergeResult {
   freedBytes: number
   /** 被合并删除的 key（调用方据此清图床边缘缓存，审计 F2） */
   removed: string[]
+  /** 删除口径全集 = removed ∪ 变体派生 key（P1-7）：边缘缓存清理用它，UI 展示仍用 removed */
+  purgeKeys: string[]
 }
 
 const REF_TABLES: [table: string, cols: string[]][] = [
@@ -268,6 +318,9 @@ const REF_TABLES: [table: string, cols: string[]][] = [
   ['pages', ['content']],
   ['weibo', ['images']],
   ['users', ['avatar']],
+  // 评论/会员头像：合并重复时引用改写也要覆盖这两列，否则被并掉的文件一删头像 404（P1-8）
+  ['comments', ['avatar']],
+  ['members', ['avatar']],
   ['friend_links', ['icon']],
   ['settings', ['value']],
   ['tg_buffer', ['content', 'images']],
@@ -313,11 +366,14 @@ export async function mergeDuplicate(env: Env, keep: string, remove: string[]): 
     for (const r of res) updated += r.meta.changes || 0
   }
 
-  await env.IMAGES.delete(rm)
+  // 删除口径带变体派生文件（2026-11 审计 P1-7）：变体不进 uploads 表，只删原 key
+  // 会留下仍可公开访问的 <key>@480.webp
+  const purgeKeys = mediaDeleteKeys(rm)
+  await env.IMAGES.delete(purgeKeys)
   await env.DB.prepare(`DELETE FROM uploads WHERE key IN (${rm.map(() => '?').join(',')})`)
     .bind(...rm)
     .run()
-  return { updated, freedBytes: keepRow.size * rm.length, removed: rm }
+  return { updated, freedBytes: keepRow.size * rm.length, removed: rm, purgeKeys }
 }
 
 /* ---------------- 清理未引用 ---------------- */
@@ -348,9 +404,11 @@ export async function cleanupUnreferenced(env: Env, keys: string[]): Promise<Cle
     .bind(...deletable)
     .all<{ key: string; size: number }>()
   const freedBytes = (results ?? []).reduce((s, r) => s + r.size, 0)
-  await env.IMAGES.delete(deletable)
+  // 删除口径带变体派生文件（P1-7），边缘缓存清理（deletedKeys 消费方）随之覆盖变体 URL
+  const purgeKeys = mediaDeleteKeys(deletable)
+  await env.IMAGES.delete(purgeKeys)
   await env.DB.prepare(`DELETE FROM uploads WHERE key IN (${ph})`)
     .bind(...deletable)
     .run()
-  return { deleted: deletable.length, freedBytes, blocked, deletedKeys: deletable }
+  return { deleted: deletable.length, freedBytes, blocked, deletedKeys: purgeKeys }
 }

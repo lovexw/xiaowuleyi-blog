@@ -142,7 +142,7 @@ import {
 import { SITE_MODE_VALUES, siteBase, toHomePost, type SiteMode } from './render'
 import { sanitizeHtml } from './sanitize'
 import { cleanupUnreferenced, backfillHashes, mergeDuplicate, runAudit } from './audit'
-import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, saveUpload, sniffImageExt, sniffUploadExt, sniffVideoCodec, transferImage } from './store'
+import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mediaDeleteKeys, saveUpload, sniffImageExt, sniffUploadExt, sniffVideoCodec, transferImage } from './store'
 import { hashPostPassword } from './protect'
 import { generateTotpSecret, totpProvisioningUri, verifyTotp } from './totp'
 import { qrMatrix } from './qrcode'
@@ -164,7 +164,7 @@ import { fetchLinkMeta, fetchableUrl } from './linkmeta'
 import { BROWSER_UA, buildCardHtml, coverProxyHostOk, coverReferer, fetchDoubanDetail, probeRelay, resolveCardCover, sanitizeMediaItem, searchMedia, subjectIdFromUrl, validateRelay, type MediaItem } from './douban'
 import { THEMES } from './themes/registry'
 import type { CommentRow, Env, MemberRow, PostRow, SessionUser, SettingsMap } from './types'
-import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanNickname, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isDemo, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, nicknameCooldown, normalizeLinkUrl, pageWindowCutoff, siteVisibleCutoff, slugify, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanNickname, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isDemo, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, nicknameCooldown, normalizeLinkUrl, pageWindowCutoff, sha256Hex, siteVisibleCutoff, slugify, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
 
 type AppEnv = { Bindings: Env; Variables: { user: SessionUser; memberSettings?: SettingsMap } }
 
@@ -1831,6 +1831,15 @@ async function storeLinkIcon(env: Env, iconUrl: string, host: string): Promise<s
       // 长 immutable 会让换图标后边缘与浏览器长期取旧图；1 天 + /images 尊重对象头
       httpMetadata: { contentType: mime, cacheControl: 'public, max-age=86400' },
     })
+    // 登记进 uploads（2026-11 审计 P2-17）：此前直接 put 绕过 saveUpload，图标不进媒体库
+    // ——整站包导出漏掉全部友链图标（还原后 404）、体检盲区、清空本站漏删成孤儿。
+    // 原地覆盖键：登记用 INSERT OR REPLACE 口径，换图重抓时行随之更新
+    await env.DB
+      .prepare(
+        'INSERT INTO uploads (key, name, mime, size, created_at, hash) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET name = excluded.name, mime = excluded.mime, size = excluded.size, created_at = excluded.created_at, hash = excluded.hash'
+      )
+      .bind(key, `${host} favicon`.slice(0, 120), mime, buf.byteLength, Date.now(), await sha256Hex(buf))
+      .run()
     return `/images/${key}`
   } catch {
     return ''
@@ -2374,13 +2383,16 @@ api.delete('/admin/uploads', async (c) => {
   const key = c.req.query('key') || ''
   // og/ 与 u/ 同为媒体库可管理的图床目录（OG 分享卡图），前缀白名单挡住 backups/ 等其余 key
   if (!key.startsWith('u/') && !key.startsWith('og/')) return jsonError('非法的文件 Key')
+  // 删除口径带变体派生文件（2026-11 审计 P1-7）：变体不进 uploads 表，只删原 key
+  // 会留下仍可公开访问的 <key>@480.webp（隐私/撤稿场景不可接受）
+  const purgeKeys = mediaDeleteKeys([key])
   await Promise.all([
-    c.env.IMAGES.delete(key),
+    c.env.IMAGES.delete(purgeKeys),
     c.env.DB.prepare('DELETE FROM uploads WHERE key = ?').bind(key).run(),
   ])
   // 删掉的媒体从图床边缘缓存摘掉（2026-10-15 审计 F2）：边缘副本 immutable 1y，
   // 不清理的话已删内容对持旧 URL 的访客继续可见
-  c.executionCtx.waitUntil(purgeImageCache(new URL(c.req.url).origin, [key]))
+  c.executionCtx.waitUntil(purgeImageCache(new URL(c.req.url).origin, purgeKeys))
   return c.json({ ok: true })
 })
 
@@ -2405,9 +2417,9 @@ api.post('/admin/uploads/merge', async (c) => {
   try {
     const r = await mergeDuplicate(c.env, b.keep, b.remove)
     // 合并把正文/微博里的重复图地址改写为保留键 → 页面边缘缓存作废（旧副本里的 URL 已失效）；
-    // 被合并删除的文件同时从图床边缘缓存摘掉（审计 F2）
+    // 被合并删除的文件（含变体派生 key，P1-7）同时从图床边缘缓存摘掉（审计 F2）
     c.executionCtx.waitUntil(purgePageCache(c.env.DB))
-    c.executionCtx.waitUntil(purgeImageCache(new URL(c.req.url).origin, r.removed ?? []))
+    c.executionCtx.waitUntil(purgeImageCache(new URL(c.req.url).origin, r.purgeKeys ?? r.removed ?? []))
     return c.json({ ok: true, ...r })
   } catch (e) {
     return jsonError(e instanceof Error ? e.message : '合并失败')

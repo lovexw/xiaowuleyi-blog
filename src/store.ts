@@ -69,6 +69,23 @@ export function variantBaseKey(key: string): string | null {
   return ext === 'jpg' || ext === 'jpeg' || ext === 'png' || ext === 'webp' ? base : null
 }
 
+/** 变体槽位宽：与 deploy/images/gen-variants.py 的 --widths 默认值一字不差（改任一侧同改） */
+export const IMAGE_VARIANT_WIDTHS = [192, 480, 960] as const
+
+/** 原图 key → 全部变体派生 key。变体文件不进 uploads 表、正文引用的永远是原图 key——
+ *  所以「删图 / 合并 / 清理 / 清空本站」的删除口径必须带上这批派生 key：
+ *  漏删 = 已删图经 `<key>@480.webp` 永久可达（2026-11 审计 P1-7）。
+ *  传入的 key 本身是变体形态时按其原图展开（幂等）。 */
+export function mediaDeleteKeys(keys: string[]): string[] {
+  const out = new Set<string>()
+  for (const k of keys) {
+    const base = variantBaseKey(k) ?? k
+    out.add(base)
+    for (const w of IMAGE_VARIANT_WIDTHS) out.add(`${base}@${w}.webp`)
+  }
+  return [...out]
+}
+
 /** 字节进 R2 图床并登记 uploads 表，返回站内地址。
  *  ext/mime 由调用方先过白名单（imageExtOf）或魔数识别（sniffImageExt）；
  *  dir 为图床目录（普通上传 u/，OG 卡图 og/），年月子目录由这里统一拼。

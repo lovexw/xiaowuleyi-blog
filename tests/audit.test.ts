@@ -30,7 +30,7 @@ function fakeDb(tables: Tables): D1Database {
     if (m) {
       const [, col, table] = m
       return {
-        results: tables[table]
+        results: (tables[table] || [])
           .filter((r) => String(r[col] ?? '').includes('/images/'))
           .map((r) => ({ id: r.id, len: bytes(String(r[col] ?? '')) })),
       }
@@ -40,7 +40,7 @@ function fakeDb(tables: Tables): D1Database {
     if (m) {
       const [, col, table] = m
       const ids = binds as number[]
-      return { results: tables[table].filter((r) => ids.includes(r.id as number)).map((r) => ({ v: r[col] })) }
+      return { results: (tables[table] || []).filter((r) => ids.includes(r.id as number)).map((r) => ({ v: r[col] })) }
     }
     // uploads key IN 查询（体检合并/清理取行）
     m = /SELECT (.+?) FROM uploads WHERE key IN \(([^)]*)\)$/.exec(sql)
@@ -53,7 +53,8 @@ function fakeDb(tables: Tables): D1Database {
     m = /SELECT (\w+) AS v FROM (\w+) WHERE \1 LIKE '%\/images\/%'( LIMIT \d+)?$/.exec(sql)
     if (m) {
       const [, col, table] = m
-      return { results: tables[table].filter((r) => String(r[col] ?? '').includes('/images/')).map((r) => ({ v: r[col] })) }
+      // comments/members（头像列，P1-8）等引用源表在部分用例的 fixtures 里不存在 → 空表口径
+      return { results: (tables[table] || []).filter((r) => String(r[col] ?? '').includes('/images/')).map((r) => ({ v: r[col] })) }
     }
     // 回填：选取 / 计数 / 写指纹
     if (sql.startsWith("SELECT key FROM uploads WHERE hash = '' LIMIT"))
@@ -75,7 +76,7 @@ function fakeDb(tables: Tables): D1Database {
       const from = binds[0] as string
       const to = binds[1] as string
       let changes = 0
-      for (const row of tables[table]) {
+      for (const row of tables[table] || []) {
         if (!whereCols.some((c) => String(row[c] ?? '').includes(from))) continue
         for (const c of cols) row[c] = String(row[c] ?? '').split(from).join(to)
         changes++
@@ -127,6 +128,8 @@ function fakeR2(objects: Map<string, string>): R2Bucket {
     delete: async (keys: string | string[]) => {
       for (const k of Array.isArray(keys) ? keys : [keys]) objects.delete(k)
     },
+    // 孤儿扫描（P2-18）翻页遍历：测试桩单页全量返回
+    list: async () => ({ objects: [...objects.keys()].map((key) => ({ key, size: 1, uploaded: new Date() })), truncated: false }),
   } as unknown as R2Bucket
 }
 
@@ -351,4 +354,64 @@ test('cleanupUnreferenced：全被引用时一个不删；非法 key / 超量拒
   assert.equal(r.blocked.length, 2)
   await assert.rejects(() => cleanupUnreferenced(env, ['backups/x.json']), /非法的文件 Key/)
   await assert.rejects(() => cleanupUnreferenced(env, Array.from({ length: 101 }, (_, i) => `u/x/${i}.jpg`)), /非法的文件 Key/)
+})
+
+test('P1-8：评论/会员头像在引用源里，不会被体检判成未引用', async () => {
+  const t = auditTables()
+  ;(t as Tables).comments = [{ id: 1, avatar: '/images/u/k/1.jpg' }]
+  ;(t as Tables).members = [{ id: 1, avatar: '/images/u/k/2.jpg' }]
+  const d = await runAudit(fakeEnv(t))
+  assert.ok(!d.unreferenced.some((u) => u.key === 'u/k/1.jpg'), '评论头像不得判未引用')
+  assert.ok(!d.unreferenced.some((u) => u.key === 'u/k/2.jpg'), '会员头像不得判未引用')
+})
+
+test('P1-7：cleanupUnreferenced 删除口径带变体派生 key', async () => {
+  const r2 = new Map<string, string>([
+    ['u/k/4.jpg', 'x'],
+    ['u/k/4.jpg@480.webp', 'v'],
+    ['u/k/4.jpg@192.webp', 'v'],
+  ])
+  const t = auditTables()
+  const env = fakeEnv(t, r2)
+  const r = await cleanupUnreferenced(env, ['u/k/4.jpg'])
+  assert.equal(r.deleted, 1)
+  assert.ok(!r2.has('u/k/4.jpg@480.webp'), '变体派生文件必须随原图一起删')
+  assert.ok(!r2.has('u/k/4.jpg@192.webp'))
+  assert.ok(r.deletedKeys.includes('u/k/4.jpg@480.webp'), 'deletedKeys 带变体（边缘缓存清理口径）')
+})
+
+test('P1-7：mergeDuplicate 删除口径带变体，purgeKeys 与 UI 的 removed 分离', async () => {
+  const r2 = new Map<string, string>([
+    ['u/k/1.jpg', 'x'],
+    ['u/k/1.jpg@480.webp', 'v'],
+    ['u/k/3.jpg', 'x'],
+    ['u/k/3.jpg@480.webp', 'v'],
+  ])
+  const t = auditTables()
+  const env = fakeEnv(t, r2)
+  const r = await mergeDuplicate(env, 'u/k/1.jpg', ['u/k/3.jpg'])
+  assert.ok(!r2.has('u/k/3.jpg@480.webp'), '被并掉的原图变体必须一起删')
+  assert.deepEqual(
+    [...r.purgeKeys].sort(),
+    ['u/k/3.jpg', 'u/k/3.jpg@192.webp', 'u/k/3.jpg@480.webp', 'u/k/3.jpg@960.webp'].sort(),
+    'purgeKeys 只含被删侧（保留项不删也不清缓存）'
+  )
+  assert.deepEqual(r.removed, ['u/k/3.jpg'])
+})
+
+test('P2-18：runAudit 报告磁盘孤儿与孤儿变体（只报告不删除）', async () => {
+  const r2 = new Map<string, string>([
+    ['u/k/1.jpg', 'x'],
+    ['u/orphan.bin', 'x'], // 磁盘有库无
+    ['u/gone.png@480.webp', 'v'], // 原图已不在库的孤儿变体
+    ['backups/b.json', 'x'], // 非媒体前缀：不进孤儿口径
+  ])
+  const t = auditTables()
+  const env = fakeEnv(t, r2)
+  const d = await runAudit(env)
+  assert.equal(d.orphans.count, 2)
+  assert.equal(d.orphans.staleVariants, 1)
+  assert.ok(d.orphans.sample.includes('u/orphan.bin'))
+  assert.ok(d.orphans.sample.includes('u/gone.png@480.webp'))
+  assert.ok(r2.has('u/orphan.bin'), '只报告不自动删')
 })

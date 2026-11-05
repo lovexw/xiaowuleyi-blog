@@ -389,6 +389,10 @@ app.get('/images/*', async (c) => {
   } catch {
     /* 保持原样 */
   }
+  // 穿越样式的 key 前置 404（2026-11 审计 P3-14）：r2disk 的 safeJoin 对 `..`/`\`/`\0`
+  // 抛异常，穿透到 shim 会变成 500 + 错误日志噪音（R2 形态本来就是 404）；穿越本身
+  // 打不穿（safeJoin 双重校验），这里只对齐行为、消掉噪音
+  if (key.includes('..') || key.includes('\\') || key.includes('\0')) return c.text('Not found', 404)
   if (!key.startsWith('u/') && !key.startsWith('og/')) return c.text('Not found', 404)
   // 图床边缘缓存（src/pagecache.ts imageCacheMatch）：键内容寻址（saveUpload 时间戳+随机数，
   // 同键永不覆盖），colo 副本命中直接返回，省一次 Worker→R2 的跨境回源；404 不缓存，

@@ -29,6 +29,7 @@ import { collectReferencedKeys } from './audit'
 import { collectImageKeysFromHtml, keyOf } from './export'
 import { purgePageCache } from './pagecache'
 import { sanitizeHtml } from './sanitize'
+import { mediaDeleteKeys, variantBaseKey } from './store'
 import type { Env } from './types'
 import { fmtDate } from './utils'
 import { APP_VERSION } from './version'
@@ -342,10 +343,14 @@ export async function resetSiteContent(env: Env): Promise<ResetResult> {
   let images = 0
   let imagesDone = true
   try {
-    for (let i = 0; i < imageKeys.length; i += R2_DELETE_BATCH) {
-      const batch = imageKeys.slice(i, i + R2_DELETE_BATCH)
+    // 删除口径带变体派生文件（2026-11 审计 P1-7）：变体不进 uploads 表/引用扫描，
+    // 只删收集到的原 key 会留下孤儿变体继续被 /images 公开服务。
+    // images 计数只算原图（变体是派生文件，计进报告会虚高）
+    const expanded = mediaDeleteKeys(imageKeys)
+    for (let i = 0; i < expanded.length; i += R2_DELETE_BATCH) {
+      const batch = expanded.slice(i, i + R2_DELETE_BATCH)
       await env.IMAGES.delete(batch)
-      images += batch.length
+      for (const k of batch) if (!variantBaseKey(k)) images++
     }
   } catch {
     imagesDone = false

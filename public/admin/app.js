@@ -3021,6 +3021,7 @@ async function renderAuditReport(body) {
     ${free.length ? `<span class="audit-chip is-warn">未引用 <b>${free.length}</b> 个 · ${fmtSize(d.unreferencedBytes)}</span>` : '<span class="audit-chip is-ok">✓ 无未引用文件</span>'}
     ${d.duplicateGroups.length ? `<span class="audit-chip is-warn">重复 <b>${d.duplicateGroups.length}</b> 组 · 冗余 ${fmtSize(d.duplicateBytes)}</span>` : '<span class="audit-chip is-ok">✓ 无重复文件</span>'}
     ${d.ghosts.length ? `<span class="audit-chip is-warn">失踪记录 <b>${d.ghosts.length}</b> 个</span>` : ''}
+    ${d.orphans && d.orphans.count ? `<span class="audit-chip is-warn">磁盘孤儿 <b>${d.orphans.count}</b> 个${d.orphans.staleVariants ? `（含变体残留 ${d.orphans.staleVariants}）` : ''}</span>` : ''}
   </div>`
 
   const dupHtml = d.duplicateGroups.length
@@ -3080,13 +3081,29 @@ async function renderAuditReport(body) {
     </div>`
     : ''
 
-  const allClean = !free.length && !d.duplicateGroups.length && !d.ghosts.length
+  const orphanHtml =
+    d.orphans && d.orphans.count
+      ? `<div class="audit-sec">
+      <div class="audit-sec-head"><span>磁盘孤儿<span class="audit-sec-sub">　磁盘里有、媒体库里没有登记（上传中断残留 / 手工拷贝 / 变体残留）；只报告不自动删，确认无引用后可在图床目录手动清理</span></span></div>
+      <div class="audit-footnote">共 ${d.orphans.count} 个${d.orphans.truncated ? '（扫描截断于 2 万个文件，可能有更多）' : ''}${d.orphans.staleVariants ? `，其中 ${d.orphans.staleVariants} 个是原图已删除却残留的变体（<code>@尺寸.webp</code>）——继续公开可访问，建议优先清理` : ''}。</div>
+      <div class="audit-grid">${(d.orphans.sample || [])
+        .map(
+          (k) => `<div class="audit-item is-ghost">
+        <div class="audit-item-info"><div class="audit-name" title="${esc(k)}">${esc(k)}</div></div>
+      </div>`
+        )
+        .join('')}</div>
+    </div>`
+      : ''
+
+  const allClean = !free.length && !d.duplicateGroups.length && !d.ghosts.length && !(d.orphans && d.orphans.count)
   body.innerHTML =
     sum +
     (allClean ? '<div class="empty-box">🎉 很干净：没有未引用、重复或失踪的文件</div>' : '') +
     dupHtml +
     freeHtml +
-    ghostHtml
+    ghostHtml +
+    orphanHtml
 
   /* --- 未引用：点选 + 批量删除 --- */
   const selected = new Set()
