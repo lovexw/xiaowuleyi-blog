@@ -163,6 +163,62 @@ test('会员回复链路：会员可回复楼中楼、游客回复被拒、被�
   assert.equal(mineA[0].postTitle, '公开文')
 })
 
+test('会员开关守卫：membersEnabled=0 时残留会员会话按游客发言、不计分（P1-3）', async () => {
+  const { db, d1 } = await setupDb()
+  const cookie = await registerMember(d1, 'legacy01')
+  const { api } = await import('../src/api')
+  await saveSettings(d1, { membersEnabled: '0' })
+  const env = { DB: d1, IMAGES: {}, ASSETS: {} } as never
+  const tasks: Promise<unknown>[] = []
+  const ec = { waitUntil: (p: Promise<unknown>) => tasks.push(p), passThroughOnException: () => {} } as never
+
+  // 浏览器里残留 xw_member_session 的用户在公开留言接口发言 → 必须走游客路径
+  const res = await api.request(
+    'https://x.example.com/public/comments',
+    {
+      method: 'POST',
+      headers: { ...JSON_HEADERS, Cookie: cookie },
+      body: JSON.stringify({ slug: 'open-post', content: '关闭后的留言', nickname: '旧会员' }),
+    },
+    env,
+    ec
+  )
+  assert.equal(res.status, 200, `应按游客放行：${await res.text()}`)
+  const row = db.prepare("SELECT member_id, nickname FROM comments WHERE content = '关闭后的留言'").get() as {
+    member_id: number | null
+    nickname: string
+  }
+  assert.ok(!row.member_id, '不得以会员身份落库（游客口径 member_id=0）')
+  assert.equal(row.nickname, '旧会员', '按游客路径使用表单昵称')
+  const mid = (db.prepare("SELECT id FROM members WHERE username = 'legacy01'").get() as { id: number }).id
+  const pointsBefore = (
+    db.prepare('SELECT COUNT(*) AS n FROM member_points_log WHERE member_id = ?').get(mid) as { n: number }
+  ).n
+  // 关闭态发言不得新增积分（注册本身记的每日登录积分不算；此时还没跑对照组）
+  const pointsAfterClosed = (
+    db.prepare('SELECT COUNT(*) AS n FROM member_points_log WHERE member_id = ?').get(mid) as { n: number }
+  ).n
+  assert.equal(pointsAfterClosed, pointsBefore, '关闭会员后发言不得新增任何积分')
+
+  // 对照组：开关重新打开后同一会员发言照常落 member_id（防线只针对关闭态，不影响正常功能）
+  await saveSettings(d1, { membersEnabled: '1' })
+  const res2 = await api.request(
+    'https://x.example.com/public/comments',
+    {
+      method: 'POST',
+      headers: { ...JSON_HEADERS, Cookie: cookie },
+      body: JSON.stringify({ slug: 'open-post', content: '开启后的留言' }),
+    },
+    env,
+    ec
+  )
+  assert.equal(res2.status, 200, `开启后会员发言应正常：${await res2.text()}`)
+  const row2 = db.prepare("SELECT member_id FROM comments WHERE content = '开启后的留言'").get() as {
+    member_id: number | null
+  }
+  assert.equal(row2.member_id, mid, '开启后会员身份恢复')
+})
+
 test('会员点赞链路：点赞记账 / 取消赞删行 / 足迹同日去重', async () => {
   const { db, d1 } = await setupDb()
   const cookie = await registerMember(d1, 'liker01')

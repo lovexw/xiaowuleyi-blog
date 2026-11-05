@@ -495,7 +495,7 @@ collectRoutes.post('/wechat', async (c) => {
   if (!/^https:\/\/mp\.weixin\.qq\.com\/s/i.test(url)) {
     return c.json({ error: '请输入 mp.weixin.qq.com 的公众号文章链接' }, 400)
   }
-  if (!rateLimit(`collect:${clientIp(c.req.raw)}`, 10, 60_000)) {
+  if (!rateLimit(c.env, `collect:${clientIp(c.req.raw)}`, 10, 60_000)) {
     return c.json({ error: '采集太频繁，请稍后再试' }, 429)
   }
 

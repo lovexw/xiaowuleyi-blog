@@ -202,7 +202,7 @@ app.post('/post/:slug/unlock', async (c) => {
   const row = await getPostBySlug(c.env.DB, slug)
   if (!row || row.status !== 'published' || !row.password_hash) return c.redirect(back, 303)
   // 按文章 + IP 限流：PBKDF2 校验是慢操作，防爆破（10 次 / 10 分钟，与登录同量级）
-  if (!rateLimit(`unlock:${clientIp(c.req.raw)}:${row.id}`, 10, 10 * 60_000)) {
+  if (!rateLimit(c.env, `unlock:${clientIp(c.req.raw)}:${row.id}`, 10, 10 * 60_000)) {
     return c.redirect(`${back}?pwerr=slow`, 303)
   }
   const body = await c.req.parseBody().catch(() => null)

@@ -432,12 +432,12 @@ mcpRoutes.post('/', async (c) => {
   const token = auth.replace(/^Bearer\s+/i, '').trim() || (c.req.header('X-Auth-Token') || '').trim()
   if (!expected || !token || !safeEqual(token, expected)) {
     // 鉴权失败按 IP 限流（照登录防爆破口径），防 token 猜测
-    if (!rateLimit(`mcpfail:${clientIp(c.req.raw)}`, 10, 10 * 60_000)) {
+    if (!rateLimit(c.env, `mcpfail:${clientIp(c.req.raw)}`, 10, 10 * 60_000)) {
       return c.json({ error: '尝试太频繁，请 10 分钟后再试' }, 429)
     }
     return c.json({ error: MCP_TOKEN_ERR }, 401)
   }
-  if (!rateLimit(`mcp:${token.slice(0, 12)}`, 30, 60_000)) {
+  if (!rateLimit(c.env, `mcp:${token.slice(0, 12)}`, 30, 60_000)) {
     return c.json({ error: '请求太频繁，请稍后再试' }, 429)
   }
   const deps: McpDeps = {

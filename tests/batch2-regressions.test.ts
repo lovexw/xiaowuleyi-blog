@@ -98,16 +98,22 @@ test('过期会员降权：会话带出 tier_expires_at，付费墙按生效档�
   assert.equal(canReadTiers(defs, 'coffee', fresh, now), true)
 })
 
-test('TG 幂等：只有标记过「已处理完」的 update_id 才挡重投', async () => {
+test('TG 幂等：只有标记过「已处理完」的 update_id 才挡重投；幂等键按租户（env）隔离（P1-2）', async () => {
   const { tgUpdateDone, tgMarkUpdateDone } = await import('../src/external')
   const now = 1_700_000_000_000
   const id = 8_888_881
-  assert.equal(tgUpdateDone(id, now), false, '没处理过不能挡')
-  assert.equal(tgUpdateDone(id, now + 60_000), false, '处理中抛错后 TG 重投必须放行')
-  tgMarkUpdateDone(id, now)
-  assert.equal(tgUpdateDone(id, now + 60_000), true, '成功处理后 5 分钟内挡住重投')
-  assert.equal(tgUpdateDone(id, now + 5 * 60_000), false, '超过 5 分钟窗口不再挡')
-  assert.equal(tgUpdateDone(id + 1, now), false, '别的 update 不受影响')
+  const scope = {}
+  assert.equal(tgUpdateDone(scope, id, now), false, '没处理过不能挡')
+  assert.equal(tgUpdateDone(scope, id, now + 60_000), false, '处理中抛错后 TG 重投必须放行')
+  tgMarkUpdateDone(scope, id, now)
+  assert.equal(tgUpdateDone(scope, id, now + 60_000), true, '成功处理后 5 分钟内挡住重投')
+  assert.equal(tgUpdateDone(scope, id, now + 5 * 60_000), false, '超过 5 分钟窗口不再挡')
+  assert.equal(tgUpdateDone(scope, id + 1, now), false, '别的 update 不受影响')
+  // 跨租户隔离：update_id 是 per-bot 序列，A 租户处理完 N 不能挡 B 租户自己的 N
+  const otherTenant = {}
+  assert.equal(tgUpdateDone(otherTenant, id, now + 60_000), false, 'B 租户同 update_id 不被 A 租户挡掉')
+  tgMarkUpdateDone(otherTenant, id, now + 60_000)
+  assert.equal(tgUpdateDone(otherTenant, id, now + 90_000), true, 'B 租户自己的记账独立生效')
 })
 
 test('扣积分：余额不足不留幽灵账本行，且实现里不再有批外补偿 DELETE', async () => {

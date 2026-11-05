@@ -231,13 +231,38 @@ test('rateLimit：窗口内计满拒绝、换 key 互不影响、窗口过期重
   const realNow = Date.now
   let now = 1_000_000
   Date.now = () => now
+  const scope = {}
   try {
-    assert.equal(rateLimit('t:a', 2, 60_000), true)
-    assert.equal(rateLimit('t:a', 2, 60_000), true)
-    assert.equal(rateLimit('t:a', 2, 60_000), false) // 窗口内第 3 次拒绝
-    assert.equal(rateLimit('t:b', 2, 60_000), true) // 不同 key 独立计桶
+    assert.equal(rateLimit(scope, 't:a', 2, 60_000), true)
+    assert.equal(rateLimit(scope, 't:a', 2, 60_000), true)
+    assert.equal(rateLimit(scope, 't:a', 2, 60_000), false) // 窗口内第 3 次拒绝
+    assert.equal(rateLimit(scope, 't:b', 2, 60_000), true) // 不同 key 独立计桶
     now += 60_001
-    assert.equal(rateLimit('t:a', 2, 60_000), true) // 过窗重建
+    assert.equal(rateLimit(scope, 't:a', 2, 60_000), true) // 过窗重建
+  } finally {
+    Date.now = realNow
+  }
+})
+
+test('rateLimit：作用域（env 实例）隔离——docker-poc 单进程多租户下同 IP 桶不跨站点共享（P0-1）', () => {
+  const realNow = Date.now
+  let now = 2_000_000
+  Date.now = () => now
+  const tenantA = {}
+  const tenantB = {}
+  try {
+    // A 站把 login:${ip} 桶打满
+    assert.equal(rateLimit(tenantA, 'login:1.2.3.4', 2, 60_000), true)
+    assert.equal(rateLimit(tenantA, 'login:1.2.3.4', 2, 60_000), true)
+    assert.equal(rateLimit(tenantA, 'login:1.2.3.4', 2, 60_000), false)
+    // B 站同 IP 不受牵连
+    assert.equal(rateLimit(tenantB, 'login:1.2.3.4', 2, 60_000), true)
+    assert.equal(rateLimit(tenantB, 'login:1.2.3.4', 2, 60_000), true)
+    assert.equal(rateLimit(tenantB, 'login:1.2.3.4', 2, 60_000), false)
+    // 字面量 global 桶同样按站点隔离：A 站备份一次后 B 站备份不被 429
+    assert.equal(rateLimit(tenantA, 'backup:global', 1, 600_000), true)
+    assert.equal(rateLimit(tenantA, 'backup:global', 1, 600_000), false)
+    assert.equal(rateLimit(tenantB, 'backup:global', 1, 600_000), true)
   } finally {
     Date.now = realNow
   }

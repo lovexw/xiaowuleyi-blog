@@ -173,11 +173,20 @@ export async function purgeExpiredMemberSessions(db: D1Database): Promise<void> 
 }
 
 /**
- * 简单内存限流（按隔离实例生效，尽力而为）。
- * key => 每窗口最多 limit 次。
+ * 简单内存限流（按作用域生效，尽力而为）。
+ * scope 传请求的 env 实例：Workers 每 isolate 一份 env（行为与历史一致）；
+ * docker-poc 单进程多租户每租户一份 env——同 IP 的限流桶从此不跨站点共享
+ * （2026-11 全项目审计 P0-1：A 站登录失败曾会锁死 B 站同 IP 用户，backup:global
+ * 等字面量桶跨站互斥）。key => 每窗口最多 limit 次。
+ * 调用方一律传 c.env，别在 key 里手工拼 host（scope 维度统一在这层处理）。
  */
-const buckets = new Map<string, { n: number; reset: number }>()
-export function rateLimit(key: string, limit: number, windowMs: number): boolean {
+const bucketScopes = new WeakMap<object, Map<string, { n: number; reset: number }>>()
+export function rateLimit(scope: object, key: string, limit: number, windowMs: number): boolean {
+  let buckets = bucketScopes.get(scope)
+  if (!buckets) {
+    buckets = new Map()
+    bucketScopes.set(scope, buckets)
+  }
   const now = Date.now()
   // 淘汰在插入时执行：先清过期项；仍超容量则丢最旧的，保证 Map 有界
   if (buckets.size >= 5000) {

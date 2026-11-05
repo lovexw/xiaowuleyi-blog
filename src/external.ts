@@ -30,26 +30,36 @@ const TG_API = 'https://api.telegram.org'
 // **只记「已处理完」的 update_id**：旧实现一进入 webhook 就写 seen，处理中途抛错后 TG
 // 重投会被当成成功吞掉，恰好把注释里想保住的恢复路堵死了（2026-11 审查发现）。
 const TG_UPDATE_TTL_MS = 5 * 60_000
-const tgDoneUpdates = new Map<number, number>()
-function tgPruneDone(now: number): void {
-  if (tgDoneUpdates.size <= 500) return
-  for (const [k, t] of tgDoneUpdates) if (now - t > TG_UPDATE_TTL_MS) tgDoneUpdates.delete(k)
-  while (tgDoneUpdates.size > 500) {
-    const oldest = tgDoneUpdates.keys().next().value
+// 作用域 = env 实例（与 rateLimit 同款）：Telegram 的 update_id 是 per-bot 独立序列，
+// 单进程多租户下不同租户是不同 bot，update_id 大量重叠——裸键会让 A 租户处理完
+// update_id=N 后把 B 租户自己的合法 update_id=N 消息当重投静默丢弃（2026-11 审计 P1-2）
+const tgDoneScopes = new WeakMap<object, Map<number, number>>()
+function tgPruneDone(scopeMap: Map<number, number>, now: number): void {
+  if (scopeMap.size <= 500) return
+  for (const [k, t] of scopeMap) if (now - t > TG_UPDATE_TTL_MS) scopeMap.delete(k)
+  while (scopeMap.size > 500) {
+    const oldest = scopeMap.keys().next().value
     if (oldest === undefined) break
-    tgDoneUpdates.delete(oldest)
+    scopeMap.delete(oldest)
   }
 }
 /** 是否已成功处理过（只查不写）；now 可注入便于测试 TTL */
-export function tgUpdateDone(updateId: number, now = Date.now()): boolean {
-  tgPruneDone(now)
-  const doneAt = tgDoneUpdates.get(updateId)
+export function tgUpdateDone(scope: object, updateId: number, now = Date.now()): boolean {
+  let scopeMap = tgDoneScopes.get(scope)
+  if (!scopeMap) return false
+  tgPruneDone(scopeMap, now)
+  const doneAt = scopeMap.get(updateId)
   return doneAt !== undefined && now - doneAt < TG_UPDATE_TTL_MS
 }
 /** 只有 handler 正常返回 2xx 后才调用；异常路径绝不调用 */
-export function tgMarkUpdateDone(updateId: number, now = Date.now()): void {
-  tgPruneDone(now)
-  tgDoneUpdates.set(updateId, now)
+export function tgMarkUpdateDone(scope: object, updateId: number, now = Date.now()): void {
+  let scopeMap = tgDoneScopes.get(scope)
+  if (!scopeMap) {
+    scopeMap = new Map()
+    tgDoneScopes.set(scope, scopeMap)
+  }
+  tgPruneDone(scopeMap, now)
+  scopeMap.set(updateId, now)
 }
 
 type AppEnv = { Bindings: Env; Variables: { user: SessionUser } }
@@ -142,7 +152,7 @@ externalRoutes.get('/weibo', async (c) => {
 externalRoutes.post('/weibo', async (c) => {
   const settings = await requireToken(c)
   if (!settings) return c.json({ error: TOKEN_ERR }, 401)
-  if (!rateLimit(`ext:${settings.externalToken.slice(0, 12)}`, 30, 60_000)) {
+  if (!rateLimit(c.env, `ext:${settings.externalToken.slice(0, 12)}`, 30, 60_000)) {
     return c.json({ error: '发布太频繁，请稍后再试' }, 429)
   }
 
@@ -476,10 +486,10 @@ telegramRoutes.use('/webhook', async (c, next) => {
   // 解析失败 / 没有 update_id 就退化为不去重，行为与旧版一致
   const probe = (await c.req.raw.clone().json().catch(() => null)) as { update_id?: unknown } | null
   const updateId = probe && typeof probe.update_id === 'number' ? probe.update_id : null
-  if (updateId !== null && tgUpdateDone(updateId)) return c.json({ ok: true })
+  if (updateId !== null && tgUpdateDone(c.env, updateId)) return c.json({ ok: true })
   await next()
   // 401（secret 错）/ 403（未配置）/ 404（演示站）都不记账，TG 重投仍能进正常链路
-  if (updateId !== null && c.res.status >= 200 && c.res.status < 300) tgMarkUpdateDone(updateId)
+  if (updateId !== null && c.res.status >= 200 && c.res.status < 300) tgMarkUpdateDone(c.env, updateId)
 })
 
 telegramRoutes.post('/webhook', async (c) => {
@@ -533,7 +543,7 @@ telegramRoutes.post('/webhook', async (c) => {
     )
     return c.json({ ok: true })
   }
-  if (!rateLimit(`tg:${chatId}`, 20, 60_000)) {
+  if (!rateLimit(c.env, `tg:${chatId}`, 20, 60_000)) {
     await tgSend(c.env, botToken, chatId, '发得太快啦，休息一下再发。')
     return c.json({ ok: true })
   }

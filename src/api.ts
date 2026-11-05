@@ -233,7 +233,7 @@ api.get('/auth/state', async (c) => {
 
 api.post('/auth/setup', async (c) => {
   if ((await countUsers(c.env.DB)) > 0) return jsonError('管理员已存在', 403)
-  if (!rateLimit(`setup:${clientIp(c.req.raw)}`, 5, 10 * 60_000)) return jsonError('请求过于频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `setup:${clientIp(c.req.raw)}`, 5, 10 * 60_000)) return jsonError('请求过于频繁，请稍后再试', 429)
   const body = await c.req.json<{ username?: string; password?: string; displayName?: string }>().catch(() => null)
   const username = (body?.username || '').trim()
   const password = body?.password || ''
@@ -284,7 +284,7 @@ const SESSIONS_PER_USER_CAP = 10
  *  的 D1 连接池会被它卡死——实测输错一次密码后，全站 `/` 与所有 `/api/*` 永久超时（`/admin/` 走静态
  *  资源所以看似正常）。挂到 waitUntil 让运行时明确知晓「响应后仍需等它完成」，与项目其他异步任务一致 */
 function alertLoginFailure(env: Env, ip: string, username: string, ctx?: { waitUntil(p: Promise<unknown>): void }): void {
-  if (!rateLimit(`login-alert:${ip}`, 1, 10 * 60_000)) return
+  if (!rateLimit(env, `login-alert:${ip}`, 1, 10 * 60_000)) return
   const p = notifyAdminText(env, `⚠️ 后台登录失败：用户名「${String(username || '').slice(0, 40)}」IP ${ip}。若非本人操作，请改密码或到「设置 → 两步验证」加固`).catch(() => {})
   try {
     ctx?.waitUntil(p)
@@ -305,7 +305,7 @@ function qrSvgData(text: string): string {
 
 api.post('/auth/login', async (c) => {
   const ip = clientIp(c.req.raw)
-  if (!rateLimit(`login:${ip}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
+  if (!rateLimit(c.env, `login:${ip}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
   const body = await c.req.json<{ username?: string; password?: string; totp?: string }>().catch(() => null)
   const username = (body?.username || '').trim()
   const password = body?.password || ''
@@ -451,7 +451,7 @@ api.post('/partner/grant', async (c) => {
 api.post('/member/register', async (c) => {
   const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const ip = clientIp(c.req.raw)
-  if (!rateLimit(`mreg:${ip}`, 5, 10 * 60_000)) return jsonError('注册太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `mreg:${ip}`, 5, 10 * 60_000)) return jsonError('注册太频繁，请稍后再试', 429)
   const body = await c.req
     .json<{ username?: string; password?: string; email?: string; nickname?: string; link?: string; turnstileToken?: string; inviteCode?: string }>()
     .catch(() => null)
@@ -539,7 +539,7 @@ api.post('/member/register', async (c) => {
 api.post('/member/login', async (c) => {
   const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
   const ip = clientIp(c.req.raw)
-  if (!rateLimit(`mlogin:${ip}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
+  if (!rateLimit(c.env, `mlogin:${ip}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
   const body = await c.req.json<{ username?: string; password?: string }>().catch(() => null)
   const username = String(body?.username || '').trim()
   const password = String(body?.password || '')
@@ -632,7 +632,7 @@ async function fetchQQAvatar(env: Env, qq: string): Promise<string | null> {
  *  幂等三道：前置查 last_checkin_day、ref_id 北京日序号唯一索引、日上限 cap=1——连点/并发都只记一次 */
 api.post('/member/checkin', async (c) => {
   const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  if (!rateLimit(`mcheckin:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `mcheckin:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const m = await getMemberUser(c.env.DB, c.req.raw)
   if (!m) return jsonError('请先登录', 401)
   const row = await getMemberById(c.env.DB, m.id)
@@ -655,7 +655,7 @@ api.post('/member/redeem-premium', async (c) => {
   // 价格 0 = 未开放（默认）。站长在「会员 → 会员设置」填个数就开通，不需要额外的启用开关
   const cost = Math.trunc(Number(settings.premiumPointsCost || 0))
   if (!Number.isFinite(cost) || cost <= 0) return jsonError('积分兑换暂未开放')
-  if (!rateLimit(`mredeem:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `mredeem:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const m = await getMemberUser(c.env.DB, c.req.raw)
   if (!m) return jsonError('请先登录', 401)
   const row = await getMemberById(c.env.DB, m.id)
@@ -712,7 +712,7 @@ api.post('/member/profile', async (c) => {
   if (qq !== undefined) {
     // 评论头像（C2）：qq 号仅作头像抓取记账位，任何公开出参不携带；绑过再绑 = 幂等重试头像
     if (!isValidQQ(qq)) return jsonError('QQ 号格式不对（5-11 位数字，不以 0 开头）')
-    if (!rateLimit(`qqbind:${session.id}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+    if (!rateLimit(c.env, `qqbind:${session.id}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
     const avatarUrl = await fetchQQAvatar(c.env, qq)
     await updateMemberQQ(c.env.DB, session.id, qq, avatarUrl, now)
     res.qq = qq
@@ -728,7 +728,7 @@ api.post('/member/password', async (c) => {
   const session = await getMemberUser(c.env.DB, c.req.raw)
   if (!session) return jsonError('请先登录', 401)
   // PBKDF2 是慢操作：按 IP 限流防滥用（口径同 /member/login）
-  if (!rateLimit(`mpwd:${clientIp(c.req.raw)}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
+  if (!rateLimit(c.env, `mpwd:${clientIp(c.req.raw)}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
   const body = await c.req.json<{ currentPassword?: string; newPassword?: string }>().catch(() => null)
   const current = String(body?.currentPassword || '')
   const next = String(body?.newPassword || '')
@@ -993,7 +993,7 @@ api.route('/telegram', telegramRoutes)
 
 api.post('/admin/totp/setup', async (c) => {
   const user = c.get('user')
-  if (!rateLimit(`totp-setup:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `totp-setup:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const secret = generateTotpSecret()
   // 只写 pending：已开启状态下重新绑定不降级（旧 secret 在 enable 成功前继续生效）；
   // saveSettings 自动换代页缓存 + invalidateSharedSettings（AGENTS「写了 settings 就要失效缓存」）
@@ -1003,7 +1003,7 @@ api.post('/admin/totp/setup', async (c) => {
 })
 
 api.post('/admin/totp/enable', async (c) => {
-  if (!rateLimit(`totp-enable:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `totp-enable:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ code?: string }>().catch(() => null)
   const s = await getSettings(c.env.DB)
   if (!s.totpSecretPending) return jsonError('请先点「开始绑定」生成密钥')
@@ -1014,7 +1014,7 @@ api.post('/admin/totp/enable', async (c) => {
 
 api.post('/admin/totp/disable', async (c) => {
   const user = c.get('user')
-  if (!rateLimit(`totp-disable:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `totp-disable:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ password?: string }>().catch(() => null)
   const row = await c.env.DB.prepare('SELECT password_hash, salt FROM users WHERE id = ?').bind(user.id).first<{ password_hash: string; salt: string }>()
   if (!row) return jsonError('账号不存在', 404)
@@ -1060,7 +1060,7 @@ api.delete('/admin/sessions', async (c) => {
 api.post('/admin/authors', async (c) => {
   const user = c.get('user')
   if (user.role !== 'admin') return jsonError('只有站长（admin）可以创建作者账号', 403)
-  if (!rateLimit(`authors:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `authors:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ username?: string; password?: string; displayName?: string }>().catch(() => null)
   const username = String(body?.username || '').trim()
   const password = String(body?.password || '')
@@ -1296,7 +1296,7 @@ api.get('/admin/plaza-stats', async (c) => {
 
 api.post('/admin/plugins/install', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放插件安装', 404)
-  if (!rateLimit(`plugin-install:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('安装太频繁，请一分钟后再试', 429)
+  if (!rateLimit(c.env, `plugin-install:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('安装太频繁，请一分钟后再试', 429)
   const body = await c.req.json<{ url?: string; id?: string }>().catch(() => null)
   const url = String(body?.url ?? '').trim().slice(0, 2048)
   if (!/^https:\/\//i.test(url) || !fetchableUrl(url)) return jsonError('插件地址无效（需公网 https 地址）')
@@ -2329,7 +2329,7 @@ api.delete('/admin/tags/:name', async (c) => {
 
 /* ---------------- 媒体库（R2 图床） ---------------- */
 api.post('/admin/upload', async (c) => {
-  if (!rateLimit(`upload:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('上传太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `upload:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('上传太频繁，请稍后再试', 429)
   const body = await c.req.parseBody().catch(() => null)
   const file = body && typeof body === 'object' ? ((body as Record<string, unknown>)['file'] as unknown) : null
   if (!(file instanceof File)) return jsonError('缺少文件字段 file')
@@ -2387,19 +2387,19 @@ api.delete('/admin/uploads', async (c) => {
 /* ---------------- 媒体体检：未引用 / 重复文件扫描与安全清理（逻辑在 src/audit.ts） ---------------- */
 
 api.get('/admin/uploads/audit', async (c) => {
-  if (!rateLimit(`audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   return c.json(await runAudit(c.env))
 })
 
 api.post('/admin/uploads/hash-backfill', async (c) => {
   // 前端回填是循环连发（每批最多 50 个），不能与 audit 的 10/分钟共桶；独立桶放宽到 60/分钟仍有界
-  if (!rateLimit(`backfill:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `backfill:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const b = await c.req.json<{ limit?: number }>().catch(() => null)
   return c.json(await backfillHashes(c.env, Number(b?.limit) || 25))
 })
 
 api.post('/admin/uploads/merge', async (c) => {
-  if (!rateLimit(`audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const b = await c.req.json<{ keep?: unknown; remove?: unknown }>().catch(() => null)
   if (!b || typeof b.keep !== 'string' || !Array.isArray(b.remove)) return jsonError('参数不完整')
   try {
@@ -2415,7 +2415,7 @@ api.post('/admin/uploads/merge', async (c) => {
 })
 
 api.post('/admin/uploads/cleanup', async (c) => {
-  if (!rateLimit(`audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const b = await c.req.json<{ keys?: unknown }>().catch(() => null)
   if (!b || !Array.isArray(b.keys)) return jsonError('参数不完整')
   try {
@@ -2433,7 +2433,7 @@ api.post('/admin/uploads/cleanup', async (c) => {
  * 独立于普通上传：key 前缀 og/，删除文章卡图的入口在编辑器里。
  */
 api.post('/admin/og-image', async (c) => {
-  if (!rateLimit(`upload:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('上传太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `upload:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('上传太频繁，请稍后再试', 429)
   const body = await c.req.parseBody().catch(() => null)
   const file = body && typeof body === 'object' ? ((body as Record<string, unknown>)['file'] as unknown) : null
   if (!(file instanceof File)) return jsonError('缺少文件字段 file')
@@ -2871,7 +2871,7 @@ api.post('/admin/backup', async (c) => {
   // 演示站守卫：备份含全库行与密钥，demo 体验者凭据公示，敏感面一律短路
   if (isDemo(c.env)) return jsonError('演示站不开放备份', 404)
   // 全表导出整包进内存，连点可在同一 isolate 堆叠多个全量导出（128MB 上限）——全局窗口内只放一次
-  if (!rateLimit('backup:global', 1, 10 * 60_000)) return jsonError('备份刚刚执行过，请 10 分钟后再试', 429)
+  if (!rateLimit(c.env, 'backup:global', 1, 10 * 60_000)) return jsonError('备份刚刚执行过，请 10 分钟后再试', 429)
   const r = await runBackup(c.env)
   if (!r.skipped && r.ok) {
     // 备份完成广播（异地备份类插件取件推送）：waitUntil 不拖慢管理端响应
@@ -2890,7 +2890,7 @@ api.get('/admin/bundle/export', async (c) => {
   // 演示站守卫：整站包含全库内容与图片，体验者凭据公示，敏感面一律短路
   if (isDemo(c.env)) return jsonError('演示站不开放导出', 404)
   // 全表导出 + 全量图片流式打包，连点会在同一 isolate 堆叠多个任务——全局窗口内只放两次
-  if (!rateLimit('bundle-export:global', 2, 10 * 60_000)) return jsonError('导出刚刚执行过，请稍后再试', 429)
+  if (!rateLimit(c.env, 'bundle-export:global', 2, 10 * 60_000)) return jsonError('导出刚刚执行过，请稍后再试', 429)
   const now = Date.now()
   const stream = await buildBundleStream(c.env, now)
   return new Response(stream, {
@@ -2905,7 +2905,7 @@ api.get('/admin/bundle/export', async (c) => {
 /** 上传整站包：流式落 R2 bundles/（不缓冲，避免大包打爆 isolate），供导入读取 */
 api.post('/admin/bundle/upload', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
-  if (!rateLimit(`bundle-upload:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `bundle-upload:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = c.req.raw.body
   if (!body) return jsonError('请求体为空')
   const key = `${BUNDLE_PREFIX}${bundleFileName(Date.now()).replace(/\.zip$/, '')}-${Math.random().toString(36).slice(2, 8)}.zip`
@@ -2926,7 +2926,7 @@ api.get('/admin/bundle/list', async (c) => {
 /** 导入第一步：校验包与版本 → 校验空站 → 清空目标表 → 给出步骤清单 */
 api.post('/admin/bundle/import/start', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
-  if (!rateLimit(`bundle-import:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `bundle-import:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ key?: string }>().catch(() => null)
   const r = await startBundleImport(c.env, String(body?.key ?? ''))
   if (!r.ok) return jsonError(r.error, r.status)
@@ -2937,7 +2937,7 @@ api.post('/admin/bundle/import/start', async (c) => {
 api.post('/admin/bundle/import/step', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   // 步骤数随站点规模增长（每片一请求），限额给宽；仍是重操作，按全局窗口兜底
-  if (!rateLimit('bundle-step:global', 2000, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, 'bundle-step:global', 2000, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ key?: string; unit?: string; cursor?: number }>().catch(() => null)
   const key = String(body?.key ?? '')
   const r = await runBundleImportStep(c.env, key, String(body?.unit ?? ''), Number(body?.cursor ?? -1))
@@ -2980,7 +2980,7 @@ api.post('/admin/bundle/delete', async (c) => {
 
 api.post('/admin/import/wxr', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
-  if (!rateLimit(`wxr-import:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请 10 分钟后再试', 429)
+  if (!rateLimit(c.env, `wxr-import:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请 10 分钟后再试', 429)
   const xml = await c.req.text()
   if (new TextEncoder().encode(xml).length > MAX_WXR_BYTES) return jsonError(`WXR 文件超过 ${Math.floor(MAX_WXR_BYTES / 1024 / 1024)}MB 上限，请在 WordPress 用「按作者 / 日期」分卷导出`)
   const parsed = parseWxr(xml)
@@ -3149,7 +3149,7 @@ api.post('/admin/import/wxr', async (c) => {
 /** 图片转存分步：前端持附件清单循环驱动，每批 ≤10 张；转存成功后全局替换正文 / 封面里的旧地址 */
 api.post('/admin/import/wxr/step', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
-  if (!rateLimit(`wxr-step:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `wxr-step:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ urls?: unknown }>().catch(() => null)
   const urls = Array.isArray(body?.urls) ? body!.urls.filter((u): u is string => typeof u === 'string') : []
   if (!urls.length || urls.length > IMPORT_IMAGE_BATCH) return jsonError('urls 需为 1-10 个图片地址')
@@ -3185,7 +3185,7 @@ api.post('/admin/import/wxr/step', async (c) => {
 api.post('/admin/site/reset', async (c) => {
   // 演示站：体验者凭据公示，一键清站等于把全站（含种子内容）删空且 2 小时才自愈，一律短路
   if (isDemo(c.env)) return jsonError('演示站不支持清空', 404)
-  if (!rateLimit(`site-reset:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `site-reset:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ confirm?: string }>().catch(() => null)
   if (!resetConfirmOk(body?.confirm)) {
     return jsonError(`确认语不正确：请原样输入「${RESET_CONFIRM_PHRASE}」`, 400)
@@ -3240,7 +3240,7 @@ api.post('/admin/tools/linkmeta', async (c) => {
   const url = String(body?.url ?? '').trim().slice(0, 2048)
   if (!url) return jsonError('请填写链接地址')
   const ip = clientIp(c.req.raw)
-  if (!rateLimit(`linkmeta:${ip}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `linkmeta:${ip}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const meta = await fetchLinkMeta(url)
   return c.json({ meta })
 })
@@ -3276,7 +3276,7 @@ api.get('/admin/tools/douban/img', async (c) => {
     return jsonError('链接不合法')
   }
   if (u.protocol !== 'https:' || !coverProxyHostOk(u.hostname)) return jsonError('域名不在白名单', 403)
-  if (!rateLimit(`doubanimg:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('请求过于频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `doubanimg:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('请求过于频繁，请稍后再试', 429)
   try {
     // 出网统一走 fetchsafe：redirect:'manual' 逐跳复查——五域白名单 + fetchableUrl 在每一跳
     // 都成立（曾用 redirect:'follow'，白名单域一旦出现可滥用的 302 就能引 Worker 抓任意
@@ -3330,7 +3330,7 @@ api.post('/admin/tools/douban', async (c) => {
   if (!['search', 'detail', 'card', 'test'].includes(action)) return jsonError('未知操作')
   if (action !== 'test' && action !== 'card' && !['book', 'movie', 'music'].includes(type)) return jsonError('未知类型')
   const ip = clientIp(c.req.raw)
-  if (!rateLimit(`douban:${ip}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `douban:${ip}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   // 外部携带的中转配置收敛长度；TMDB key 是 32 位十六进制（douban.ts 内再校验）
   const relay = String(body?.relay ?? '').trim().slice(0, 2048)
   const relayToken = String(body?.relayToken ?? '').trim().slice(0, 256)
@@ -3397,7 +3397,7 @@ api.post('/admin/tools/sanitize', async (c) => {
   if (isDemo(c.env)) return jsonError('演示站不开放粘贴转存', 404)
   const body = await c.req.json<{ html?: string }>().catch(() => null)
   const html = String(body?.html ?? '')
-  if (!rateLimit(`sanitize:${clientIp(c.req.raw)}`, 30, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `sanitize:${clientIp(c.req.raw)}`, 30, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   if (new TextEncoder().encode(html).length > MAX_CONTENT_BYTES) return jsonError('内容过长')
   const clean = sanitizeHtml(html)
   const r = await rehostPasteImages(c.env, clean)
@@ -3499,18 +3499,20 @@ async function publicComment(
   const settings = await getSettings(db)
   const user = await getSessionUser(db, c.req.raw)
   if (!user && settings.allowComments !== '1') return jsonError(o.closedMessage, 403)
-  // 会员身份（与管理员互斥取一路；banned 已在 getMemberUser 查询层视为未登录）
-  const member = user ? null : await getMemberUser(db, c.req.raw)
+  // 会员身份（与管理员互斥取一路；banned 已在 getMemberUser 查询层视为未登录）。
+  // 必须挂 membersEnabled 门控（与微博评论 GET / pages.ts 四处 SSR 同口径）：关闭会员功能
+  // 后残留的 xw_member_session 一律按游客发言、不计分（AGENTS「会员体系」防线，2026-11 审计 P1-3）
+  const member = user ? null : (settings.membersEnabled === '1' ? await getMemberUser(db, c.req.raw) : null)
   const ip = clientIp(c.req.raw)
   // IP 属地快照（src/ipregion.ts）：与 ip 同一请求瞬间定格，采集无条件（与 ip 本体同类的
   // 内部数据），展示与否由 settings.showCommentRegion 在出参端门控——开关不影响采集
   const ipRegion = regionSnapshot(c.req.raw)
   // 管理员发言不受留言频率限制；会员是登录身份，放宽到 10 条/10 分钟（仍防滥用），游客维持 5 条
-  if (!user && !member && !rateLimit(`cmt:${ip}`, 5, 10 * 60_000)) return jsonError(o.freqMessage, 429)
-  if (member && !rateLimit(`mcmt:${member.id}`, 10, 10 * 60_000)) return jsonError(o.freqMessage, 429)
+  if (!user && !member && !rateLimit(c.env, `cmt:${ip}`, 5, 10 * 60_000)) return jsonError(o.freqMessage, 429)
+  if (member && !rateLimit(c.env, `mcmt:${member.id}`, 10, 10 * 60_000)) return jsonError(o.freqMessage, 429)
   // 会员限流补 IP 桶：只按账号限不住「批量注册小号各发 10 条」的 Sybil 打法（注册零验证成本）；
   // NAT 共享 IP 放宽到 20 条/10 分钟，正常家庭/办公网够用
-  if (member && !rateLimit(`mcmt-ip:${ip}`, 20, 10 * 60_000)) return jsonError(o.freqMessage, 429)
+  if (member && !rateLimit(c.env, `mcmt-ip:${ip}`, 20, 10 * 60_000)) return jsonError(o.freqMessage, 429)
   const body = await c.req.json<CommentBody>().catch(() => null)
   // 蜜罐字段：正常用户不会填写，机器人会 —— 静默丢弃
   if (body?.link) return c.json({ ok: true })
@@ -3724,7 +3726,7 @@ async function trackMemberLike(c: Context<AppEnv>, targetType: 'post' | 'weibo',
 
 api.post('/public/like/weibo/:id', async (c) => {
   // 限流防脚本刷赞刷踩（正常用户连点几条微博远够用）
-  if (!rateLimit(`like:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁了，休息一下吧', 429)
+  if (!rateLimit(c.env, `like:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁了，休息一下吧', 429)
   const id = parseId(c.req.param('id'))
   if (!id) return jsonError('参数错误')
   const body = await c.req.json<{ delta?: number }>().catch(() => null)
@@ -3825,7 +3827,7 @@ api.post('/public/weibo/:id/comments', async (c) => {
   })
 })
 api.post('/public/like/:slug', async (c) => {
-  if (!rateLimit(`like:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁了，休息一下吧', 429)
+  if (!rateLimit(c.env, `like:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁了，休息一下吧', 429)
   const slug = c.req.param('slug').slice(0, 100)
   const body = await c.req.json<{ delta?: number }>().catch(() => null)
   const delta = body?.delta === -1 ? -1 : 1
@@ -3848,7 +3850,7 @@ api.post('/public/like/:slug', async (c) => {
 api.post('/public/track', async (c) => {
   // 30 次/10 分钟/IP：正常访客到不了（浏览自增另有 1h/IP/post 去重）；这是无鉴权的 D1 写入面
   // （每请求一行 INSERT），限流宽度直接决定被代理池烧穿 D1 日写配额的量级
-  if (!rateLimit(`track:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('请求过于频繁，请稍后再试', 429)
+  if (!rateLimit(c.env, `track:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('请求过于频繁，请稍后再试', 429)
   const settings = await getSettings(c.env.DB)
   if (settings.statsEnabled === '0') return c.json({ ok: true })
   const body = await c.req.json<{ p?: string; r?: string; v?: string; t?: string }>().catch(() => null)
@@ -3874,7 +3876,7 @@ api.post('/public/track', async (c) => {
 /* ---------------- 友链申请（公开，进入待审核） ---------------- */
 api.post('/public/links/apply', async (c) => {
   const ip = clientIp(c.req.raw)
-  if (!rateLimit(`flapply:${ip}`, 3, 10 * 60_000)) return jsonError('提交太频繁了，请稍后再试', 429)
+  if (!rateLimit(c.env, `flapply:${ip}`, 3, 10 * 60_000)) return jsonError('提交太频繁了，请稍后再试', 429)
   const body = await c.req
     .json<{ name?: string; url?: string; description?: string; link?: string }>()
     .catch(() => null)
