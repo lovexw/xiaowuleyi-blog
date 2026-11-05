@@ -149,7 +149,22 @@ async function createTenantFor(host: string, cfg: TenantConfig, r2Shared?: R2Sha
   }
   if (cfg.demo) env.DEMO_MODE = '1'
   const db = env.DB as { exec: (sql: string) => Promise<unknown> }
-  await db.exec(SCHEMA_SQL)
+  // 建表顺序是硬要求（2026-11 审计 P1-1）：核心九表（users/posts/weibo/pages/settings/
+  // comments/categories/post_categories/uploads/sessions）唯一来源是 schema.sql——ensureSchema
+  // 只负责增量（SCHEMA_TABLES 的 13 张后加表 + ALTER 补列 + 索引 + 触发器），单独跑会被
+  // `no such table: settings` 炸掉，所以 exec 必须先行。
+  // 但 schema.sql 的部分索引引用 deleted_at / weibo.pinned 这类「老库靠 ALTER 补」的列：
+  // 老库直接 exec 会 no such column 崩掉 loadTenants（进程起不来，systemd 反复重启），
+  // 且今后任何一次「schema.sql 加列 + 建索引引用该列」的发布都会让存量库升级即崩。
+  // 所以 exec 包 try/catch：失败 = 老库 → 先增量迁移补列，再幂等重放整份 schema.sql。
+  // 四种形态全覆盖：空库/新库 exec 一次过；现代库 exec 幂等（IF NOT EXISTS）；
+  // 老库走补列重放；补列后仍失败 = 真故障，让错误照常抛出
+  try {
+    await db.exec(SCHEMA_SQL)
+  } catch {
+    await ensureSchema(env.DB as never)
+    await db.exec(SCHEMA_SQL)
+  }
   await ensureSchema(env.DB as never)
   console.log(`[tenant] ${host} 就绪（存储: ${label}，${cfg?.demo ? '演示种子' : '空库'}）→ ${dir}`)
   return { host, env }

@@ -1191,6 +1191,12 @@ export async function getFriendLinkById(db: D1Database, id: number): Promise<Fri
  */
 const SCHEMA_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: 'posts', column: 'publish_at', ddl: 'ALTER TABLE posts ADD COLUMN publish_at INTEGER' },
+  // 索引引用列必须可补（2026-11 审计 P1-1 配套）：schema.sql 的部分索引引用的列若只在
+  // CREATE 里、不在本清单，老库升级时 exec(schema.sql) 会 no such column 且 ensureSchema
+  // 补不回来。posts/weibo 的 pinned 与 published_at 三列属于此类，ALTER 对已有列幂等跳过
+  { table: 'posts', column: 'published_at', ddl: 'ALTER TABLE posts ADD COLUMN published_at INTEGER' },
+  { table: 'posts', column: 'pinned', ddl: 'ALTER TABLE posts ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0' },
+  { table: 'weibo', column: 'published_at', ddl: 'ALTER TABLE weibo ADD COLUMN published_at INTEGER' },
   { table: 'weibo', column: 'likes', ddl: 'ALTER TABLE weibo ADD COLUMN likes INTEGER NOT NULL DEFAULT 0' },
   { table: 'weibo', column: 'topics', ddl: "ALTER TABLE weibo ADD COLUMN topics TEXT NOT NULL DEFAULT '[]'" },
   { table: 'weibo', column: 'pinned', ddl: 'ALTER TABLE weibo ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0' },
@@ -1249,6 +1255,14 @@ const SCHEMA_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: 'categories', column: 'description', ddl: "ALTER TABLE categories ADD COLUMN description TEXT NOT NULL DEFAULT ''" },
 ]
 const SCHEMA_TABLES = [
+  // settings 必须由 ensureSchema 兜底创建（2026-11 审计 P1-1 配套）：ensureSchema 末尾的
+  // FTS/pagesSeeded 探测都读这张表；老库升级路径（docker-poc/server.ts：exec 半途失败 →
+  // ensureSchema 补列）里 settings 可能还没轮到建——schema.sql 的 settings 建表排在 :305，
+  // 而炸点索引在 :166。放在增量清单首位，保证探测前表已在场
+  `CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+  )`,
   // 会员体系（2026-10-07 起，见 docs/archive/DEVPLAN-2026-10-07.md 附录 A 契约）：
   // members 与 users/sessions 彻底分离（users 只承载管理员，游客注册混入会破坏 /api/auth/setup 首装判断）
   `CREATE TABLE IF NOT EXISTS members (

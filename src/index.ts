@@ -31,16 +31,21 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser | null } }>
 // 外链中间页的 CSP（/go 路由专用）：无脚本需求，比前台更收紧——default-src 'none' 只留内联样式
 const CSP_GO = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
-// 老库缺列自动补齐（幂等），每个 isolate 只执行一次
-let schemaReady: Promise<void> | null = null
+// 老库缺列自动补齐（幂等），按 db 实例各执行一次。必须是 WeakMap 而不是模块级单例：
+// docker-poc 单进程多租户共用同一份模块，单例会让第一个租户之后的全部租户在
+// 请求/cron 路径上跳过 ensureSchema（租户库各自需要各自的增量迁移）；
+// Workers 形态每 isolate 一个 db 实例，行为不变（2026-11 审计 P3-10）
+const schemaReadyByDb = new WeakMap<D1Database, Promise<void>>()
 function ensureSchemaOnce(db: D1Database): Promise<void> {
-  if (!schemaReady) {
-    schemaReady = ensureSchema(db).catch((err) => {
-      schemaReady = null
+  let p = schemaReadyByDb.get(db)
+  if (!p) {
+    p = ensureSchema(db).catch((err) => {
+      schemaReadyByDb.delete(db)
       throw err
     })
+    schemaReadyByDb.set(db, p)
   }
-  return schemaReady
+  return p
 }
 app.use('*', async (c, next) => {
   // 演示站：先幂等建表再自播种（空库冷启动要抢在 ensureSchema 之前——ensureSchema 是增量
