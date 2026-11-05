@@ -122,6 +122,15 @@ Body `{"delta": 1}` 或 `{"delta": -1}`，返回 `{"ok":true,"likes":7}`。计�
 - 新密码 8-64 位；当前密码错误 400（PBKDF2 验证，按 IP 10 分钟 10 次限流防滥用）
 - 成功后**其他设备的会员会话全部失效**（当前会话保留）；本站不提供密码找回，表单旁有固定提醒
 
+### POST /api/partner/grant（跨站会员继承，签名鉴权）
+另一个站推送「某会员是付费会员」的唯一入口（机制见 `docs/PARTNER.md`）。**不走管理员会话**：鉴权是 `X-Partner-Signature: HMAC-SHA256(settings.partnerPushSecret, [issuer, subject, email, tier, note, exp].join("\n"))`。
+
+- Body：`{issuer, subject, email, tier, note?, exp}`；`exp` 只防重放，与权益有效期无关（权益是永久的），必须落在 ±5 分钟内
+- 本站没配 `partnerPushSecret` → **404**（不暴露「功能存在但没开」）；签名不对 → 401；形状或时间窗不对 → 400
+- `tier` 必须是本站 `settings.memberTiers` 里的**永久档**（限时档 400 —— 接进来会顺手置空有效期，等于把年费变终身）
+- 出参 `{ok:true, result}`：`granted`（当场授予）/ `pending`（本站还没有这个邮箱的会员，进待认领队列）/ `conflict`（该来源会员已绑别的账号）
+- 幂等：同 `(issuer, subject)` 重复推送按更新处理（改邮箱/改档位再推一次不会产生两条记录）；按 IP 60 次/分钟限流
+
 ### GET /go?u=<url>（SSR 页面）
 外链中间页（机制见 `src/outlink.ts`）：白名单域名（`TRUSTED_OUT_DOMAINS`，子域名自动跟随）与本站同源地址 302 直跳；其余第三方 http(s) 地址渲染「即将离开本站」确认页（展示目标域名与完整链接、附免责声明，`noindex`，无 JS、不自动跳转，故不构成开放重定向）。目标缺失 / 非 http(s) / 超 2048 字符一律 302 回首页。正文外链在渲染层包装进来：文章 / 页面 / 关于我走 `sanitizeHtml(html, { origin })`，微博文本走 `weiboTextHtml`（客户端镜像在 site.js）——存库与 RSS / 导出保持原始 URL。
 
@@ -410,10 +419,16 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
 已注册主题列表 `{themes:[{id,name,description,colors,appearance}]}`，`colors` 为后台皮肤卡预览色板（`[背景, 强调条, 卡面, 卡面2, 卡面3]`，未设置时为 `null`）；`appearance` 是该主题支持的外观变量元信息（角色/默认值/变量名清单/字号基线/圆角旋钮 `{var,default,lgFactor}`/字体预设，B9；后台实时预览用变量名构造同款覆盖样式）。
 
 ### GET /api/admin/members?page=1&q=
-会员列表（后台「会员」页数据源）：`{items:[{id, username, email, display_name, avatar, tier, tier_expires_at, tier_source, points, status, created_at, updated_at, last_login_at}], total, page, totalPages}`（不含 password_hash/salt）；`tier_source` 是档位来源标注（register / invite / points / paid / manual），**只作运营展示，不参与权限判定**；`q` 模糊匹配用户名 / 邮箱，20 条/页。
+会员列表（后台「会员」页数据源）：`{items:[{id, username, email, display_name, avatar, tier, tier_expires_at, tier_source, points, status, created_at, updated_at, last_login_at}], total, page, totalPages}`（不含 password_hash/salt）；`tier_source` 是档位来源标注（register / invite / points / paid / partner / manual），**只作运营展示，不参与权限判定**（`partner` = 跨站继承授予，只由系统写入，人工改档传不进这个值）；`q` 模糊匹配用户名 / 邮箱，20 条/页。
 
 ### PUT /api/admin/members/:id
-改档位 / 封禁，**缺键即保留**（只传要改的键）：`{ "tier": "档位key（须在 settings.memberTiers 定义里）", "tierExpiresAt": "2027-10-21|null", "tierSource": "paid" }` 或 `{ "status": "active|banned" }` → `{ok:true}`；`tierSource` 白名单 register / invite / points / paid / manual（其余一律记 manual），只作展示；`status:"banned"` 同时清空该会员全部会话（即刻踢下线），历史评论保留。未知档位 400，会员不存在 404。限时档到期后**不会消失**，按该档的 fallback 降级（默认降一档）。
+改档位 / 封禁，**缺键即保留**（只传要改的键）：`{ "tier": "档位key（须在 settings.memberTiers 定义里）", "tierExpiresAt": "2027-10-21|null", "tierSource": "paid" }` 或 `{ "status": "active|banned" }` → `{ok:true}`；`tierSource` 白名单 register / invite / points / paid / manual（其余一律记 manual），只作展示；`status:"banned"` 同时清空该会员全部会话（即刻踢下线），历史评论保留。未知档位 400，会员不存在 404。限时档到期后**不会消失**，按该档的 fallback 降级（默认降一档）。分配**永久档**且本站配了 `partnerPushUrl` 时顺手推送一条给另一站（跨站继承），出参多一个 `partner`：`ok:granted|pending|conflict` / `no-email`（会员没填邮箱，推不了）/ `failed:原因`；推送失败不回滚本地授予。
+
+### GET /api/admin/partner-grants
+跨站继承流水与待认领队列（后台「会员 → 跨站继承」）：`{grants:[{id, issuer, subject, email, member_id, tier, note, created_at, claimed_at, username, member_tier}], tiers, selfId, pushUrl}`，取最近 200 条、新的在前。`member_id` 三种取值即三种状态：`0` 待认领（本站还没有这个邮箱的会员）/ `-1` 认领冲突（该来源会员已绑别的账号）/ 正数 已授予。
+
+### DELETE /api/admin/partner-grants/:memberId
+撤销某会员的跨站继承：解除 `remote_issuer`/`remote_subject` 绑定 + 档位降回基础档 + 流水退回待认领 → `{ok:true}`。只影响本站，对方站的会员身份不受影响。
 
 ### GET /api/admin/invites?page=1&status=usable|usedup|expired|all
 注册邀请码列表（后台「会员 → 邀请码」）：`{items:[{id, code, tier, note, max_uses, used_count, created_at, expires_at, used_at, used_by, used_by_name}], total, page, totalPages, usable, usedup, expired, tiers}`（`tiers` 是当前档位定义，生成表单的下拉直接用它；三个计数直接喂筛选按钮）；20 条/页，新的在前。三态口径与 `src/invite.ts` 的 `inviteStatus` 一致：**已用完优先于已过期**（`max_uses > 0 && used_count >= max_uses` 先判），`max_uses = 0`（不限）的码永远不会进 usedup。
