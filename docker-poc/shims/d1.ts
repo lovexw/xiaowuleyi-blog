@@ -34,6 +34,8 @@ type Prepared = ReturnType<DatabaseSync['prepare']>
 const STMT_CACHE_MAX = 256
 /** 会改变 schema 或依赖实时 schema 的语句不缓存，且执行前清掉已有缓存 */
 const SCHEMA_SQL = /^\s*(CREATE|ALTER|DROP|PRAGMA|REINDEX|VACUUM|ATTACH|DETACH)\b/i
+/** 有结果集的语句（batch 里必须走 all()；其余走 run() 取 changes） */
+const READ_SQL = /^\s*(?:SELECT|WITH|VALUES|PRAGMA|EXPLAIN)\b/i
 
 function plainRow(row: Row | undefined | null): Row | null {
   return row ? { ...row } : null
@@ -65,6 +67,20 @@ class ShimStatement {
         duration: 0,
       },
     }
+  }
+
+  /** batch 里的读语句：必须走 all() 才有结果集（2026-11-06 修） */
+  _allSync<T = Row>(): { results: T[]; success: true; meta: Record<string, never> } {
+    const rows = this.stmt(this.sql).all(...(this.args as never[])) as Row[]
+    return { results: rows.map((r) => ({ ...r })) as T[], success: true, meta: {} }
+  }
+
+  /** 这条语句会不会返回结果集（决定 batch 里走 all 还是 run） */
+  _returnsRows(): boolean {
+    const s = this.sql
+    // INSERT/UPDATE/DELETE ... RETURNING 也带结果集
+    if (/\breturning\b/i.test(s)) return true
+    return READ_SQL.test(s)
   }
 
   async run() {
@@ -110,14 +126,26 @@ export function createD1(file: string) {
     return s
   }
 
+  /**
+   * 批量执行（对齐 D1 语义：逐条按顺序执行，写操作整体原子）。
+   *
+   * 2026-11-06 修：原实现对**每一条**语句都调 run()，于是 batch 里的 SELECT 只拿到
+   * `{success, meta:{changes,last_row_id}}`——没有 results，changes 还是上一条语句的残留值。
+   * 线上表现是媒体体检「未引用」把整库 6176 个文件全列了出来（引用源一条都没读到），
+   * 一键清理会据此删光图床；同族受害者还有邀请码核销的 changes 判定、往年今日的两个
+   * SELECT、回收站彻底删除的 changes 判定。真 D1 的 batch 对读语句返回 results，
+   * 这里按语句形态分流：有结果集的走 all()，其余走 run()。
+   */
   async function batch(stmts: ShimStatement[]) {
-    const out: ReturnType<ShimStatement['_runSync']>[] = []
-    db.exec('BEGIN IMMEDIATE')
+    const out: unknown[] = []
+    const hasWrite = stmts.some((s) => !s._returnsRows())
+    // 纯读批次不开事务：体检这类大结果集读取不该占住写锁；真 D1 的原子性对只读没有意义
+    if (hasWrite) db.exec('BEGIN IMMEDIATE')
     try {
-      for (const s of stmts) out.push(s._runSync())
-      db.exec('COMMIT')
+      for (const s of stmts) out.push(s._returnsRows() ? s._allSync() : s._runSync())
+      if (hasWrite) db.exec('COMMIT')
     } catch (e) {
-      db.exec('ROLLBACK')
+      if (hasWrite) db.exec('ROLLBACK')
       throw e
     }
     return out

@@ -104,7 +104,11 @@ const QUERY_BYTE_BUDGET = 700_000
 const BATCH_CHUNK = 25
 
 /** table/column 只来自本文件字面量，无注入面 */
-async function bucketedColumnScan(db: D1Database, table: string, column: string): Promise<string[]> {
+async function bucketedColumnScan(
+  db: D1Database,
+  table: string,
+  column: string
+): Promise<{ texts: string[]; probed: number }> {
   const probe = await db
     .prepare(`SELECT id, length(CAST(${column} AS BLOB)) AS len FROM ${table} WHERE ${column} LIKE '%/images/%'`)
     .all<{ id: number; len: number }>()
@@ -133,12 +137,13 @@ async function bucketedColumnScan(db: D1Database, table: string, column: string)
     )
     for (const r of res) for (const row of (r.results ?? []) as { v: string }[]) if (row.v) texts.push(row.v)
   }
-  return texts
+  return { texts, probed: (probe.results ?? []).length }
 }
 
 /** 小字段一次批查拿全：行数与单值体积都被产品设计封顶（用户表个位数、友链 ≤500、设置 ≤50 条） */
 async function pullReferenceTexts(db: D1Database): Promise<string[]> {
   const texts: string[] = []
+  let probed = 0
   for (const [table, column] of [
     ['posts', 'content'],
     ['pages', 'content'],
@@ -146,7 +151,18 @@ async function pullReferenceTexts(db: D1Database): Promise<string[]> {
     // 视频列存 JSON（url + poster 都是 /images/ 地址）：不进引用源会被体检误判为「未被引用」（B19）
     ['weibo', 'video'],
   ] as const) {
-    texts.push(...(await bucketedColumnScan(db, table, column)))
+    const r = await bucketedColumnScan(db, table, column)
+    texts.push(...r.texts)
+    probed += r.probed
+  }
+  // 死线守卫（2026-11-06）：预筛明确命中「含 /images/ 的记录」，正文却一条都没取回来，
+  // 只可能是数据层坏了（当时是 docker-poc 的 db.batch 把 SELECT 当写语句执行，结果集全丢）。
+  // 这种情况绝不能当「全站没有引用」继续跑——体检会把整库文件列成未引用，一键清理即删光图床。
+  // 宁可让体检报错，也不能给出一份反过来的报告。
+  if (probed > 0 && texts.length === 0) {
+    throw new Error(
+      `引用源读取异常：预筛命中 ${probed} 条含图记录，却未取回任何正文/配图；已中止体检（避免把全部媒体误判为「未引用」）`
+    )
   }
   const small = await db.batch([
     db.prepare("SELECT cover AS v FROM posts WHERE cover LIKE '%/images/%' LIMIT 20000"),

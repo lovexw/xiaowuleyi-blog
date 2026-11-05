@@ -2401,7 +2401,13 @@ api.delete('/admin/uploads', async (c) => {
 
 api.get('/admin/uploads/audit', async (c) => {
   if (!rateLimit(c.env, `audit:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
-  return c.json(await runAudit(c.env))
+  try {
+    return c.json(await runAudit(c.env))
+  } catch (e) {
+    // 体检失败要说清原因：这条路径上最可能的失败是「引用源一条都读不出来」，
+    // 含糊的 500 会让人以为整站坏了（2026-11-06 线上那次就是这种症状）
+    return jsonError(e instanceof Error ? e.message : '体检失败，请稍后再试', 500)
+  }
 })
 
 api.post('/admin/uploads/hash-backfill', async (c) => {

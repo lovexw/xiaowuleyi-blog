@@ -444,3 +444,19 @@ test('P2-18 补充：truncated 却没给 cursor 的实现在此收口（否则�
   assert.equal(d.orphans.count, 0)
   assert.equal(d.orphans.truncated, true, '没扫完就如实说没扫完')
 })
+
+test('引用源读取失败要中止体检，而不是报「全部未引用」（2026-11-06 线上事故）', async () => {
+  // 复现当时的坏 shim：batch 里的 SELECT 只返回 meta，没有 results
+  const base = fakeDb(auditTables())
+  const broken = {
+    prepare: base.prepare,
+    batch: async (stmts: unknown[]) => (stmts as unknown[]).map(() => ({ success: true, meta: { changes: 1 } })),
+  } as unknown as D1Database
+  await assert.rejects(
+    () => runAudit({ DB: broken, IMAGES: fakeR2(new Map()) } as unknown as Env),
+    /引用源读取异常/,
+    '预筛命中含图记录却取不回正文 → 必须报错，绝不能给出一份「全站未引用」的报告'
+  )
+  // 同一条死线也要挡住清理：否则「全选 → 删除所选」会照着假报告删光图床
+  await assert.rejects(() => cleanupUnreferenced({ DB: broken, IMAGES: fakeR2(new Map()) } as unknown as Env, ['u/k/1.jpg']), /引用源读取异常/)
+})
