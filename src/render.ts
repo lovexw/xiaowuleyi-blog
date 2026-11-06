@@ -673,15 +673,36 @@ export function stripCoverDuplicate(contentHtml: string, cover: string): string 
   return withoutP !== contentHtml ? withoutP : contentHtml.replace(img[0], '')
 }
 
+/** 会生成 WebP 变体的源图扩展名——与 deploy/images/gen-variants.py 的 EXTS 及
+ *  src/store.ts `variantBaseKey` 的白名单一致（改任一侧同改）。
+ *  gif 明列在外：cwebp 转静态会丢帧，宿主机脚本**故意跳过**，所以 `x.gif@480.webp`
+ *  永远不会存在，拼出来就是 404（2026-11-06 生产日志里 blog.btchao.com 的
+ *  `u/btc/*.gif@960.webp` 404、9 篇文章内嵌动图 + 4 篇 gif 封面裂图即此）
+ *  svg/ico 同理：不是位图，没有变体。 */
+const VARIANT_SOURCE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+
 /**
  * 站内图床图片 → 响应式变体地址（`<原图>@<宽>.webp`）。
  *
  * 变体由 deploy/images/gen-variants.py 在宿主机预生成，/images 路由按 key 直读磁盘；
  * 真没生成时路由会回退原图并给 300s 短 TTL，所以这里可以无条件改写，不会裂图。
  * 外链图片原样返回——那不是我们能生成变体的对象。
+ *
+ * **不会生成变体的源图（gif/svg/ico）原样返回**：路由的回退只认 variantBaseKey
+ * 白名单里的扩展名（gif 会判成"不是变体形态"→不回退→404），所以拼上去等于直接造一个
+ * 死链，而不是"反正会回退"。调用方据此判断"有没有真的换地址"，别输出 srcset。
+ * 已经是变体形态（`@480.webp`）的也原样返回，避免叠成 `x.webp@480.webp@960.webp`。
  */
 export function variantUrl(url: string, w: number): string {
-  return url.startsWith('/images/') ? `${url}@${w}.webp` : url
+  if (!url.startsWith('/images/')) return url
+  const cut = url.search(/[?#]/)
+  const path = cut < 0 ? url : url.slice(0, cut)
+  const suffix = cut < 0 ? '' : url.slice(cut)
+  if (/@\d{2,4}\.webp$/i.test(path)) return url
+  const dot = path.lastIndexOf('.')
+  if (dot < 0) return url
+  const ext = path.slice(dot + 1).toLowerCase()
+  return VARIANT_SOURCE_EXTS.has(ext) ? `${path}@${w}.webp${suffix}` : url
 }
 
 /**
@@ -703,8 +724,10 @@ export function responsiveContentImages(html: string): string {
     const selfClose = /\/\s*$/.test(rawAttrs)
     const attrs = selfClose ? rawAttrs.replace(/\/\s*$/, '') : rawAttrs
     let extra = ''
-    // 已经是变体地址（或懒加载库的 data-srcset 占位）就别再叠一层
-    if (src.startsWith('/images/') && !/@\d{2,4}\.webp$/i.test(src) && !/\bdata-srcset\s*=/i.test(attrs)) {
+    // 已经是变体地址（或懒加载库的 data-srcset 占位）就别再叠一层；
+    // gif/svg 这类没有变体的源图 variantUrl 会原样返回，此时补 srcset 只会让浏览器
+    // 选中一个永远 404 的候选地址（srcset 命中后不会回退 src）——所以直接跳过
+    if (variantUrl(src, 480) !== src && !/\bdata-srcset\s*=/i.test(attrs)) {
       const set = [480, 960].map((w) => `${src}@${w}.webp ${w}w`).join(', ')
       extra += ` srcset="${set}" sizes="(max-width: 780px) 100vw, 720px"`
     }

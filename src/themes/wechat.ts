@@ -73,9 +73,11 @@ function sideCard(title: string, sub: string, body: string): string {
 }
 
 /** 正文封面是唯一「按容器宽度铺满」的图，值得给 srcset 让浏览器自己挑。
- *  外链封面没有变体，返回空串——输出重复 URL 的多档 srcset 只会让浏览器白选一次 */
+ *  外链封面没有变体，返回空串——输出重复 URL 的多档 srcset 只会让浏览器白选一次。
+ *  gif/svg 封面同理（宿主机脚本不生成动图变体，拼出来必 404）：variantUrl 原样返回时
+ *  也返回空串，让 `src` 用回原图地址 */
 function coverSrcset(url: string): string {
-  if (!url.startsWith('/images/')) return ''
+  if (variantUrl(url, 480) === url) return ''
   return ` srcset="${esc(variantUrl(url, 480))} 480w, ${esc(variantUrl(url, 960))} 960w" sizes="(max-width: 780px) 100vw, 760px"`
 }
 

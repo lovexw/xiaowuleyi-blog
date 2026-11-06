@@ -49,6 +49,34 @@ test('responsiveContentImages：没有 img 的 HTML 原样返回（含空串）'
   assert.equal(responsiveContentImages('<img alt="占位">'), '<img alt="占位">')
 })
 
+test('responsiveContentImages：gif/svg 没有变体，不补 srcset（补了就是 404 死链）', () => {
+  const gif = responsiveContentImages('<img src="/images/u/btc/abc.gif" alt="动图">')
+  assert.doesNotMatch(gif, /srcset=/)
+  assert.match(gif, /src="\/images\/u\/btc\/abc\.gif"/)
+  // 该补的懒加载照补
+  assert.match(gif, /loading="lazy"/)
+
+  const svg = responsiveContentImages('<img src="/images/u/logo.svg">')
+  assert.doesNotMatch(svg, /srcset=/)
+})
+
+test('variantUrl：只有会生成变体的源图才拼 @宽.webp（与 gen-variants.py 的白名单对齐）', async () => {
+  const { variantUrl } = await import('../src/render.ts')
+  assert.equal(variantUrl('/images/u/a.jpg', 480), '/images/u/a.jpg@480.webp')
+  assert.equal(variantUrl('/images/u/a.JPEG', 960), '/images/u/a.JPEG@960.webp')
+  assert.equal(variantUrl('/images/u/a.png', 192), '/images/u/a.png@192.webp')
+  assert.equal(variantUrl('/images/u/a.webp', 480), '/images/u/a.webp@480.webp')
+  // gif（宿主机脚本故意跳过，转静态会丢帧）、svg、无扩展名、外链：原样返回
+  assert.equal(variantUrl('/images/u/btc/abc.gif', 960), '/images/u/btc/abc.gif')
+  assert.equal(variantUrl('/images/u/logo.svg', 192), '/images/u/logo.svg')
+  assert.equal(variantUrl('/images/u/no-ext', 480), '/images/u/no-ext')
+  assert.equal(variantUrl('https://cdn.example.com/a.jpg', 480), 'https://cdn.example.com/a.jpg')
+  // 已经是变体，别再叠一层
+  assert.equal(variantUrl('/images/u/a.jpg@480.webp', 960), '/images/u/a.jpg@480.webp')
+  // 带查询串/锚点的也能认出扩展名，且变体后缀插在参数之前
+  assert.equal(variantUrl('/images/u/a.jpg?v=1', 480), '/images/u/a.jpg@480.webp?v=1')
+})
+
 test('mediaDeleteKeys：原图展开全部变体槽位；变体 key 幂等回原图；多 key 去重（P1-7）', async () => {
   const { mediaDeleteKeys } = await import('../src/store.ts')
   assert.deepEqual(
