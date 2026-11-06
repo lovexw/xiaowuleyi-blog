@@ -3026,7 +3026,8 @@ async function renderAuditReport(body) {
 
   const dupHtml = d.duplicateGroups.length
     ? `<div class="audit-sec">
-      <div class="audit-sec-head"><span>重复文件<span class="audit-sec-sub">　内容完全相同：点「保留这张」，其余副本的引用会自动改写到它再删除，前台照常显示</span></span></div>
+      <div class="audit-sec-head"><span>重复文件<span class="audit-sec-sub">　内容完全相同：点「保留这张」，其余副本的引用会自动改写到它再删除，前台照常显示；也可以直接「一键合并全部」，每组留一张，规则是「正在被引用的优先，其次上传最早」</span></span>
+      <span class="audit-actions"><button class="btn btn-sm btn-primary" id="audit-mergeall">一键合并全部</button></span></div>
       ${d.duplicateGroups
         .map(
           (g, gi) => `<div class="dup-group">
@@ -3177,6 +3178,57 @@ async function renderAuditReport(body) {
         toast(deleted ? `已删除 ${deleted} 个，剩余的稍后重试：${e.message}` : e.message, true)
         cleanBtn.disabled = false
       }
+    })
+
+  /* --- 重复：一键合并全部（服务端每组现算，按批推进） --- */
+  const mergeAllBtn = body.querySelector('#audit-mergeall')
+  if (mergeAllBtn)
+    mergeAllBtn.addEventListener('click', async () => {
+      const groups = d.duplicateGroups.length
+      const copies = d.duplicateGroups.reduce((s, g) => s + g.items.length - 1, 0)
+      const ok = await confirmBox(
+        `一键合并 ${groups} 组重复文件？每组保留「正在被引用的、其次上传最早」的那一张，其余 ${copies} 个副本的图片地址会先改写再删除，前台照常显示。共回收约 ${fmtSize(d.duplicateBytes)}。`
+      )
+      if (!ok) return
+      const label = mergeAllBtn.textContent
+      mergeAllBtn.disabled = true
+      let done = 0
+      let removed = 0
+      let freed = 0
+      let failed = 0
+      let left = 0
+      let firstError = ''
+      try {
+        // 服务端每次最多 20 组：循环推进并显示进度；remaining 为 0 即收工
+        for (let i = 0; i < 40; i++) {
+          const r = await api('/admin/uploads/merge-all', { method: 'POST', body: { limit: 20 } })
+          done += r.processed || 0
+          removed += r.removed || 0
+          freed += r.freedBytes || 0
+          left = r.remaining || 0
+          if (r.failed && r.failed.length) {
+            failed += r.failed.length
+            if (!firstError) firstError = r.failed[0].error
+          }
+          mergeAllBtn.textContent = `合并中… ${done}/${groups} 组`
+          if (!left) break
+          // 一批下来一组都没成功（指纹异常 / 文件正被别人删）就停手，别原地打转
+          if (!r.processed) break
+        }
+      } catch (e) {
+        mergeAllBtn.disabled = false
+        mergeAllBtn.textContent = label
+        toast(done ? `已合并 ${done} 组，剩余的下次再试：${e.message}` : e.message, true)
+        if (!done) return
+      }
+      mergeAllBtn.disabled = false
+      mergeAllBtn.textContent = label
+      const head = done ? `已合并 ${done} 组，删除 ${removed} 个副本，释放 ${fmtSize(freed)}` : ''
+      const tail = left ? `；还有 ${left} 组没处理，再点一次继续` : ''
+      if (failed) toast(`${head || '没有可合并的组'}；${failed} 组失败已跳过（${firstError || '稍后重试'}）${tail}`, true)
+      else toast((head || '没有需要合并的重复文件') + tail)
+      navigate()
+      renderAuditReport(body)
     })
 
   /* --- 重复：每组选一张保留，其余合并进去 --- */

@@ -83,6 +83,14 @@ function fakeDb(tables: Tables): D1Database {
       }
       return { meta: { changes } }
     }
+    // 合并后校验：SELECT COUNT(*) AS n FROM <table> WHERE instr(c1, ?) > 0 OR instr(c2, ?) > 0 ...
+    m = /^SELECT COUNT\(\*\) AS n FROM (\w+) WHERE ((?:instr\(\w+, \?\) > 0)(?: OR instr\(\w+, \?\) > 0)*)$/.exec(sql)
+    if (m) {
+      const [, table, where] = m
+      const pairs = [...where.matchAll(/instr\((\w+), \?\) > 0/g)].map((x, i) => ({ col: x[1], key: binds[i] as string }))
+      const n = (tables[table] || []).filter((row) => pairs.some((p) => String(row[p.col] ?? '').includes(p.key))).length
+      return { results: [{ n }] }
+    }
     // 删除登记
     m = /^DELETE FROM uploads WHERE key IN \(([^)]*)\)$/.exec(sql)
     if (m) {

@@ -141,7 +141,7 @@ import {
 } from './hooks'
 import { SITE_MODE_VALUES, siteBase, toHomePost, type SiteMode } from './render'
 import { sanitizeHtml } from './sanitize'
-import { cleanupUnreferenced, backfillHashes, mergeDuplicate, runAudit } from './audit'
+import { cleanupUnreferenced, backfillHashes, mergeAllDuplicates, mergeDuplicate, runAudit } from './audit'
 import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mediaDeleteKeys, saveUpload, sniffImageExt, sniffUploadExt, sniffVideoCodec, transferImage } from './store'
 import { hashPostPassword } from './protect'
 import { generateTotpSecret, totpProvisioningUri, verifyTotp } from './totp'
@@ -2427,6 +2427,23 @@ api.post('/admin/uploads/merge', async (c) => {
     // 被合并删除的文件（含变体派生 key，P1-7）同时从图床边缘缓存摘掉（审计 F2）
     c.executionCtx.waitUntil(purgePageCache(c.env.DB))
     c.executionCtx.waitUntil(purgeImageCache(new URL(c.req.url).origin, r.purgeKeys ?? r.removed ?? []))
+    return c.json({ ok: true, ...r })
+  } catch (e) {
+    return jsonError(e instanceof Error ? e.message : '合并失败')
+  }
+})
+
+api.post('/admin/uploads/merge-all', async (c) => {
+  // 独立限流桶：一次点击会连发十几批（每批默认 20 组），与 audit/merge 的 10 次/分钟共桶会把自己卡住
+  if (!rateLimit(c.env, `mergeall:${clientIp(c.req.raw)}`, 30, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
+  const b = await c.req.json<{ limit?: unknown }>().catch(() => null)
+  try {
+    const r = await mergeAllDuplicates(c.env, Number(b?.limit) || 20)
+    // 合并改写了正文/微博里的图片地址 → 页面边缘缓存作废；被删文件（含变体）从图床边缘缓存摘掉
+    if (r.processed) {
+      c.executionCtx.waitUntil(purgePageCache(c.env.DB))
+      if (r.purgeKeys.length) c.executionCtx.waitUntil(purgeImageCache(new URL(c.req.url).origin, r.purgeKeys))
+    }
     return c.json({ ok: true, ...r })
   } catch (e) {
     return jsonError(e instanceof Error ? e.message : '合并失败')

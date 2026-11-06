@@ -93,6 +93,39 @@ export function groupDuplicates(uploads: UploadRow[]): DupGroup[] {
     .map(([hash, items]) => ({ hash, items, wasteBytes: (items.length - 1) * (items[0]?.size ?? 0) }))
 }
 
+/** 站内所有存媒体地址的列——**唯一事实来源**：体检的引用识别、合并时的改写、合并后的校验都用这一张表。
+ *
+ *  为什么必须共用一张表：这三处只要有一处漏列，后果就是「以为没人用 → 删掉 → 地址还在别处指着它」。
+ *  2026-11-06 就踩过一次：合并改写漏了 weibo.video（引用识别有、改写没有），
+ *  用生产库快照预演 241 组重复合并，站内断链从 2 处涨到 44 处，全是微博视频。
+ *
+ *  mode = 'scan'：正文/配图这类大字段，按字节预算分桶查询（不把整库正文拉进一次响应）；
+ *  mode = 'small'：头像/图标/设置这类小字段，一次 LIKE 查全即可。 */
+const MEDIA_REF_COLUMNS: { table: string; col: string; mode: 'scan' | 'small' }[] = [
+  { table: 'posts', col: 'content', mode: 'scan' },
+  { table: 'posts', col: 'cover', mode: 'small' },
+  { table: 'pages', col: 'content', mode: 'scan' },
+  { table: 'weibo', col: 'images', mode: 'scan' },
+  // 视频列存 JSON（url + poster 都是 /images/ 地址）：不进引用源会被误判为「未被引用」（B19）
+  { table: 'weibo', col: 'video', mode: 'scan' },
+  { table: 'users', col: 'avatar', mode: 'small' },
+  // 评论头像 C2 / 会员 QQ 头像：都经 saveUpload 落 /images/，漏登记会打瘫评论区头像（P1-8）
+  { table: 'comments', col: 'avatar', mode: 'small' },
+  { table: 'members', col: 'avatar', mode: 'small' },
+  { table: 'friend_links', col: 'icon', mode: 'small' },
+  { table: 'settings', col: 'value', mode: 'small' },
+  // tg_buffer 是待合并的 TG 相册缓冲，行数个位数且**没有 id 列**（分桶查询按 id 取行，用不了）
+  { table: 'tg_buffer', col: 'content', mode: 'small' },
+  { table: 'tg_buffer', col: 'images', mode: 'small' },
+]
+
+/** 改写的粒度是「表」：同一张表的多列用一条 UPDATE 一起改 */
+const REF_TABLES: [table: string, cols: string[]][] = (() => {
+  const byTable = new Map<string, string[]>()
+  for (const { table, col } of MEDIA_REF_COLUMNS) byTable.set(table, [...(byTable.get(table) ?? []), col])
+  return [...byTable]
+})()
+
 /* ---------------- 引用源拉取 ----------------
  * 大字段（posts/pages 正文、weibo 配图）按字节预算分桶查询：单条查询的响应体积可控，
  * 也不至于把整库正文拉进内存；含图行先用 LIKE 预筛，纯文字文章不进候选。
@@ -144,14 +177,9 @@ async function bucketedColumnScan(
 async function pullReferenceTexts(db: D1Database): Promise<string[]> {
   const texts: string[] = []
   let probed = 0
-  for (const [table, column] of [
-    ['posts', 'content'],
-    ['pages', 'content'],
-    ['weibo', 'images'],
-    // 视频列存 JSON（url + poster 都是 /images/ 地址）：不进引用源会被体检误判为「未被引用」（B19）
-    ['weibo', 'video'],
-  ] as const) {
-    const r = await bucketedColumnScan(db, table, column)
+  for (const { table, col, mode } of MEDIA_REF_COLUMNS) {
+    if (mode !== 'scan') continue
+    const r = await bucketedColumnScan(db, table, col)
     texts.push(...r.texts)
     probed += r.probed
   }
@@ -164,18 +192,11 @@ async function pullReferenceTexts(db: D1Database): Promise<string[]> {
       `引用源读取异常：预筛命中 ${probed} 条含图记录，却未取回任何正文/配图；已中止体检（避免把全部媒体误判为「未引用」）`
     )
   }
-  const small = await db.batch([
-    db.prepare("SELECT cover AS v FROM posts WHERE cover LIKE '%/images/%' LIMIT 20000"),
-    db.prepare("SELECT avatar AS v FROM users WHERE avatar LIKE '%/images/%'"),
-    // 评论头像 C2 / 会员 QQ 头像：都经 saveUpload 落 /images/，不进引用源会被体检误判
-    // 为「未被引用」，一键清理即打瘫评论区头像（2026-11 审计 P1-8）
-    db.prepare("SELECT avatar AS v FROM comments WHERE avatar LIKE '%/images/%' LIMIT 20000"),
-    db.prepare("SELECT avatar AS v FROM members WHERE avatar LIKE '%/images/%'"),
-    db.prepare("SELECT icon AS v FROM friend_links WHERE icon LIKE '%/images/%' LIMIT 20000"),
-    db.prepare("SELECT value AS v FROM settings WHERE value LIKE '%/images/%'"),
-    db.prepare("SELECT content AS v FROM tg_buffer WHERE content LIKE '%/images/%'"),
-    db.prepare("SELECT images AS v FROM tg_buffer WHERE images LIKE '%/images/%'"),
-  ])
+  const small = await db.batch(
+    MEDIA_REF_COLUMNS.filter((c) => c.mode === 'small').map(({ table, col }) =>
+      db.prepare(`SELECT ${col} AS v FROM ${table} WHERE ${col} LIKE '%/images/%' LIMIT 20000`)
+    )
+  )
   for (const r of small) for (const row of (r.results ?? []) as { v: string }[]) if (row.v) texts.push(row.v)
   return texts
 }
@@ -349,18 +370,7 @@ export interface MergeResult {
   purgeKeys: string[]
 }
 
-const REF_TABLES: [table: string, cols: string[]][] = [
-  ['posts', ['content', 'cover']],
-  ['pages', ['content']],
-  ['weibo', ['images']],
-  ['users', ['avatar']],
-  // 评论/会员头像：合并重复时引用改写也要覆盖这两列，否则被并掉的文件一删头像 404（P1-8）
-  ['comments', ['avatar']],
-  ['members', ['avatar']],
-  ['friend_links', ['icon']],
-  ['settings', ['value']],
-  ['tg_buffer', ['content', 'images']],
-]
+/* REF_TABLES 由 MEDIA_REF_COLUMNS 推导（见文件上方）：改写的列集合必然等于体检测引用的列集合 */
 
 /** 把 remove 组的引用改写到 keep 并删除 remove。
  *  安全闸：所有 key 必须是媒体库可管理的目录、必须真实存在、内容指纹必须完全一致——
@@ -402,6 +412,20 @@ export async function mergeDuplicate(env: Env, keep: string, remove: string[]): 
     for (const r of res) updated += r.meta.changes || 0
   }
 
+  // 最后一道校验（2026-11-06）：改写完再问一遍「站内还有没有地方指着这些副本」。
+  // 查的列 = MEDIA_REF_COLUMNS（体检识别引用用的同一张表），所以「漏改一列」这种 bug
+  // 会在这里暴露成中止，而不是删完之后留下一堆 404 地址。宁可报错让人重试，也不带病删除。
+  const check = await env.DB.batch(
+    REF_TABLES.map(([table, cols]) => {
+      const conds = cols.flatMap((c) => rm.map(() => `instr(${c}, ?) > 0`))
+      return env.DB
+        .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${conds.join(' OR ')}`)
+        .bind(...cols.flatMap(() => rm.map((k) => `/images/${k}`)))
+    })
+  )
+  const still = check.reduce((s, r) => s + Number((r.results?.[0] as { n?: number })?.n ?? 0), 0)
+  if (still > 0) throw new Error(`仍有 ${still} 处内容引用这些副本，已中止删除（请重试；持续失败请把这条报给开发）`)
+
   // 删除口径带变体派生文件（2026-11 审计 P1-7）：变体不进 uploads 表，只删原 key
   // 会留下仍可公开访问的 <key>@480.webp
   const purgeKeys = mediaDeleteKeys(rm)
@@ -410,6 +434,99 @@ export async function mergeDuplicate(env: Env, keep: string, remove: string[]): 
     .bind(...rm)
     .run()
   return { updated, freedBytes: keepRow.size * rm.length, removed: rm, purgeKeys }
+}
+
+/* ---------------- 一键合并全部重复 ---------------- */
+
+export interface MergeAllResult {
+  /** 本批尝试的组数 */
+  groups: number
+  /** 本批成功的组数（失败的组会留在 remaining 里，下次重试） */
+  processed: number
+  /** 本批删除的副本文件数 */
+  removed: number
+  freedBytes: number
+  /** 本批改写的引用处数 */
+  updated: number
+  /** 本批做完后还剩多少组重复（前端据它决定要不要继续下一批） */
+  remaining: number
+  /** 失败明细：一组失败不影响同批其他组 */
+  failed: { hash: string; error: string }[]
+  /** 已删文件（含变体派生 key），调用方据此清图床边缘缓存 */
+  purgeKeys: string[]
+}
+
+/** 单次请求最多处理多少组：一条 merge 语句要扫 9 张表的正文，分批做才不会拖成长请求 */
+export const MERGE_ALL_MAX = 30
+
+/** 全部重复一次性合并（每组挑一张留下，其余合并进去）。
+ *
+ *  为什么在服务端重新分组、而不是让前端把分组结果发上来：分组依据是指纹，前端那份可能已经过期
+ *  （体检之后又传了新图 / 合并过一批），按过期清单删文件是最危险的一类操作。这里每次都从
+ *  uploads 现算，天然幂等——重复调用、被打断后重试都只会推进，不会误删。
+ *
+ *  保留规则（可解释、可预期）：**正在被引用的优先**（改写引用才不会动到在用内容），
+ *  同样都在用/都没用时取**上传最早**的那张（老文章里的地址保持不变，URL 更稳定）。
+ *  从体积最大的组开始处理，同样的点击次数先回收大头。 */
+export async function mergeAllDuplicates(env: Env, limit = 20): Promise<MergeAllResult> {
+  const take = Math.min(Math.max(1, Math.floor(limit) || 20), MERGE_ALL_MAX)
+  const empty: MergeAllResult = {
+    groups: 0, processed: 0, removed: 0, freedBytes: 0, updated: 0, remaining: 0, failed: [], purgeKeys: [],
+  }
+
+  const { results: groups } = await env.DB
+    .prepare(
+      `SELECT hash FROM uploads WHERE length(hash) = 64
+        GROUP BY hash HAVING COUNT(*) > 1 ORDER BY SUM(size) DESC LIMIT ?`
+    )
+    .bind(take)
+    .all<{ hash: string }>()
+  if (!groups.length) return empty
+
+  const hashes = groups.map((g) => g.hash)
+  const { results: rows } = await env.DB
+    .prepare(`SELECT key, hash, size, created_at FROM uploads WHERE hash IN (${hashes.map(() => '?').join(',')})`)
+    .bind(...hashes)
+    .all<{ key: string; hash: string; size: number; created_at: number }>()
+
+  // 引用判定只扫一遍（引用源全量拉取是本函数最贵的部分），本批所有组共用
+  const referenced = await scanReferencedKeys(env, (rows ?? []).map((r) => r.key))
+
+  const out: MergeAllResult = { ...empty, groups: hashes.length, failed: [], purgeKeys: [] }
+  for (const hash of hashes) {
+    const items = (rows ?? []).filter((r) => r.hash === hash)
+    if (items.length < 2) continue
+    // 引用中的优先 → 上传最早 → key 字典序（最后一条只是为了排序稳定，结果可复现）
+    const ranked = [...items].sort((a, b) => {
+      const ra = referenced.has(a.key) ? 1 : 0
+      const rb = referenced.has(b.key) ? 1 : 0
+      if (ra !== rb) return rb - ra
+      if (a.created_at !== b.created_at) return a.created_at - b.created_at
+      return a.key < b.key ? -1 : 1
+    })
+    const keep = ranked[0].key
+    const remove = ranked.slice(1).map((r) => r.key)
+    try {
+      // 单组副本可能超过 mergeDuplicate 的 20 个上限：同 keep 分批，REPLACE 改写幂等
+      for (let i = 0; i < remove.length; i += 20) {
+        const r = await mergeDuplicate(env, keep, remove.slice(i, i + 20))
+        out.updated += r.updated
+        out.freedBytes += r.freedBytes
+        out.removed += r.removed.length
+        out.purgeKeys.push(...r.purgeKeys)
+      }
+      out.processed++
+    } catch (e) {
+      // 一组失败（指纹不一致 / 文件正好被删）不牵连其他组，留在剩余里下次再来
+      out.failed.push({ hash, error: e instanceof Error ? e.message : String(e) })
+    }
+  }
+
+  const left = await env.DB
+    .prepare('SELECT COUNT(*) AS n FROM (SELECT hash FROM uploads WHERE length(hash) = 64 GROUP BY hash HAVING COUNT(*) > 1)')
+    .first<{ n: number }>()
+  out.remaining = left?.n ?? 0
+  return out
 }
 
 /* ---------------- 清理未引用 ---------------- */
