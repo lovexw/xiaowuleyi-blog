@@ -317,7 +317,7 @@ function prefRead(k) {
 /** 桌面侧栏与移动端「更多」抽屉共用同一份 MENU 渲染（外链 + 写作 CTA + 「更多」折叠区）
  *  flat=true：平铺全部（移动端抽屉是「全部菜单」，不该再折一层） */
 /**
- * 冻结项从菜单消失（docs/FROZEN.md，2026-11-10）：`membersEnabled` 不是 '1' 时「会员」整项不渲染。
+ * 冻结项从菜单消失（docs/FROZEN-FEATURES.md，2026-11-10）：`membersEnabled` 不是 '1' 时「会员」整项不渲染。
  * 菜单是最贵的位置——一个用不上的入口比一段用不上的代码更耗注意力。
  * 只在「明确关闭」时隐藏，settings 还没加载完（undefined）时按冻结处理：宁可晚一拍出现，
  * 也不要先闪出来再消失。直接输 #/members 仍能进（后台接口没关），页面顶部自己给说明。
@@ -4302,7 +4302,7 @@ async function viewSettings() {
     <div class="panel" style="padding:20px;">
       <div class="form-section"><h3>会员</h3>${
         state.settings && state.settings.membersEnabled !== '1'
-          ? '<div class="sec-desc">会员功能<b>已冻结</b>：前台会员入口、<code>/member</code>、<code>/rank</code> 都已收掉，侧栏也不再出现「会员」。名单与档位数据仍在，需要时去会员页重新打开总开关即可（见 docs/FROZEN.md）</div>'
+          ? '<div class="sec-desc">会员功能<b>已冻结</b>：前台会员入口、<code>/member</code>、<code>/rank</code> 都已收掉，侧栏也不再出现「会员」。名单与档位数据仍在，需要时去会员页重新打开总开关即可（见 docs/FROZEN-FEATURES.md）</div>'
           : '<div class="sec-desc">会员体系已从「设置」独立成页：档位定义、注册规则、评论圈层、邀请码与成员名单都在 <a href="#/members">会员页</a> 里管理（入口在侧栏「更多」里）</div>'
       }
         <a class="btn btn-sm" href="#/members?tab=settings" style="margin-top:10px;display:inline-block;text-decoration:none;">去「会员」页管理 →</a>

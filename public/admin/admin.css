@@ -311,7 +311,7 @@ input, textarea, select { font: inherit; color: inherit; }
 .form-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
 .form-section .sec-desc { font-size: 13px; color: var(--sub); margin-bottom: 14px; }
 
-/* 冻结功能提示条（docs/FROZEN.md）：说明「功能关着、数据还在、去哪开」。
+/* 冻结功能提示条（docs/FROZEN-FEATURES.md）：说明「功能关着、数据还在、去哪开」。
    用虚线边框而不是色块——它是要读的说明，不是报错，不该抢主按钮的注意力 */
 .frozen-note {
   margin: 0 0 14px; padding: 10px 12px; border-radius: 8px;
