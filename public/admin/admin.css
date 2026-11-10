@@ -344,7 +344,19 @@ input, textarea, select { font: inherit; color: inherit; }
 .settings-tabs-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
 .settings-tabs .tab { padding: 7px 22px; font-size: 14px; }
 .settings-hint { font-size: 12.5px; color: var(--sub); }
+.settings-row-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* 窄屏：说明文字与开关同一行，说明允许折行、按钮不许折（390px 实测过，否则两者各占一行太散） */
+@media (max-width: 560px) {
+  .settings-row-right { width: 100%; }
+  .settings-hint { flex: 1; min-width: 0; }
+}
 .stab-pane[hidden] { display: none; }
+/* 高级设置分组默认折叠（.panel 本身不设 display，hidden 生效；这条只是兜底，
+   防止将来给 .panel 加了 display 之后折叠失效） */
+.stab-pane .panel[hidden] { display: none; }
+/* 「显示全部设置 / 只看常用设置」开关：展开态只把文字染主色，不加主色边框——
+   否则它会和右上角「保存全部」抢注意力（那是这一页唯一的主操作） */
+.btn.is-on { color: var(--accent); }
 
 /* 会员页分页签（成员 / 会员设置 / 邀请码）：tab 切换走 hash，复用设置页那套 .tabs 视觉 */
 .members-tabs { margin-bottom: 16px; width: fit-content; max-width: 100%; }

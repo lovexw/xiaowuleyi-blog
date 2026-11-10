@@ -4024,6 +4024,14 @@ async function viewPlugins() {
 /* ---------------- 设置 ---------------- */
 /* 设置页当前页签：页内记忆（不进 hash——hashchange 会触发 navigate 重挂视图，丢未保存输入） */
 let settingsTab = 'site'
+/* 设置页「常用 / 全部」：默认只露日常会动的那几组，高级组折起来（偏好存 localStorage） */
+let settingsShowAll = (() => {
+  try {
+    return localStorage.getItem('admin-set-all') === '1'
+  } catch {
+    return false // 隐私模式读不到，按常用显示
+  }
+})()
 
 /* ---------------- 会员档位编辑器（会员页「会员设置」页签） ----------------
  * 草稿态编辑：行内改名/选色/切永久/改默认天数/定到期降级档，上移下移调等级，增删档位；
@@ -4150,7 +4158,10 @@ async function viewSettings() {
         <button class="tab" data-stab="advance" type="button">进阶</button>
         <button class="tab" data-stab="data" type="button">数据</button>
       </div>
-      <div class="settings-hint" id="settings-hint"></div>
+      <div class="settings-row-right">
+        <span class="settings-hint" id="settings-hint"></span>
+        <button class="btn btn-sm" id="btn-set-adv" type="button"></button>
+      </div>
     </div>
 
     <div class="stab-pane" data-pane="site">
@@ -4208,7 +4219,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>SEO 与统计</h3><div class="sec-desc">搜索引擎验证、第三方统计脚本与 robots.txt 追加规则；三项都可留空</div>
         <div class="form-item">
           <label>站点验证标签（一行一个，直接粘贴站长平台给的 meta 标签；支持 Google / Bing / 百度 / 搜狗 / 360 / Yandex 等验证字段）</label>
@@ -4232,7 +4243,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>语言版本（英文测试版 English 0.1）</h3><div class="sec-desc">前台界面语言：文章与微博正文保持原文，仅界面文案切换。英文版渲染出现异常时会自动回退中文版，并在后台顶部提醒；重新开启即重置异常状态</div>
         <label class="mode-row"><input type="radio" name="st-edition" value="zh"><span class="mode-text"><b>中文（默认）</b><i>前台保持中文界面</i></span></label>
         <label class="mode-row"><input type="radio" name="st-edition" value="en"><span class="mode-text"><b>English 0.1（英文测试版）</b><i>前台界面切换为英文并在页面顶部公示测试版横幅；测试期间搜索引擎不收录（noindex），出问题自动回退中文版</i></span></label>
@@ -4250,7 +4261,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>两步验证（TOTP）</h3><div class="sec-desc">给管理员登录再加一道锁：开启后每次登录除了密码还要输验证器 App 里的 6 位数字码（Google Authenticator / 1Password / 微软 Authenticator 等都支持）。密钥只在绑定时显示一次，换手机先关闭再重新绑定。</div>
         <div id="totp-box">${state.demo ? '演示站不提供两步验证。' : s.totpEnabled === '1'
           ? `<div class="totp-status">✅ 两步验证已开启。关闭需输入登录密码确认。</div>
@@ -4299,7 +4310,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>会员</h3>${
         state.settings && state.settings.membersEnabled !== '1'
           ? '<div class="sec-desc">会员功能<b>已冻结</b>：前台会员入口、<code>/member</code>、<code>/rank</code> 都已收掉，侧栏也不再出现「会员」。名单与档位数据仍在，需要时去会员页重新打开总开关即可（见 docs/FROZEN-FEATURES.md）</div>'
@@ -4309,7 +4320,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>访客统计</h3><div class="sec-desc">在后台「统计」页展示浏览量、访客数、来源与设备分布；只记匿名访客号与来源域名，不存 IP 和原始 UA，日志保留 180 天</div>
         <div class="switch-row">
           <div><div class="switch-label">开启访客统计采集</div><div class="switch-sub">关闭后前台页面不再上报访问数据（已有数据保留不再新增，统计页仍可看历史）</div></div>
@@ -4338,7 +4349,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>外部发布</h3><div class="sec-desc">用 Telegram 机器人或开放 API 远程发微博（文字 / 图片 / 相册都可以），或让 AI 助手经 MCP 发文、查评论</div>
         <div class="form-item">
           <label>API Token（开放接口密钥，重新生成后旧 Token 立即失效）</label>
@@ -4373,7 +4384,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>服务端插件</h3><div class="sec-desc">随内核运行的官方插件（启停在「插件」页），这里是它们的配置项</div>
         <div class="form-item">
           <label>评论 Webhook 地址（评论 Webhook 推送插件：访客留言时 POST 一段 JSON 到这个地址，飞书 / 企微 / Bark 均可）</label>
@@ -4435,7 +4446,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>WordPress 导入</h3><div class="sec-desc">从 WordPress 迁移过来：上传后台「工具 → 导出」得到的 WXR 文件，文章 / 独立页面 / 评论 / 分类与标签一并进来，<b>保留原发布状态与发布时间</b>；带访问密码的文章继续上锁，定时中的文章保持定时。导入完成后自动分批把 WP 站内图片转存进你的图床并改写正文引用（源站防盗链导致转存失败的图保留原链）。slug 冲突自动加序号；<b>重复导入会产生重复内容</b>；导入不触发发布通知。</div>
         <div class="fav-row">
           <button class="btn" id="btn-wxr-import" type="button">选择 WXR 文件并导入</button>
@@ -4444,7 +4455,7 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;">
+    <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>整站搬家</h3><div class="sec-desc">把整站原样打成一个包带走：全部文章 / 微博 / 页面 / 评论 / 会员 / 分类标签 / 友链 / 图床图片。<b>只允许还原到「没有内容的站」</b>（没有未删除的文章 / 微博 / 页面；刚装好的新站请先把自带的「示例文章」与「关于我」页面删进回收站，或直接用下面的「清空本站内容」），<b>不会覆盖、不会合并</b>；包与系统版本不匹配会明确报错，不猜。包里不含管理员账号与各类密钥（新站自己登录、自己填）。换服务器 / 换域名 / 重新部署时用它。</div>
         <div class="fav-row">
           <a class="btn" href="/api/admin/bundle/export" download>导出整站包</a>
@@ -4474,7 +4485,7 @@ async function viewSettings() {
   // 各页签的输入控件始终留在 DOM，「保存全部」跨页签照常收齐，PUT 缺键保留语义不受影响
   const STAB_HINTS = {
     site: '站名、头像、首页形态这些门面事，以及登录密码',
-    social: '留言规则、内容可见范围与访客统计（会员体系已独立到「会员」页）',
+    social: '留言规则、内容可见范围与访客统计（会员已冻结，需要时去「会员」页开）',
     advance: '闭站等特殊开关与外部服务对接——不确定的先别动',
     data: '备份与导出：把数据完整地交回自己手里',
   }
@@ -4494,6 +4505,34 @@ async function viewSettings() {
     })
   )
   applyStab()
+
+  // 常用 / 全部：设置页 17 个分组、近 50 个输入控件，日常真正会动的只有站名头像、
+  // 留言规则、可见范围、闭站开关这几组（共 8 组 27 个控件）。剩下 9 组（SEO、英文版、
+  // 两步验证、会员、访客统计、外部发布、服务端插件、WordPress 导入、整站搬家）都是
+  // 「装站时配一次，之后一年不碰」，默认折起来。只 hidden 不移除：输入框还在 DOM 里，
+  // 跨页签的「保存全部」照旧一次收齐，保存语义一个字没变。
+  const advPanels = Array.prototype.slice.call(document.querySelectorAll('.stab-pane .panel[data-adv]'))
+  const advBtn = document.getElementById('btn-set-adv')
+  const applyAdv = () => {
+    advPanels.forEach((p) => {
+      p.hidden = !settingsShowAll
+    })
+    advBtn.textContent = settingsShowAll ? '只看常用设置' : `显示全部设置（另有 ${advPanels.length} 组）`
+    advBtn.title = settingsShowAll
+      ? '收起高级设置，只留日常会动的那几组'
+      : 'SEO、英文版、两步验证、外部发布、WordPress 导入、整站搬家等'
+    advBtn.classList.toggle('is-on', settingsShowAll)
+  }
+  advBtn.addEventListener('click', () => {
+    settingsShowAll = !settingsShowAll
+    try {
+      localStorage.setItem('admin-set-all', settingsShowAll ? '1' : '0')
+    } catch {
+      /* 隐私模式下不记偏好 */
+    }
+    applyAdv()
+  })
+  applyAdv()
 
   function renderFavSlot(url) {
     document.getElementById('fav-preview-slot').innerHTML = url
