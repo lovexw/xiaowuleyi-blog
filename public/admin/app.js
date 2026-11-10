@@ -633,7 +633,7 @@ async function viewHome() {
       <div class="panel-body" style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
         <div><div class="stat-value" style="font-size:20px;">${s.db.weibo}<small>条微博</small></div></div>
         <div><div class="stat-value" style="font-size:20px;">${s.db.comments}<small>条评论</small></div></div>
-        <div><div class="stat-value" style="font-size:20px;">${s.db.members}<small>位会员</small></div></div>
+        ${state.settings?.membersEnabled === '1' ? `<div><div class="stat-value" style="font-size:20px;">${s.db.members}<small>位会员</small></div></div>` : ''}
         <div style="color:var(--sub);font-size:13px;">最近备份：${esc(backupText)}</div>
         <div style="color:var(--sub);font-size:13px;">系统版本：博客号 v${esc(s.version || '?')} <button class="btn btn-ghost btn-sm" data-act="check-update" type="button">检查更新</button></div>
       </div>
