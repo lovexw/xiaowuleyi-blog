@@ -309,16 +309,20 @@ if [ "$mode" = status ]; then
     [ -n "$_spec" ] || continue
     parse_instance "$_spec"
     _live=$C_PORT
+    _standby=$C_ALT_PORT
     if [ -n "$C_UP" ]; then
       _up=$(upstream_port)
       if [ -n "$_up" ]; then _live=$_up; fi
+      # 「下一轮换到哪」= 当前没用的那一侧；别直接打印配置里的备用端口，
+      # 切过去之后它就成了当前端口，显示成「备用 8791 → 8791」很误导
+      if [ "$_live" = "$C_PORT" ]; then _standby=$C_ALT_PORT; else _standby=$C_PORT; fi
     fi
     echo
     echo "── 实例 $C_NAME ──"
     echo "  监听     : $C_ADDR（健康检查 Host: $C_HOST）"
     echo "  数据目录 : $C_DATA"
     if [ -n "$C_UP" ]; then
-      echo "  流量入口 : 上游 $C_UP → 127.0.0.1:${_live}（蓝绿备用 ${C_ALT_PORT}）"
+      echo "  流量入口 : 上游 $C_UP → 127.0.0.1:${_live}（下一轮换 ${_standby}）"
     else
       echo "  流量入口 : 直连 $C_ADDR（未配蓝绿，替换容器会中断 2–5 秒）"
     fi
