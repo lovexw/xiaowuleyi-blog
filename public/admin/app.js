@@ -181,29 +181,31 @@ const I = {
 }
 
 /* ---------------- 侧边栏菜单 ----------------
- * 分组标签 + 高亮「写作」CTA；type: ext 外链 / cta 写作按钮 / group 分组标题 / 普通项为菜单叶子。
- * 预留 children 字段：未来「设置」拆子页或市场子页时，给叶子加 children 即可在其下渲染二级菜单。
- * badge 为函数：渲染时实时取待审数（state 由各页面加载时写入）。 */
+ * 高亮「写作」CTA；type: ext 外链 / cta 写作按钮 / 普通项为菜单叶子。
+ * badge 为函数：渲染时实时取待审数（state 由各页面加载时写入）。
+ * 预留 children 字段：未来「设置」拆子页时，给叶子加 children 即可在其下渲染二级菜单。
+ *
+ * 「收入口」改造（2026-11-10）：一级只留每天会点的 6 项 + 查看主页 + 写作，
+ * 其余低频项标 more:true 收进侧栏底部的「更多」折叠区。依据是线上 7 天日志——
+ * 95 个后台端点里只有 7 个被调用过，菜单里统计/页面/会员/友链/皮肤/插件/回收站
+ * 一次都没被点开。折叠不等于删除：移动端「更多」抽屉仍是全量平铺，入口一个没少。 */
 const MENU = [
   { type: 'ext', href: '/', label: '查看主页', icon: 'home' },
   { type: 'cta', id: 'editor', href: '#/editor/new', label: '写作', icon: 'edit' },
-  { type: 'group', label: '数据' },
   { id: 'home', href: '#/', label: '概览', icon: 'home' },
-  { id: 'stats', href: '#/stats', label: '统计', icon: 'chart', adminOnly: true },
-  { type: 'group', label: '内容' },
   { id: 'posts', href: '#/posts', label: '文章', icon: 'post' },
   { id: 'weibo', href: '#/weibo', label: '微博', icon: 'weibo' },
-  { id: 'pages', href: '#/pages', label: '页面', icon: 'page' },
-  { id: 'media', href: '#/media', label: '媒体', icon: 'image' },
-  { type: 'group', label: '互动' },
   { id: 'comments', href: '#/comments', label: '评论', icon: 'comment', badge: () => state.pendingComments || 0 },
-  { id: 'members', href: '#/members', label: '会员', icon: 'member', adminOnly: true },
-  { id: 'links', href: '#/links', label: '友链', icon: 'link', badge: () => state.pendingLinks || 0 },
-  { type: 'group', label: '系统' },
-  { id: 'trash', href: '#/trash', label: '回收站', icon: 'trash', adminOnly: true },
-  { id: 'appearance', href: '#/appearance', label: '皮肤', icon: 'palette', adminOnly: true },
-  { id: 'plugins', href: '#/plugins', label: '插件', icon: 'plug', adminOnly: true },
+  { id: 'media', href: '#/media', label: '媒体', icon: 'image' },
   { id: 'settings', href: '#/settings', label: '设置', icon: 'gear', adminOnly: true },
+  /* ↓ 以下收进「更多」折叠区（more:true），顺序按使用频率排 */
+  { id: 'stats', href: '#/stats', label: '统计', icon: 'chart', adminOnly: true, more: true },
+  { id: 'pages', href: '#/pages', label: '页面', icon: 'page', more: true },
+  { id: 'links', href: '#/links', label: '友链', icon: 'link', badge: () => state.pendingLinks || 0, more: true },
+  { id: 'members', href: '#/members', label: '会员', icon: 'member', adminOnly: true, more: true },
+  { id: 'appearance', href: '#/appearance', label: '皮肤', icon: 'palette', adminOnly: true, more: true },
+  { id: 'plugins', href: '#/plugins', label: '插件', icon: 'plug', adminOnly: true, more: true },
+  { id: 'trash', href: '#/trash', label: '回收站', icon: 'trash', adminOnly: true, more: true },
 ]
 
 /* 移动端底部栏固定项（其余入口收进「更多」抽屉） */
@@ -289,25 +291,39 @@ function sideItemHtml(item, active) {
   return `<a class="side-item${active === item.id ? ' is-active' : ''}" href="${item.href}" title="${item.label}">${I[item.icon]}<span>${item.label}</span>${badge ? `<span class="side-badge">${badge}</span>` : ''}</a>`
 }
 
-/** 桌面侧栏与移动端「更多」抽屉共用同一份 MENU 渲染（分组标签 + 外链 + 写作 CTA） */
-function sideNavHtml(active) {
+/* 隐私加固浏览器（Safari 锁定模式等）访问 localStorage 即抛 SecurityError：统一吞异常降级默认值 */
+function prefRead(k) {
+  try {
+    return localStorage.getItem(k)
+  } catch {
+    return null
+  }
+}
+
+/** 桌面侧栏与移动端「更多」抽屉共用同一份 MENU 渲染（外链 + 写作 CTA + 「更多」折叠区）
+ *  flat=true：平铺全部（移动端抽屉是「全部菜单」，不该再折一层） */
+function sideNavHtml(active, flat) {
   const author = state.user && state.user.role === 'author'
   const items = MENU.filter((m) => !(author && m.adminOnly))
-  // 作者视角隐藏空分组标签：先渲染草稿再剔除「后面没有可见项」的分组
-  const out = []
-  for (let i = 0; i < items.length; i++) {
-    const m = items[i]
-    if (m.type === 'group') {
-      const next = items.slice(i + 1).find((x) => x.type !== 'group')
-      if (next) out.push(`<div class="side-group">${m.label}</div>`)
-      continue
-    }
+  const one = (m) => {
     if (m.type === 'ext')
-      out.push(`<a class="side-item side-item-home" href="${m.href}" target="_blank" rel="noopener" title="${m.label}">${I[m.icon]}<span>${m.label}</span></a><div class="side-sep"></div>`)
-    else if (m.type === 'cta') out.push(`<a class="side-cta" href="${m.href}" title="${m.label}">${I[m.icon]}<span>${m.label}</span></a>`)
-    else out.push(sideItemHtml(m, active))
+      return `<a class="side-item side-item-home" href="${m.href}" target="_blank" rel="noopener" title="${m.label}">${I[m.icon]}<span>${m.label}</span></a><div class="side-sep"></div>`
+    if (m.type === 'cta') return `<a class="side-cta" href="${m.href}" title="${m.label}">${I[m.icon]}<span>${m.label}</span></a>`
+    if (m.type === 'group') return `<div class="side-group">${m.label}</div>`
+    return sideItemHtml(m, active)
   }
-  return out.join('')
+  const top = items.filter((m) => !m.more)
+  const rest = items.filter((m) => m.more)
+  let out = top.map(one).join('')
+  if (flat || !rest.length) return out + rest.map(one).join('')
+  // 当前页在折叠区里（或上次手动展开过）就保持展开，否则默认收起
+  const open = rest.some((m) => m.id === active) || prefRead('admin-more') === '1'
+  const restBadge = rest.reduce((n, m) => n + (m.badge ? m.badge() : 0), 0)
+  out += `<details class="side-more"${open ? ' open' : ''}>
+      <summary class="side-item side-more-sum" title="更多">${I.more}<span>更多</span>${restBadge ? `<span class="side-badge">${restBadge}</span>` : ''}<span class="side-more-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span></summary>
+      ${rest.map(one).join('')}
+    </details>`
+  return out
 }
 
 
@@ -349,7 +365,7 @@ async function shellView(active, contentHTML) {
     <div class="sheet-mask" id="sheet-mask">
       <div class="side-sheet" role="dialog" aria-label="全部菜单">
         <div class="side-sheet-head"><span>全部菜单</span><button class="side-sheet-close" id="btn-sheet-close" type="button">✕</button></div>
-        <nav class="side-sheet-nav">${sideNavHtml(active)}</nav>
+        <nav class="side-sheet-nav">${sideNavHtml(active, true)}</nav>
       </div>
     </div>
   </div>`
@@ -358,6 +374,9 @@ async function shellView(active, contentHTML) {
     try { localStorage.setItem('admin-side', mini ? 'mini' : 'full') } catch { /* 锁定模式下不记住偏好 */ }
     e.currentTarget.title = mini ? '展开侧栏' : '收起侧栏'
   })
+  // 「更多」折叠区：记住展开态，下次进后台保持（重渲染后重新绑定，toggle 事件不冒泡）
+  const moreEl = $app.querySelector('.side-nav details.side-more')
+  if (moreEl) moreEl.addEventListener('toggle', () => { try { localStorage.setItem('admin-more', moreEl.open ? '1' : '0') } catch { /* 同上 */ } })
   document.getElementById('btn-logout').addEventListener('click', async () => {
     await api('/auth/logout', { method: 'POST' }).catch(() => {})
     state.user = null
@@ -4250,7 +4269,7 @@ async function viewSettings() {
     </div>
 
     <div class="panel" style="padding:20px;">
-      <div class="form-section"><h3>会员</h3><div class="sec-desc">会员体系已从「设置」独立成页：档位定义、注册规则、评论圈层、邀请码与成员名单都在侧栏「会员」里管理</div>
+      <div class="form-section"><h3>会员</h3><div class="sec-desc">会员体系已从「设置」独立成页：档位定义、注册规则、评论圈层、邀请码与成员名单都在 <a href="#/members">会员页</a> 里管理（入口在侧栏「更多」里）</div>
         <a class="btn btn-sm" href="#/members?tab=settings" style="margin-top:10px;display:inline-block;text-decoration:none;">去「会员」页管理 →</a>
       </div>
     </div>
@@ -4420,7 +4439,7 @@ async function viewSettings() {
   // 各页签的输入控件始终留在 DOM，「保存全部」跨页签照常收齐，PUT 缺键保留语义不受影响
   const STAB_HINTS = {
     site: '站名、头像、首页形态这些门面事，以及登录密码',
-    social: '留言规则、内容可见范围与访客统计（会员体系已独立到侧栏「会员」）',
+    social: '留言规则、内容可见范围与访客统计（会员体系已独立到「会员」页）',
     advance: '闭站等特殊开关与外部服务对接——不确定的先别动',
     data: '备份与导出：把数据完整地交回自己手里',
   }

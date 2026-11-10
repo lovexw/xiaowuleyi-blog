@@ -138,6 +138,21 @@ input, textarea, select { font: inherit; color: inherit; }
 .side-item:hover { background: #f4f5f6; color: var(--ink); }
 .side-item.is-active { background: var(--accent); color: #fff; font-weight: 500; }
 .side-group { padding: 14px 12px 4px; font-size: 11px; color: var(--sub); letter-spacing: 0.08em; user-select: none; }
+/* 侧栏「更多」折叠区：低频入口收口（2026-11-10 收入口改造）。
+ * 折叠不减功能——移动端「更多」抽屉仍是全量平铺；这里只决定桌面侧栏先给你看几项 */
+.side-more { margin-top: 6px; }
+.side-more > summary { list-style: none; color: var(--sub); }
+.side-more > summary::-webkit-details-marker { display: none; }
+.side-more[open] > summary { color: #555; }
+.side-more-arrow { margin-left: auto; color: var(--sub); opacity: 0.75; display: flex; transition: transform 0.15s ease; }
+.side-more-arrow svg { width: 13px; height: 13px; }
+.side-more-sum .side-badge { margin-left: 8px; }
+.side-more[open] .side-more-arrow { transform: rotate(180deg); }
+.side-more > a.side-item { padding-left: 34px; font-size: 13.5px; }
+@media (min-width: 861px) {
+  /* 收起态侧栏只剩图标，二级项不能再缩进（否则图标偏心） */
+  .shell.side-mini .side-more > a.side-item { padding-left: 0; }
+}
 .side-cta {
   display: flex; align-items: center; gap: 10px;
   margin: 8px 0 2px; padding: 10px 12px; border-radius: 8px;
