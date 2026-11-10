@@ -168,9 +168,12 @@ parse_instance() {
     C_UP=${C_BG%%:*}
     C_ALT_PORT=${C_BG##*:}
     # 只写了上游名没写端口：备用端口默认取 port+1（8788→8789、8790→8791）
-    [ "$C_ALT_PORT" = "$C_UP" ] && C_ALT_PORT=$((C_PORT + 1))
-    [ "$C_ALT_PORT" = "$C_PORT" ] &&
+    if [ "$C_ALT_PORT" = "$C_UP" ]; then C_ALT_PORT=$((C_PORT + 1)); fi
+    # 注意别写成 `[ ... ] && die`：条件为假时这是函数最后一条命令，函数会返回 1，
+    # 调用处的 set -e 直接把整个部署退掉（2026-11-10 踩过，--status 连一行都没打印）。
+    if [ "$C_ALT_PORT" = "$C_PORT" ]; then
       die "实例 $C_NAME 的备用端口不能等于主端口 $C_PORT（$C_BG）"
+    fi
   fi
 }
 
@@ -308,7 +311,7 @@ if [ "$mode" = status ]; then
     _live=$C_PORT
     if [ -n "$C_UP" ]; then
       _up=$(upstream_port)
-      [ -n "$_up" ] && _live=$_up
+      if [ -n "$_up" ]; then _live=$_up; fi
     fi
     echo
     echo "── 实例 $C_NAME ──"
