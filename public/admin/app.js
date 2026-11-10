@@ -79,7 +79,7 @@ function fmtSize(bytes) {
  * 「没登录 / 没权限」和「根本连不上」——前者回登录页，后者要明确说连不上 */
 const API_TIMEOUT_MS = 20000
 
-async function api(path, opts = {}) {
+async function api(path, opts = {}, retried = false) {
   const init = { method: opts.method || 'GET', credentials: 'same-origin', headers: {} }
   if (opts.body !== undefined) {
     init.headers['Content-Type'] = 'application/json'
@@ -91,12 +91,21 @@ async function api(path, opts = {}) {
   try {
     res = await fetch('/api' + path, { ...init, signal: ctrl.signal })
   } catch (e) {
+    // 部署替换容器、反代重启这类瞬断：fetch 直接抛 TypeError（连接被拒 / 中途断开），
+    // 请求根本没到服务端。GET 是可重放的，静默重试一次——用户对「刷新一下就好了」无感知，
+    // 不必看见一条红色报错。POST/PUT/DELETE 不重试：重复提交的代价比一次失败大。
+    if (!ctrl.signal.aborted && init.method === 'GET' && !retried) {
+      clearTimeout(timer)
+      return api(path, opts, true)
+    }
     if (ctrl.signal.aborted) {
-      const err = new Error('后台没有响应，请求已超时')
+      const err = new Error(`后台 ${API_TIMEOUT_MS / 1000} 秒没有响应：可能是站点正在更新，或网络不稳，稍后刷新即可`)
       err.timeout = true
       throw err
     }
-    throw e
+    const err = new Error('连不上后台：站点可能正在更新，或网络刚断了一下。刷新页面重试')
+    err.offline = true
+    throw err
   } finally {
     clearTimeout(timer)
   }
@@ -111,7 +120,12 @@ async function api(path, opts = {}) {
       authView('login')
       toast('登录已过期，请重新登录', true)
     }
-    const err = new Error(expired ? '登录已过期，请重新登录' : data.error || '请求失败')
+    // 网关层状态码（502/503/504）：容器替换的几十秒里会出现，body 是 nginx 的 HTML，
+    // data.error 取不到，别让用户对着「请求失败」猜。给一句能行动的
+    const gateway = res.status === 502 || res.status === 503 || res.status === 504
+    const err = new Error(
+      expired ? '登录已过期，请重新登录' : gateway ? '站点正在更新，几秒后再试' : data.error || '请求失败'
+    )
     err.status = res.status
     throw err
   }
@@ -246,7 +260,7 @@ function authView(mode) {
       <button class="btn btn-primary auth-btn" type="submit">${isSetup ? '创建并进入' : '登 录'}</button>
       <div class="auth-err" id="auth-err"></div>
     </form>
-    <p class="auth-tip">住在 Cloudflare 上的小博客 · D1 存储 · R2 图床</p>
+    <p class="auth-tip">博客号 · 自托管 · 数据在自己手里</p>
   </div></div>`
   if (demoBox) {
     const form = document.getElementById('auth-form')
@@ -5332,7 +5346,7 @@ function bootErrorView(msg) {
     </div>
     <div class="auth-err" style="display:block">${esc(msg)}</div>
     <button class="btn btn-primary auth-btn" type="button" id="boot-retry">重新连接</button>
-    <p class="auth-tip">住在 Cloudflare 上的小博客 · D1 存储 · R2 图床</p>
+    <p class="auth-tip">博客号 · 自托管 · 数据在自己手里</p>
   </div></div>`
   document.getElementById('boot-retry').addEventListener('click', () => location.reload())
 }
@@ -5345,9 +5359,10 @@ async function boot() {
     state.demo = !!st.demo
     state.needsTotp = !!st.needsTotp
   } catch (e) {
-    // 超时 ≠ 未登录：回落到登录页会让用户以为「要重新输入密码」，
-    // 实际是服务端根本没应答，必须说清楚（2026-11-03）
-    if (e && e.timeout) return bootErrorView(e.message)
+    // 超时 / 连不上 ≠ 未登录：回落到登录页会让用户以为「要重新输入密码」，
+    // 实际是服务端根本没应答，必须说清楚（2026-11-03）；
+    // 部署替换容器的瞬断走 offline 分支，同样给「重新连接」而不是登录表单
+    if (e && (e.timeout || e.offline)) return bootErrorView(e.message)
     state.user = null
   }
   if (state.user) {
