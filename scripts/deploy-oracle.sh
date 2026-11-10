@@ -27,6 +27,18 @@
 #    `-e TRUST_PROXY=cf` 的那次提交上线后，容器里根本没这个变量，手动
 #    `./scripts/deploy-oracle.sh --force` 重跑一次才补上。改完 env / 启动参数，
 #    推完要么 `--force` 跑一轮，要么等下一个提交顺带把它带上去。
+# 8. 蓝绿切换（2026-11-10）：实例描述的第 5 段填 `上游名:备用端口` 后，替换容器不再
+#    「先停后起」——新容器起在备用端口，健康检查过了才把 nginx 上游指过去并 reload，
+#    等排空窗口过后才停旧容器。中间层任何时刻都有一个活着的上游，用户看不到 502/超时。
+#    前置条件（一次性配置，脚本不会自动改 nginx）：
+#      a. conf.d 里有上游文件，一行一条，形如
+#         upstream xwblog_main { server 127.0.0.1:8788; }
+#         脚本用 sed 改其中的端口，写成多行会失配。
+#      b. 站点 conf 的 proxy_pass 指向 http://xwblog_main 而不是写死端口。
+#    第 5 段留空则完全退回旧的「停旧起新」，老机器不改也能跑。
+# 9. 蓝绿期间新旧容器会并存约 DRAIN_SECONDS 秒，共用同一个 DATA_DIR/blog.db。能这么干
+#    的前提是 docker-poc/shims/d1.ts 已设 PRAGMA journal_mode=WAL + busy_timeout=5000：
+#    写写之间是排队等锁，而不是立刻抛 SQLITE_BUSY。这两条不在就别开蓝绿。
 
 set -euo pipefail
 
@@ -39,8 +51,15 @@ HEALTH_HOST=${HEALTH_HOST:-blog.xiaowuleyi.com}
 KEEP_IMAGES=${KEEP_IMAGES:-3}
 STATE_DIR=${STATE_DIR:-/opt/xwblog-deploy/state}
 HEALTH_TIMEOUT=${HEALTH_TIMEOUT:-40}
+# 蓝绿：切到新上游后等多久再停旧容器（秒）。在途请求是毫秒级，3 秒足够排空；
+# 有大文件上传正在进行时想更稳就调大。
+DRAIN_SECONDS=${DRAIN_SECONDS:-3}
+# nginx 上游配置文件（见设计要点 8）。容器名留空则按名字自动探测 openresty。
+UPSTREAM_FILE=${UPSTREAM_FILE:-/opt/1panel/apps/openresty/openresty/conf/conf.d/00-xwblog-upstreams.conf}
+NGINX_CONTAINER=${NGINX_CONTAINER:-}
 
-# 实例清单：容器名|绑定地址|健康检查域名|数据目录，分号分隔；留空则用上面单实例三件套。
+# 实例清单：容器名|绑定地址|健康检查域名|数据目录[|上游名:备用端口]，分号分隔；留空则用上面单实例三件套。
+# 第 5 段是可选开关，填了就走蓝绿切换（见设计要点 8），不填照旧停旧起新。
 # 手动执行时没有 systemd 注入的环境变量，这里回退去读同一个单元里的 INSTANCES，
 # 免得手动 --status / --force 时只看到一个实例、和定时器行为不一致。
 INSTANCES=${INSTANCES:-}
@@ -137,12 +156,22 @@ last_good() { cat "$STATE_DIR/last-good" 2>/dev/null || true; }
 # ---------- 实例解析 ----------
 # 解析一条实例描述，结果放进 C_NAME / C_ADDR / C_HOST / C_DATA / C_PORT，
 # 之后所有容器操作都针对「当前实例」，循环里逐条切换即可。
+# 第 5 段 `上游名[:备用端口]` 落进 C_UP / C_ALT_PORT；留空表示不走蓝绿。
 parse_instance() {
   local spec=$1
-  IFS='|' read -r C_NAME C_ADDR C_HOST C_DATA <<<"$spec"
+  C_UP='' C_ALT_PORT=''
+  IFS='|' read -r C_NAME C_ADDR C_HOST C_DATA C_BG <<<"$spec"
   [ -n "${C_NAME:-}" ] && [ -n "${C_ADDR:-}" ] && [ -n "${C_HOST:-}" ] && [ -n "${C_DATA:-}" ] ||
-    die "实例描述格式不对：$spec（应为 容器|绑定地址|健康域名|数据目录）"
+    die "实例描述格式不对：$spec（应为 容器|绑定地址|健康域名|数据目录[|上游名:备用端口]）"
   C_PORT=${C_ADDR##*:}
+  if [ -n "${C_BG:-}" ]; then
+    C_UP=${C_BG%%:*}
+    C_ALT_PORT=${C_BG##*:}
+    # 只写了上游名没写端口：备用端口默认取 port+1（8788→8789、8790→8791）
+    [ "$C_ALT_PORT" = "$C_UP" ] && C_ALT_PORT=$((C_PORT + 1))
+    [ "$C_ALT_PORT" = "$C_PORT" ] &&
+      die "实例 $C_NAME 的备用端口不能等于主端口 $C_PORT（$C_BG）"
+  fi
 }
 
 # 前置校验：每个实例的数据目录都要有 tenants.json（应用启动即需要）
@@ -153,32 +182,90 @@ for _spec in "${INSTANCE_LIST[@]}"; do
 done
 unset _spec
 
-container_field() { # $1=inspect 格式，作用于当前实例
-  ${DOCKER[@]} inspect -f "$1" "$C_NAME" 2>/dev/null || true
+container_field() { # $1=inspect 格式 [$2=容器名，默认当前实例]
+  ${DOCKER[@]} inspect -f "$1" "${2:-$C_NAME}" 2>/dev/null || true
 }
 
-health() { # 检查当前实例
-  local i code
+container_exists() { # $1=容器名
+  ${DOCKER[@]} inspect -f '{{.Id}}' "$1" >/dev/null 2>&1
+}
+
+port_in_use() { # $1=端口；备用口被别的服务占着时提前失败，别等容器起不来才发现
+  ss -tlnH 2>/dev/null |
+    awk -v p=":$1" '{ for (i = 1; i <= NF; i++) if ($i ~ (p "$")) { found = 1; exit } } END { exit found ? 0 : 1 }'
+}
+
+health() { # [$1=端口，默认当前实例端口]
+  local port=${1:-$C_PORT} i code='-'
   for ((i = 1; i <= HEALTH_TIMEOUT; i++)); do
     code=$(curl -s -o /dev/null -w '%{http_code}' -m 3 -H "Host: $C_HOST" \
-      "http://127.0.0.1:${C_PORT}/" 2>/dev/null || true)
+      "http://127.0.0.1:${port}/" 2>/dev/null || true)
     [ "$code" = "200" ] && return 0
     sleep 1
   done
-  log "健康检查超时（${HEALTH_TIMEOUT}s，$C_NAME 最后一次 HTTP $code）"
+  log "健康检查超时（${HEALTH_TIMEOUT}s，$C_NAME@$port 最后一次 HTTP $code）"
   return 1
 }
 
-start_container() { # $1=镜像 $2=commit，作用于当前实例
-  local img=$1 sha=$2
-  ${DOCKER[@]} rm -f "$C_NAME" >/dev/null 2>&1 || true
+# ---------- 蓝绿切换用的小工具 ----------
+nginx_container() {
+  if [ -n "$NGINX_CONTAINER" ]; then
+    printf '%s' "$NGINX_CONTAINER"
+    return 0
+  fi
+  local names
+  names=$(${DOCKER[@]} ps --format '{{.Names}}' 2>/dev/null || true)
+  printf '%s\n' "$names" | awk 'tolower($0) ~ /openresty/ { print; exit }'
+}
+
+upstream_port() { # 打印当前实例在上游配置里指向的端口；查不到输出空
+  [ -f "$UPSTREAM_FILE" ] || return 0
+  sudo -n awk -v u="$C_UP" '
+    $1 == "upstream" && $2 == u { inside = 1 }
+    inside && /server/ {
+      for (i = 1; i <= NF; i++)
+        if ($i ~ /^127\.0\.0\.1:[0-9]+;?$/) {
+          sub(/^127\.0\.0\.1:/, "", $i); sub(/;$/, "", $i); print $i; exit
+        }
+    }
+    inside && /\}/ { exit }
+  ' "$UPSTREAM_FILE" 2>/dev/null
+}
+
+set_upstream_port() { # $1=端口；只改当前实例那一行里的端口号，改完回读校验
+  local port=$1
+  sudo -n sed -i -E \
+    "s|^(upstream[[:space:]]+${C_UP}[[:space:]]*\{[[:space:]]*server[[:space:]]+127\.0\.0\.1:)[0-9]+|\1${port}|" \
+    "$UPSTREAM_FILE" 2>/dev/null || return 1
+  [ "$(upstream_port)" = "$port" ]
+}
+
+reload_nginx() { # 先 -t 再 reload；-t 失败就把错误打出来，别静默
+  local c out
+  c=$(nginx_container)
+  if [ -z "$c" ]; then
+    warn "没找到 openresty 容器，无法重载 nginx（可用 NGINX_CONTAINER 指定容器名）"
+    return 1
+  fi
+  if ! out=$(sudo -n docker exec "$c" openresty -t 2>&1); then
+    log "nginx 配置校验失败："
+    printf '%s\n' "$out" | tail -5
+    return 1
+  fi
+  sudo -n docker exec "$c" openresty -s reload >/dev/null 2>&1 || return 1
+  log "nginx 已重载（$c）"
+}
+
+start_container() { # $1=镜像 $2=commit [$3=容器名] [$4=绑定地址]
+  local img=$1 sha=$2 name=${3:-$C_NAME} addr=${4:-$C_ADDR}
+  ${DOCKER[@]} rm -f "$name" >/dev/null 2>&1 || true
   # TRUST_PROXY=cf：链路是 CF 橙云 → 本机 openresty(80) → 容器，openresty 用
   # `$proxy_add_x_forwarded_for` 把「CF 边缘 IP」追加到 XFF 末尾，而默认档 proxy 取末跳
   # → 访客 IP 变成 172.7x 的 CF 边缘地址（全站共用一个限流桶、TG 登录告警里的 IP 也是它）。
   # CF 会强制写入 CF-Connecting-IP，且 80 端口已用 iptables `CF_ONLY` 只放行 CF 回源段
   # （直连伪造那个头进不来），所以取 cf 档：只认 CF 写的头，其余转发头一律丢弃。
-  ${DOCKER[@]} run -d --name "$C_NAME" --restart unless-stopped \
-    -p "${C_ADDR}:8787" \
+  ${DOCKER[@]} run -d --name "$name" --restart unless-stopped \
+    -p "${addr}:8787" \
     -v "${C_DATA}:/data/tenants" \
     -v "${C_DATA}/tenants.json:/app/docker-poc/tenants.json:ro" \
     -e NODE_ENV=production \
@@ -218,15 +305,26 @@ if [ "$mode" = status ]; then
   for _spec in "${INSTANCE_LIST[@]}"; do
     [ -n "$_spec" ] || continue
     parse_instance "$_spec"
+    _live=$C_PORT
+    if [ -n "$C_UP" ]; then
+      _up=$(upstream_port)
+      [ -n "$_up" ] && _live=$_up
+    fi
     echo
     echo "── 实例 $C_NAME ──"
     echo "  监听     : $C_ADDR（健康检查 Host: $C_HOST）"
     echo "  数据目录 : $C_DATA"
+    if [ -n "$C_UP" ]; then
+      echo "  流量入口 : 上游 $C_UP → 127.0.0.1:${_live}（蓝绿备用 ${C_ALT_PORT}）"
+    else
+      echo "  流量入口 : 直连 $C_ADDR（未配蓝绿，替换容器会中断 2–5 秒）"
+    fi
     echo "  容器镜像 : $(container_field '{{.Config.Image}}')"
     echo "  容器提交 : $(container_field '{{index .Config.Labels "xwblog.sha"}}')"
     echo "  容器状态 : $(container_field '{{.State.Status}}')  启动于 $(container_field '{{.State.StartedAt}}')"
-    echo "  健康检查 : $(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Host: $C_HOST" "http://127.0.0.1:${C_PORT}/" 2>/dev/null || echo '-')"
+    echo "  健康检查 : $(curl -s -o /dev/null -w '%{http_code}' -m 5 -H "Host: $C_HOST" "http://127.0.0.1:${_live}/" 2>/dev/null || echo '-')"
   done
+  unset _spec _live _up
   echo
   echo "可用镜像   :"
   ${DOCKER[@]} images --filter 'reference=xwblog:sha-*' --format '  {{.Tag}}  {{.CreatedAt}}  {{.Size}}' | head -6
@@ -287,26 +385,17 @@ else
 fi
 
 # ---------- 逐实例替换容器 ----------
-failed=()
-for _spec in "${INSTANCE_LIST[@]}"; do
-  [ -n "$_spec" ] || continue
-  parse_instance "$_spec"
-
-  cur_sha=$(container_field '{{index .Config.Labels "xwblog.sha"}}')
-  cur_state=$(container_field '{{.State.Status}}')
-  if [ "$mode" != force ] && [ "$cur_sha" = "$target" ] && [ "$cur_state" = running ]; then
-    log "实例 $C_NAME 已在 $short，跳过"
-    continue
-  fi
-
+# 老路子：原端口上「停旧起新」，中间断 2–5 秒。没配蓝绿的实例仍走这条。
+replace_in_place() { # $1=镜像 $2=commit；0=成功 1=需人工/已回滚
+  local img=$1 sha=$2 prev_img prev_sha
   prev_img=$(container_field '{{.Config.Image}}')
-  prev_sha=$cur_sha
+  prev_sha=$(container_field '{{index .Config.Labels "xwblog.sha"}}')
   log "替换实例 $C_NAME（预计中断 2–5 秒）"
-  start_container "$img" "$target"
+  start_container "$img" "$sha"
 
   if health; then
     log "实例 $C_NAME 部署成功：$img 已接管 $C_ADDR"
-    continue
+    return 0
   fi
 
   # 只回滚当前实例，其它实例不受影响
@@ -322,7 +411,98 @@ for _spec in "${INSTANCE_LIST[@]}"; do
   else
     warn "实例 $C_NAME 没有可回滚的旧镜像，当前可能不可用"
   fi
-  failed+=("$C_NAME")
+  return 1
+}
+
+# 蓝绿：新容器起在备用端口 → 健康检查 → 改上游 → reload → 排空 → 停旧容器并改名。
+# 关键性质：任何一步失败都只是「新容器被删掉」，旧容器从头到尾没停过，用户无感。
+replace_blue_green() { # $1=镜像 $2=commit；0=成功 1=已放弃（旧版仍在服务）
+  local img=$1 sha=$2 active target incoming="${C_NAME}-incoming" bak
+
+  active=$(upstream_port)
+  if [ -z "$active" ]; then
+    warn "上游 $C_UP 不在 $UPSTREAM_FILE 里，本实例退回「停旧起新」"
+    replace_in_place "$img" "$sha"
+    return $?
+  fi
+  if [ "$active" = "$C_PORT" ]; then target=$C_ALT_PORT; else target=$C_PORT; fi
+
+  # 上次如果死在 rename 之前，${C_NAME}-incoming 就是线上服务者：直接认领，别当垃圾删了
+  if container_exists "$incoming"; then
+    if [ "$(container_field '{{.State.Status}}' "$incoming")" = running ] && ! container_exists "$C_NAME"; then
+      log "发现上次遗留的 $incoming 仍在服务，先认领为 $C_NAME"
+      ${DOCKER[@]} rename "$incoming" "$C_NAME" || true
+    else
+      ${DOCKER[@]} rm -f "$incoming" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  if port_in_use "$target"; then
+    warn "备用端口 $target 被占用，本实例退回「停旧起新」"
+    replace_in_place "$img" "$sha"
+    return $?
+  fi
+
+  log "蓝绿切换实例 $C_NAME：上游 $C_UP $(printf '%s' "$active") → $target"
+  start_container "$img" "$sha" "$incoming" "127.0.0.1:${target}"
+
+  if ! health "$target"; then
+    log "实例 $C_NAME 新版本在 $target 上不健康，已丢弃；旧容器原样继续服务（用户无感）"
+    ${DOCKER[@]} logs --tail 40 "$incoming" 2>&1 || true
+    ${DOCKER[@]} rm -f "$incoming" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  bak="$STATE_DIR/upstream-${C_UP}.bak"
+  if ! sudo -n cp "$UPSTREAM_FILE" "$bak" 2>/dev/null; then
+    warn "备份上游配置失败，放弃切换（旧容器继续服务）"
+    ${DOCKER[@]} rm -f "$incoming" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! set_upstream_port "$target"; then
+    warn "改写上游配置失败，放弃切换（旧容器继续服务）"
+    sudo -n cp "$bak" "$UPSTREAM_FILE" >/dev/null 2>&1 || true
+    ${DOCKER[@]} rm -f "$incoming" >/dev/null 2>&1 || true
+    return 1
+  fi
+  if ! reload_nginx; then
+    warn "nginx 未接受新上游，回滚配置（旧容器继续服务）"
+    sudo -n cp "$bak" "$UPSTREAM_FILE" >/dev/null 2>&1 || true
+    reload_nginx >/dev/null 2>&1 || warn "回滚后 nginx 重载仍失败，请人工 ./scripts/deploy-oracle.sh --status"
+    ${DOCKER[@]} rm -f "$incoming" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  log "上游已切到 $target，等 ${DRAIN_SECONDS}s 排空在途请求"
+  sleep "$DRAIN_SECONDS"
+  if container_exists "$C_NAME"; then
+    ${DOCKER[@]} stop -t 20 "$C_NAME" >/dev/null 2>&1 || true
+    ${DOCKER[@]} rm "$C_NAME" >/dev/null 2>&1 || true
+  fi
+  if ! ${DOCKER[@]} rename "$incoming" "$C_NAME" >/dev/null 2>&1; then
+    warn "重命名 $incoming → $C_NAME 失败：容器仍在运行并监听 $target，下次部署会自动认领"
+  fi
+  log "实例 $C_NAME 部署成功：$img 已接管 127.0.0.1:$target（切换期间无中断）"
+  return 0
+}
+
+failed=()
+for _spec in "${INSTANCE_LIST[@]}"; do
+  [ -n "$_spec" ] || continue
+  parse_instance "$_spec"
+
+  cur_sha=$(container_field '{{index .Config.Labels "xwblog.sha"}}')
+  cur_state=$(container_field '{{.State.Status}}')
+  if [ "$mode" != force ] && [ "$cur_sha" = "$target" ] && [ "$cur_state" = running ]; then
+    log "实例 $C_NAME 已在 $short，跳过"
+    continue
+  fi
+
+  if [ -n "$C_UP" ]; then
+    replace_blue_green "$img" "$target" || failed+=("$C_NAME")
+  else
+    replace_in_place "$img" "$target" || failed+=("$C_NAME")
+  fi
 done
 unset _spec
 

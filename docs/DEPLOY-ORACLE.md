@@ -74,7 +74,8 @@ cd /opt/xwblog-app && ./scripts/install-oracle-deploy.sh
 git add -A && git commit -m "..." && git push origin main
 ```
 
-服务器 2 分钟内自动完成构建与替换。期间站点中断约 2–5 秒（停旧容器到新容器起来）。
+服务器 2 分钟内自动完成构建与替换。**2026-11-10 起是零中断切换**：新容器起在备用端口，
+健康检查通过才把 nginx 上游指过去并 reload，旧容器排空几秒后才停（见下文「零中断」）。
 
 **改的是部署脚本本身时**，那次部署跑的还是旧版（脚本先 `git reset` 再往下跑，bash 读的是旧 inode），
 所以脚本改动要等下一次部署才生效。推完补一条 `./scripts/deploy-oracle.sh --force` 即可立刻生效 ——
@@ -94,13 +95,15 @@ journalctl -u xwblog-deploy -f              # 盯日志
 逐个替换容器。实例清单写在 systemd 单元的 `INSTANCES` 环境变量里：
 
 ```
-容器名|绑定地址|健康检查域名|数据目录
+容器名|绑定地址|健康检查域名|数据目录|上游名:备用端口
 ```
+
+第 5 段可选，填了就启用蓝绿切换（见下一节），留空则退回「停旧起新」。
 
 多个实例用**分号**分隔，例如当前这台机器（`/etc/systemd/system/xwblog-deploy.service`）：
 
 ```ini
-Environment="INSTANCES=xwblog-next|127.0.0.1:8788|blog.xiaowuleyi.com|/opt/xwblog-data;btchao-blog|127.0.0.1:8790|blog.btchao.com|/opt/btchao-blog/data"
+Environment="INSTANCES=xwblog-next|127.0.0.1:8788|blog.xiaowuleyi.com|/opt/xwblog-data|xwblog_main:8789;btchao-blog|127.0.0.1:8790|blog.btchao.com|/opt/btchao-blog/data|xwblog_btchao:8791"
 ```
 
 不设置 `INSTANCES` 时退化为单实例，行为与老版本一致（读 `CONTAINER` / `BIND_ADDR` /
@@ -129,6 +132,71 @@ cd /opt/xwblog-app && ./scripts/deploy-oracle.sh
   commit 防止每 2 分钟重试
 - `--status` 会按实例分段打印镜像 / 提交 / 健康码
 
+## 零中断：蓝绿切换（2026-11-10 起）
+
+**为什么加这个**：在这之前，部署是「停旧容器 → 同端口起新容器」。停和起之间那几十毫秒到几秒里，
+端口上没有监听者，nginx 的连接卡在建立阶段——既不成功也不立刻被拒，后台页面要等满 20 秒的
+`AbortController` 才弹「后台没有响应，请求已超时」。2026-11-10 20:23–20:25 那段 103 秒的请求空白
+就是撞在部署窗口上（当晚连推三次，制造了三个窗口）。
+
+**现在怎么切**：
+
+```
+                    nginx :80
+                       │  proxy_pass http://xwblog_main
+                       ▼
+          00-xwblog-upstreams.conf      ← 部署脚本只改这一行的端口
+                       │
+             ┌─────────┴─────────┐
+             ▼                   ▼
+      127.0.0.1:8788        127.0.0.1:8789
+     （旧容器，仍在服务）   （新容器，健康检查中）
+```
+
+1. 新容器起在备用端口（8788 ⇄ 8789），旧容器一个字节都没动
+2. 健康检查（带 Host 头，最多 `HEALTH_TIMEOUT` 秒）通过才继续
+3. `sed` 改上游端口 → `openresty -t` → `openresty -s reload`
+4. 等 `DRAIN_SECONDS`（默认 3 秒）排空在途请求
+5. 停旧容器 → 新容器改名回 `xwblog-next`（容器名对用户始终不变）
+
+**任何一步失败都只是「新容器被删掉」**，旧容器继续服务，站点不受影响。所以蓝绿模式下
+「回滚」这个概念消失了，只有「这次没更新」。
+
+| 失败点 | 结果 |
+|---|---|
+| 新容器起不来 / 健康检查不过 | 删新容器，旧版继续跑 |
+| 上游文件里找不到这个 upstream 名 | 本实例退回「停旧起新」 |
+| `sed` 改完回读不符（配置格式被改过） | 放弃切换，旧版继续跑 |
+| `openresty -t` 不过 | 恢复上游备份并重载，删新容器 |
+| 备用端口被别的服务占了 | 本实例退回「停旧起新」 |
+| 上次死在 rename 之前 | 下次部署把遗留的 `-incoming` 认领回来，不会误删服务中的容器 |
+
+**前提**（一次性，脚本不会自动改 nginx）：
+
+- `conf.d/00-xwblog-upstreams.conf` 里定义上游，一个一行：
+  `upstream xwblog_main { server 127.0.0.1:8788; }`。
+  文件名 `00-` 前缀是必须的：nginx 解析到 `proxy_pass` 时就得找得到这个 upstream。
+- 站点 conf 的 `location /` 写 `proxy_pass http://xwblog_main;`，不再写死端口
+- 这两个文件都在仓库 `deploy/nginx/`，服务器上已装（备份在
+  `/opt/xwblog-deploy/state/nginx-backup-20261110/`）
+
+**1Panel 会覆盖站点 conf**：在面板里改站点设置会把 `proxy_pass` 写回 `127.0.0.1:8788`，
+蓝绿退化成「停旧起新」（脚本自己会发现上游缺失并退回，不报错）。遇到就用 `deploy/nginx/`
+下的版本覆盖回去再 reload。
+
+**为什么能两个容器同时开着**：它们共用同一个 `blog.db`。`docker-poc/shims/d1.ts` 已设
+`journal_mode=WAL` + `busy_timeout=5000`，写写之间是排队等锁而不是立刻抛 `SQLITE_BUSY`。
+这两条是蓝绿成立的前提，别去动。
+
+**验证零中断**（部署窗口里连续打请求，看有没有失败）：
+
+```bash
+# 一个终端：每 50ms 打一次首页，记下失败
+while :; do curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: blog.xiaowuleyi.com' http://127.0.0.1/; sleep 0.05; done |
+  awk '$1 != 200 { bad++ } END { print "非 200：", bad + 0 }'
+# 另一个终端：sudo systemctl start xwblog-deploy
+```
+
 ## 常用命令
 
 ```bash
@@ -141,9 +209,11 @@ cd /opt/xwblog-app
 
 ## 回滚
 
-镜像按 commit 打 tag，回滚就是把上一个镜像跑起来：
+镜像按 commit 打 tag，回滚就是把上一个镜像跑起来。**先用 `--status` 看 nginx 当前指向哪个端口**
+（蓝绿切换后主站可能停在 8789 而不是 8788），手工起的容器必须监听那个端口，否则 nginx 指向空端口：
 
 ```bash
+cd /opt/xwblog-app && ./scripts/deploy-oracle.sh --status | grep -E '流量入口|容器提交'
 sudo docker images --filter 'reference=xwblog:sha-*'          # 看有哪些
 sudo docker rm -f xwblog-next
 sudo docker run -d --name xwblog-next --restart unless-stopped \
@@ -180,9 +250,12 @@ cd /opt/xwblog-app && ./scripts/install-oracle-deploy.sh --uninstall
 ## 不要做的事
 
 - **不要在服务器上改代码**。`git reset --hard` 会覆盖，改了也白改；要改就改 GitHub。
-- 不要在服务器上手动 `docker run` 别的容器占 8788 端口，脚本按名称 `xwblog-next` 管理。
+- 不要在服务器上手动 `docker run` 别的容器占 8788/8789 端口，脚本按名称 `xwblog-next` 管理，
+  备用端口要留给蓝绿切换。
 - 不要给 `/opt/xwblog-data` 做 `git` 操作，它不在仓库里。
 - 不要去掉 `blog.xiaowuleyi.com.conf` 里的 `proxy_set_header Host $host`，多租户按 Host 路由。
+- 不要把站点 conf 的 `proxy_pass` 改回写死端口——那样每次部署都会断流几秒，等于关掉蓝绿。
+- 不要把 `00-xwblog-upstreams.conf` 里的上游改成多行写法，脚本用 sed 按单行改端口。
 
 ## 与 Cloudflare 的关系
 
