@@ -310,6 +310,18 @@ input, textarea, select { font: inherit; color: inherit; }
 .form-section { margin-bottom: 26px; }
 .form-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
 .form-section .sec-desc { font-size: 13px; color: var(--sub); margin-bottom: 14px; }
+
+/* 冻结功能提示条（docs/FROZEN.md）：说明「功能关着、数据还在、去哪开」。
+   用虚线边框而不是色块——它是要读的说明，不是报错，不该抢主按钮的注意力 */
+.frozen-note {
+  margin: 0 0 14px; padding: 10px 12px; border-radius: 8px;
+  border: 1px dashed var(--line); background: var(--card);
+  color: var(--sub); font-size: 13px; line-height: 1.7;
+}
+.frozen-note code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  background: var(--bg); padding: 1px 5px; border-radius: 4px;
+}
 .form-row { display: flex; gap: 14px; flex-wrap: wrap; }
 .form-item { flex: 1; min-width: 220px; margin-bottom: 14px; }
 .form-item label { display: block; font-size: 13px; color: var(--sub); margin-bottom: 6px; }
