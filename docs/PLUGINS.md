@@ -57,7 +57,7 @@ window.BlogHao &&
 
 **启停**：后台「插件」页可以随时停用某个插件（写入 settings 的 `pluginsDisabled` 名单），编辑器加载时跳过名单内的 id，下次打开编辑器生效——不再需要手改 manifest 重新部署。
 
-**远程安装（B8 插件半边）**：后台「插件 → 插件市场」底部「远程插件」面板，粘贴插件文件的 **https 直链**（或点市场条目的「安装」按钮——条目带 `src` 字段即出现）即可装进站内：服务端抓取文件（走统一出网防线、≤ 256KB、须调用 `registerPlugin`）、落 R2、登记进 settings 的 `pluginsInstalled`。编辑器加载时除静态 manifest 外还会拉 `/plugins/installed.json` 清单、逐个 `import('/plugin-files/<id>')`（管理员会话门槛），与 manifest 插件同一套加载 / 停用 / 补注册机制。卸载删文件并撤登记，已打开的编辑器刷新后不再加载。演示站不开放安装。机制核心（id 白名单 / 内容安检 / 登记表纯函数）在 `src/pluginpkg.ts`。
+**远程安装（B8 插件半边）**：后台「插件 → 插件市场」底部「远程插件」面板，粘贴插件文件的 **https 直链**（或点市场条目的「安装」按钮——条目带 `src` 字段即出现）即可装进站内：服务端抓取文件（走统一出网防线、≤ 256KB、须调用 `registerPlugin`）、落 R2、登记进 settings 的 `pluginsInstalled`。编辑器加载时除静态 manifest 外还会拉 `/plugins/installed.json` 清单、逐个 `import('/plugin-files/<id>')`（管理员会话门槛），与 manifest 插件同一套加载 / 停用 / 补注册机制。卸载删文件并撤登记，已打开的编辑器刷新后不再加载。机制核心（id 白名单 / 内容安检 / 登记表纯函数）在 `src/pluginpkg.ts`。
 
 **市场**：`public/market/catalog.json` 是后台「皮肤 / 插件」页「市场」标签页的数据源（内置精选目录，`{ themes: [...], skins: [...], plugins: [...] }`）。`plugins` 条目 `{ id, name, description, link }`，带 `src`（插件文件 https 直链）即出现「安装」按钮；`skins` 条目内联 `pack`（`{ name, appearance, css }`），在皮肤页一键应用为皮肤包。收录新作品 = 往里加一条；未来切换成远程目录时前端只需换数据来源。
 

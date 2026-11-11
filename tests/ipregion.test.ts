@@ -59,12 +59,6 @@ test('ipRegionLabel：国内到省 / 国外到国家 / 港澳台按国家码 / �
   assert.equal(ipRegionLabel(''), '')
   // 脏码不透传：未知形态一律收敛成既定标签，不会被当成文本拼进 HTML
   assert.equal(ipRegionLabel('<img src=x>'), '海外')
-  // 英文版：国内出 cf 原文地名、国外出英文国名、未收录回退链 地名 → ISO 码
-  assert.equal(ipRegionLabel('CN:Guangdong', true), 'Guangdong')
-  assert.equal(ipRegionLabel('CN', true), 'China')
-  assert.equal(ipRegionLabel('US:California', true), 'United States')
-  assert.equal(ipRegionLabel('KZ:Almaty', true), 'Almaty', 'EN 未收录国回地名')
-  assert.equal(ipRegionLabel('KZ', true), 'KZ', 'EN 无地名再退 ISO 码')
 })
 
 test('regionSnapshot：Node 请求无 cf 得空串（自托管 / 测试形态不展示，宁缺毋假）', () => {

@@ -42,15 +42,14 @@ test('llms.txt：H1 站名 + blockquote 描述 + 文章条目（标题/链接/�
   assert.ok(!out.includes('smoke-llms-body-marker'), '索引不出现正文')
 })
 
-test('llms：无 topics 时「关于本站」只剩作者链接；英文版出英文节名', () => {
+test('llms：无 topics 时「关于本站」只剩作者链接', () => {
   const zh = buildLlmsTxt(S, [post({})], [], SITE)
   assert.ok(zh.includes('## 关于本站'))
   assert.ok(zh.includes('- [关于我（作者介绍）](https://blog.example.com/about)'))
   assert.ok(!zh.includes('主要话题'), '空标签整行省略')
-  const enS = { ...S, edition: 'en', editionEnStatus: 'active' } as SettingsMap
-  const en = buildLlmsFullTxt(enS, [post({})], SITE, ['bitcoin'])
-  assert.ok(en.includes('## About this site'))
-  assert.ok(en.includes('- Main topics: bitcoin'))
+  const full = buildLlmsFullTxt(S, [post({})], SITE, ['bitcoin'])
+  assert.ok(full.includes('## 关于本站'))
+  assert.ok(full.includes('- 主要话题：bitcoin'))
 })
 
 test('llms.txt：中文 slug 百分号编码；摘要/标题内嵌换行单行化；无摘要省略冒号', () => {
@@ -92,26 +91,19 @@ test('llms-full.txt：密码文只出作者摘要 + 加密说明（与 RSS descr
   assert.ok(out.includes('访问密码'))
 })
 
-test('llms 桩：演示站 / siteNoindex 只出站名与说明，不列任何内容', () => {
-  const out = buildLlmsStub(S, SITE)
-  assert.ok(out.startsWith('# 测试站'))
-  assert.ok(out.includes('不向 AI 爬虫暴露内容'))
-  assert.ok(!out.includes('rss.xml') && !out.includes('##'))
-})
-
-test('llms 桩：AI 策略 deny 档文案指向策略而非演示', () => {
+test('llms 桩：AI 策略 deny 档文案指向策略', () => {
   const out = buildLlmsStub(S, SITE, true)
   assert.ok(out.startsWith('# 测试站'))
   assert.ok(out.includes('不允许 AI 抓取'))
-  assert.ok(!out.includes('演示'), '真实站点的拒绝文案不冒充演示站')
+  assert.ok(!out.includes('演示'), '拒绝文案指向策略本身')
   assert.ok(!out.includes('rss.xml') && !out.includes('##'))
 })
 
-test('llms 桩：siteNoindex 真实站出「不收录」文案，不冒充演示站（P2-14）', () => {
+test('llms 桩：siteNoindex 真实站出「不收录」文案（P2-14）', () => {
   const out = buildLlmsStub(S, SITE, false, true)
   assert.ok(out.startsWith('# 测试站'))
   assert.ok(out.includes('不希望被收录'))
-  assert.ok(!out.includes('演示'), 'noindex 的真实站不再被标成演示/预览实例')
+  assert.ok(!out.includes('演示') && !out.includes('预览'), 'noindex 的真实站只出「不收录」一种口径')
   assert.ok(!out.includes('rss.xml') && !out.includes('##'))
   // deny 优先于 noindex：传了 aiDenied 仍出策略文案
   const denied = buildLlmsStub(S, SITE, true, true)

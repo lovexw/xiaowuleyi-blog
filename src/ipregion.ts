@@ -7,7 +7,7 @@
  *
  * 口径（对齐国内平台「IP 属地」惯例）：国内到省（cf.region 的 MaxMind 英文地名映射中文省名）、
  * 国外到国家（ISO 码映射中文国名）、港澳台按 country 码（CF 视作独立国家）；T1（Tor 出口）与
- * XX（未知）不采集；未收录国家回「海外」（非中国即海外，永远为真）。英文版国外显示英文国名，
+ * XX（未知）不采集；未收录国家回「海外」（非中国即海外，永远为真）。
  * 未收录回退 cf.region 原文 / ISO 码。
  *
  * 预期与限制（诚实的口径）：① 开启前已存的评论无属地，不追溯回填（对存量 ip 反查要引外部库，
@@ -257,60 +257,6 @@ const COUNTRY_ZH: Record<string, string> = {
   ZW: '津巴布韦',
 }
 
-/** 英文版常用国名（内部测试版够用即可）：未收录回退 cf.region 原文，再退 ISO 码 */
-const COUNTRY_EN: Record<string, string> = {
-  AR: 'Argentina',
-  AT: 'Austria',
-  AU: 'Australia',
-  BE: 'Belgium',
-  BR: 'Brazil',
-  CA: 'Canada',
-  CH: 'Switzerland',
-  CL: 'Chile',
-  CO: 'Colombia',
-  CZ: 'Czechia',
-  DE: 'Germany',
-  DK: 'Denmark',
-  EG: 'Egypt',
-  ES: 'Spain',
-  FI: 'Finland',
-  FR: 'France',
-  GB: 'United Kingdom',
-  GR: 'Greece',
-  HK: 'Hong Kong',
-  ID: 'Indonesia',
-  IE: 'Ireland',
-  IL: 'Israel',
-  IN: 'India',
-  IT: 'Italy',
-  JP: 'Japan',
-  KE: 'Kenya',
-  KR: 'South Korea',
-  MO: 'Macao',
-  MX: 'Mexico',
-  MY: 'Malaysia',
-  NG: 'Nigeria',
-  NL: 'Netherlands',
-  NO: 'Norway',
-  NZ: 'New Zealand',
-  PE: 'Peru',
-  PH: 'Philippines',
-  PL: 'Poland',
-  PT: 'Portugal',
-  RO: 'Romania',
-  RU: 'Russia',
-  SA: 'Saudi Arabia',
-  SE: 'Sweden',
-  SG: 'Singapore',
-  TH: 'Thailand',
-  TR: 'Turkey',
-  TW: 'Taiwan',
-  UA: 'Ukraine',
-  US: 'United States',
-  VN: 'Vietnam',
-  ZA: 'South Africa',
-}
-
 const hasOwn = (o: Record<string, string>, k: string) => Object.prototype.hasOwnProperty.call(o, k)
 
 /** cf.region 只可能是 ASCII 地名（异常值当没采集到），展示前还有 esc 兜底 */
@@ -338,21 +284,19 @@ export function regionSnapshot(req: Request): string {
 
 /**
  * 展示标签（唯一格式化出口）：空码回空串（调用方据此不渲染）。
- * 国内到省、国外到国家（中英同口径）；CN 的未收录地名回「中国/ China」，未收录国家回「海外」。
+ * 国内到省、国外到国家；CN 的未收录地名回「中国」，未收录国家回「海外」。
  */
-export function ipRegionLabel(code: string, en = false): string {
+export function ipRegionLabel(code: string): string {
   if (!code) return ''
   const sep = code.indexOf(':')
   const country = sep === -1 ? code : code.slice(0, sep)
   const region = sep === -1 ? '' : code.slice(sep + 1)
   if (country === 'CN') {
     if (region) {
-      if (en) return region
       return hasOwn(CN_REGIONS, region) ? CN_REGIONS[region] : '中国'
     }
-    return en ? 'China' : '中国'
+    return '中国'
   }
-  if (en) return hasOwn(COUNTRY_EN, country) ? COUNTRY_EN[country] : region || country
   if (hasOwn(COUNTRY_ZH, country)) return COUNTRY_ZH[country]
   return '海外'
 }

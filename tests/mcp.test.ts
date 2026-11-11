@@ -11,7 +11,7 @@ import type { Env } from '../src/types.ts'
 
 // ── MCP 服务器（src/mcp.ts，ROADMAP B10）──
 // 三层覆盖：协议层 dispatchRpc（纯函数）、工具层（node:sqlite 真 schema 建库）、
-// HTTP 薄壳 mcpRoutes（鉴权 / 202 通知 / 批处理 / demo 门控 / 405）。
+// HTTP 薄壳 mcpRoutes（鉴权 / 202 通知 / 批处理 / 405）。
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SCHEMA_SQL = readFileSync(join(ROOT, 'schema.sql'), 'utf8')
@@ -381,14 +381,14 @@ test('publish_weibo：图片地址全无效 / 空内容是 isError；draft 不�
   assert.equal(weiboed.length, 0, '草稿不广播')
 })
 
-/* ---------------- HTTP 薄壳（鉴权 / 202 / 批处理 / demo / 405） ---------------- */
+/* ---------------- HTTP 薄壳（鉴权 / 202 / 批处理 / 405） ---------------- */
 
 type EcStub = { waitUntil: (p: Promise<unknown>) => void; passThroughOnException: () => void }
 
-async function makeRouteCtx(opts: { demo?: boolean; token?: string } = {}) {
+async function makeRouteCtx(opts: { token?: string } = {}) {
   const ctx = await makeCtx()
   if (opts.token) await saveSettings(ctx.d1, { externalToken: opts.token })
-  const env = { DB: ctx.d1, IMAGES: {}, ASSETS: {}, DEMO_MODE: opts.demo ? '1' : undefined } as unknown as Env
+  const env = { DB: ctx.d1, IMAGES: {}, ASSETS: {} } as unknown as Env
   const waited: Promise<unknown>[] = []
   const ec: EcStub = { waitUntil: (p) => waited.push(p), passThroughOnException: () => {} }
   return { ...ctx, env, ec, waited }
@@ -448,7 +448,7 @@ test('薄壳：通知回 202 空 body；全通知批处理也 202；混合批只
   assert.equal(arr[0].result.protocolVersion, '2025-06-18')
 })
 
-test('薄壳：坏 JSON 回 400 parse error；空数组批 -32600；demo 门控 404', async () => {
+test('薄壳：坏 JSON 回 400 parse error；空数组批 -32600', async () => {
   const ctx = await makeRouteCtx({ token: 'right-token-abcdef' })
   const bad = await post(ctx, '{not json', AUTH)
   assert.equal(bad.status, 400)
@@ -457,9 +457,6 @@ test('薄壳：坏 JSON 回 400 parse error；空数组批 -32600；demo 门控 
   const empty = await post(ctx, [], { ...AUTH, 'CF-Connecting-IP': '10.9.3.1' })
   assert.equal(empty.status, 400)
   assert.equal(((await empty.json()) as any).error.code, -32600)
-
-  const demo = await makeRouteCtx({ demo: true, token: 'right-token-abcdef' })
-  assert.equal((await post(demo, INIT, { ...AUTH, 'CF-Connecting-IP': '10.9.3.2' })).status, 404, '演示站不开放 MCP 接入')
 })
 
 test('薄壳：tools/call 全链路真发文落库（waitUntil 接住发布广播不阻塞响应）', async () => {

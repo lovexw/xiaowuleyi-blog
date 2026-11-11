@@ -438,9 +438,8 @@ test('site.js 微博评论头像镜像：会员图 / 作者站点头像 / 游客
   const seg = src.slice(src.indexOf('function renderWeiboComments'), src.indexOf('function loadWeiboComments'))
   assert.ok(seg.includes('function renderWeiboComments') && seg.includes('adminAvatar'), 'site.js 切片失败：镜像段不在预期位置')
   // esc 注入服务端实现（两端语义一致）；fmtTime / wxqReplace 与头像位无关，stub 掉
-  // EN / T 是英文测试版的前台文案开关（site.js 顶部定义，切片外的依赖）：镜像段按中文路径注入
-  const factory = new Function('esc', 'fmtTime', 'wxqReplace', 'EN', 'T', seg + '\n;return renderWeiboComments')
-  const render = factory(esc, (t: number) => String(t), (s: string) => s, false, (zh: string) => zh)
+  const factory = new Function('esc', 'fmtTime', 'wxqReplace', seg + '\n;return renderWeiboComments')
+  const render = factory(esc, (t: number) => String(t), (s: string) => s)
   const listEl = { innerHTML: '' }
   const rows = [
     { id: 1, parent_id: 0, is_admin: 0, nickname: '会员甲', content: '内容', created_at: TS, member_avatar: '/images/u/202610/a.png' },
@@ -560,7 +559,7 @@ test('wechat 桌面增强：home 有标签/分类时出侧栏，全空则退单�
 
 // ── 页脚站点名片 + 新站引导卡（结构共享，主题 CSS 塑形） ──
 
-test('footCardHtml：统计行（万字换算/起始年）、未播种只出名片、脏 JSON 容错、英文口径', () => {
+test('footCardHtml：统计行（万字换算/起始年）、未播种只出名片、脏 JSON 容错', () => {
   const s = {
     siteName: '山野手记',
     siteDescription: '手写笔记',
@@ -573,18 +572,14 @@ test('footCardHtml：统计行（万字换算/起始年）、未播种只出名�
   const bare = footCardHtml({ siteName: 'X', siteFoot: '' })
   assert.ok(bare.includes('fc-name') && !bare.includes('fc-stats'), '未播种只出名片半边')
   assert.ok(!footCardHtml({ siteName: 'X', siteFoot: 'not-json' }).includes('fc-stats'), '脏 JSON 按未播种容错')
-  const en = footCardHtml({ siteName: 'X', siteFoot: JSON.stringify({ posts: 1, chars: 500, since: 0 }) }, true)
-  assert.ok(en.includes('1 post · 500 characters'), '英文语序（since=0 不出年份）')
 })
 
-test('newSiteGuideHtml：三步开张卡（后台直达链接 + 双语词条）', () => {
+test('newSiteGuideHtml：三步开张卡（后台直达链接）', () => {
   const zh = newSiteGuideHtml()
   assert.ok(zh.includes('开张大吉'), '标题')
   assert.ok(zh.includes('href="/admin"'), '写第一篇直达后台')
   assert.ok(zh.includes('href="/admin/#/appearance"'), '皮肤页直达')
   assert.ok(zh.includes('href="/admin/#/settings"'), '设置页直达')
-  const en = newSiteGuideHtml(true)
-  assert.ok(en.includes('Welcome aboard'), '英文标题走词典')
 })
 
 // ── 创作热力图（结构共享，色阶 = 各主题 accent 透明度四档） ──
@@ -600,7 +595,7 @@ test('heatmapHtml：周列网格 + 月份标签 + 四档色阶 + 图例，无数
     ],
     total: 7,
   }
-  const zh = heatmapHtml(data, false, now)
+  const zh = heatmapHtml(data, now)
   assert.ok(zh.startsWith('<section class="hm">'), 'section 开场')
   assert.ok(zh.includes('hm-grid'), '网格容器')
   assert.ok(zh.includes('hm-l4'), 'count≥4 落满档')
@@ -608,10 +603,6 @@ test('heatmapHtml：周列网格 + 月份标签 + 四档色阶 + 图例，无数
   assert.ok(zh.includes('10月'), '月份标签（中文口径）')
   assert.ok(zh.includes('过去一年写了 7 篇'), '汇总行')
   assert.ok(zh.includes('hm-legend'), '图例')
-  const en = heatmapHtml(data, true, now)
-  assert.ok(en.includes('Oct'), '英文月份缩写')
-  assert.ok(en.includes('7 posts in the last year'))
-  assert.ok(en.includes('title="2026-10-05 · 2 posts"'))
   assert.ok(!zh.includes('2025-01-01'), '窗口外日期不渲染格子（db 只回传窗口内日期，渲染端不补）')
   assert.equal(heatmapHtml(undefined), '', '未传数据')
   assert.equal(heatmapHtml({ days: [], total: 0 }), '', '空数据')

@@ -3,7 +3,6 @@
 #
 # 用法（在 docker-poc/ 目录下）：
 #   ./add-tenant.sh blog1.example.com            # 真实站：空库，进 /admin/ 走创建管理员
-#   ./add-tenant.sh try.example.com --demo       # 演示种子站：公示 demo 账号，每 2 小时清库重灌
 #   ./add-tenant.sh blog2.example.com --remove   # 下线：从配置移除并重启（数据目录保留在盘上）
 #   ./add-tenant.sh blog1.example.com --build    # 顺带重建镜像（升级代码后用；平时不需要）
 #
@@ -15,19 +14,17 @@
 # cat > 截断重写保住 inode，重启后新配置立即生效。
 #
 # 开通末尾会跑一次「收录自检」：确认新域名的 robots.txt 不是整站 Disallow、sitemap.xml 可达
-# ——站长口径是「bloghao.com 的每个二级域名都要能被 AI 与搜索引擎抓到」。演示站例外：
-# demo 站刻意整站 noindex（公开了 demo 账号、每 2 小时清库重灌），跳过断言。
+# ——站长口径是「bloghao.com 的每个二级域名都要能被 AI 与搜索引擎抓到」。
 set -eu
 
 usage() {
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
   exit 1
 }
 
-DEMO=0; REMOVE=0; BUILD=0; HOST=""
+REMOVE=0; BUILD=0; HOST=""
 for arg in "$@"; do
   case "$arg" in
-    --demo)   DEMO=1 ;;
     --remove) REMOVE=1 ;;
     --build)  BUILD=1 ;;
     -h|--help) usage ;;
@@ -50,18 +47,18 @@ COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 command -v docker >/dev/null 2>&1 || { echo "错误：没有 docker 命令" >&2; exit 1; }
 
 # ── 改配置（jq 优先，node 兜底；两种格式都兼容）─────────────────────────────
-#   新格式 {"r2":{...},"tenants":{...}}，旧平铺格式 {"域名":{"demo":..}}；
+#   新格式 {"r2":{...},"tenants":{...}}，旧平铺格式 {"域名":{..}}；
 #   下线时两处同删，避免历史混用残留。
 TMP="$CONFIG.tmp.$$"
 if command -v jq >/dev/null 2>&1; then
   if [ "$REMOVE" = 1 ]; then
     jq --arg h "$HOST" 'if .tenants then del(.tenants[$h]) else . end | del(.[$h])' "$CONFIG" > "$TMP"
   else
-    jq --arg h "$HOST" --argjson d "$([ "$DEMO" = 1 ] && echo true || echo false)" \
-       'if .tenants then .tenants[$h] = {"demo": $d} else .[$h] = {"demo": $d} end' "$CONFIG" > "$TMP"
+    jq --arg h "$HOST" \
+       'if .tenants then .tenants[$h] = {} else .[$h] = {} end' "$CONFIG" > "$TMP"
   fi
 elif command -v node >/dev/null 2>&1; then
-  MODE=add; [ "$REMOVE" = 1 ] && MODE=remove; [ "$DEMO" = 1 ] && MODE=demo
+  MODE=add; [ "$REMOVE" = 1 ] && MODE=remove
   node -e '
     const fs = require("fs");
     const [, cfgPath, outPath, mode, host] = process.argv;
@@ -70,7 +67,7 @@ elif command -v node >/dev/null 2>&1; then
       if (cfg.tenants) delete cfg.tenants[host];
       delete cfg[host];
     } else {
-      const entry = { demo: mode === "demo" };
+      const entry = {};
       if (cfg.tenants) cfg.tenants[host] = entry; else cfg[host] = entry;
     }
     fs.writeFileSync(outPath, JSON.stringify(cfg, null, 2) + "\n");
@@ -95,11 +92,7 @@ else
   if [ "$(id -u 2>/dev/null || echo 1)" = "0" ]; then
     chown -R 1000:1000 "data/tenants/$HOST" 2>/dev/null || true
   fi
-  if [ "$DEMO" = 1 ]; then
-    echo "已登记演示租户 ${HOST}（首访自动播种 demo/demo1234，每 2 小时清库重灌）"
-  else
-    echo "已登记租户 ${HOST}（空库，进 https://${HOST}/admin/ 创建管理员）"
-  fi
+  echo "已登记租户 ${HOST}（空库，进 https://${HOST}/admin/ 创建管理员）"
 fi
 
 # ── 重启容器（或首次启动指引）─────────────────────────────────────────────
@@ -138,10 +131,6 @@ fi
 # 内核默认就是「可抓取」：siteNoindex 默认关、robots.txt / sitemap.xml 自动生成。
 # 这里只兜底确认一次——开通时串了模板、或日后被关了 noindex，当场红字提醒。
 crawl_selfcheck() {
-  if [ "$DEMO" = 1 ]; then
-    echo "  · 演示站：刻意整站 noindex，跳过收录自检（属正常）"
-    return 0
-  fi
   ROBOTS=$(docker compose -f "$COMPOSE_FILE" exec -T xwblog \
     sh -c "wget -q -O - --header 'Host: $HOST' http://127.0.0.1:8787/robots.txt" 2>/dev/null || true)
   if printf '%s\n' "$ROBOTS" | grep -qx 'Disallow: /'; then

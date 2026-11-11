@@ -48,9 +48,9 @@ test('site.js「…」聚合菜单与底部面板：注入口就位', () => {
   assert.match(seg, /function xwSheetRow\(/, '面板行构造器')
   assert.match(seg, /xw-more-fab/, '「…」浮动入口')
   // 面板只有「分享 / 复制链接 / 字号」三行：精简口径，别再堆低频动作进来（见 MOBILE-UX §5）
-  assert.match(seg, /T\('分享'\)/)
-  assert.match(seg, /T\('复制链接'\)/)
-  assert.match(seg, /T\('字号'\)/)
+  assert.match(seg, /'分享'/)
+  assert.match(seg, /'复制链接'/)
+  assert.match(seg, /'字号'/)
   // 字号只作用于正文容器，且优先 zoom（一次覆盖标题/正文/代码）
   assert.match(seg, /querySelectorAll\('\.rich'\)/)
   assert.match(seg, /CSS\.supports\('zoom'/)
@@ -68,8 +68,8 @@ test('site.js 灯箱手势补齐：下拉关闭 + 长按菜单在位', () => {
   assert.match(src, /dy > 100 && Math\.abs\(dy\) > Math\.abs\(dx\)/, '下拉关闭判定（够远且纵向为主）')
   assert.match(src, /var pressTimer = null/, '长按计时器')
   assert.match(src, /-webkit-touch-callout:none/, '灯箱图不出系统长按菜单（自家长按菜单接管）')
-  assert.match(src, /T\('保存图片'\)/)
-  assert.match(src, /T\('复制图片地址'\)/)
+  assert.match(src, /'保存图片'/)
+  assert.match(src, /'复制图片地址'/)
 })
 
 test('site.js 不引入 lookbehind 正则（Safari ≤16.3 解析期抛错、全站交互瘫痪）', () => {

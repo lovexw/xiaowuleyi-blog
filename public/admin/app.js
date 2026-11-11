@@ -9,7 +9,6 @@ const state = {
   user: null,
   needsSetup: false,
   settings: null,
-  demo: false, // 演示站模式（/auth/state 返回 demo: true）：登录页公示演示账号、禁用改密码与闭站开关
   needsTotp: false, // 两步验证已开启（/auth/state 返回，B13）：登录表单预显验证码框
 }
 
@@ -241,17 +240,12 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 function authView(mode) {
   pendingRoute = null // 登录态下不允许任何迟到的 shell 视图渲染
   const isSetup = mode === 'setup'
-  // 演示站：登录页公示账号密码并自动填充（数据每 2 小时重置，随便玩）
-  const demoBox = !isSetup && state.demo
-    ? `<div class="auth-demo">🎓 这是<b>演示体验版</b>（非最新正式版，仅供测试体验），数据每 2 小时自动清空重置，随便看、随便改。<br>账号 <code>demo</code> · 密码 <code>demo1234</code>（已自动填好）</div>`
-    : ''
   $app.innerHTML = `<div class="auth-wrap"><div class="auth-card">
     <div class="auth-logo">
       <img src="/favicon.svg" alt="">
       <h1>${isSetup ? '创建管理员' : '登录博客号后台'}</h1>
       <p>${isSetup ? '第一次使用，设置你的管理员账号' : esc(state.settings?.siteName || '')}</p>
     </div>
-    ${demoBox}
     <form id="auth-form">
       <div class="auth-field"><label>用户名</label><input class="input" name="username" autocomplete="username" placeholder="2-24 位字母、数字、_ 或 -" required></div>
       <div class="auth-field"><label>密码</label><input class="input" type="password" name="password" autocomplete="${isSetup ? 'new-password' : 'current-password'}" placeholder="${isSetup ? '至少 8 位' : '输入密码'}" required></div>
@@ -262,11 +256,6 @@ function authView(mode) {
     </form>
     <p class="auth-tip">博客号 · 自托管 · 数据在自己手里</p>
   </div></div>`
-  if (demoBox) {
-    const form = document.getElementById('auth-form')
-    form.username.value = 'demo'
-    form.password.value = 'demo1234'
-  }
   document.getElementById('auth-form').addEventListener('submit', async (e) => {
     e.preventDefault()
     const f = e.target
@@ -357,15 +346,6 @@ async function shellView(active, contentHTML) {
   if (!state.user) return
   // 路由已切走（或已登出）时放弃本次渲染，防慢响应把旧页面盖回来
   if (active !== pendingRoute) return
-  // 英文测试版（English 0.1）后台提醒：运行中常驻公示；异常回退时换红色警示条（机制见 src/i18n.ts）
-  const s = state.settings || {}
-  let editionBanner = ''
-  if (s.edition === 'en') {
-    editionBanner =
-      s.editionEnStatus === 'fallback'
-        ? `<div style="background:var(--warn,#b45309);color:#fff;font-size:13px;line-height:1.7;padding:9px 16px;">⚠️ <b>英文测试版出现异常，已自动回退中文版</b>（${s.editionEnAt ? new Date(Number(s.editionEnAt)).toLocaleString() + '：' : ''}${esc(s.editionEnError || '未知错误')}）。可在「设置 → 语言版本」重新开启。</div>`
-        : `<div style="background:#1d4ed8;color:#fff;font-size:13px;line-height:1.7;padding:9px 16px;">🧪 <b>英文测试版 English 0.1 正在前台运行（仅供测试）</b>：前台界面为英文并显示测试版横幅，文章与微博正文保持原文；如出现异常会自动回退中文版。可在「设置 → 语言版本」关闭。</div>`
-  }
   // 隐私加固浏览器（Safari 锁定模式等）访问 localStorage 即抛 SecurityError：偏好存取吞异常，降级默认值
   const prefGet = (k) => { try { return localStorage.getItem(k) } catch { return null } }
   const sideMini = prefGet('admin-side') === 'mini'
@@ -374,7 +354,7 @@ async function shellView(active, contentHTML) {
   const moreDot = MENU.reduce((sum, m) => (m.badge && !MOBILE_TAB_IDS.includes(m.id) ? sum + m.badge() : sum), 0)
   $app.innerHTML = `<div class="shell${sideMini ? ' side-mini' : ''}">
     <aside class="sidebar">
-      <div class="side-logo"><img src="/favicon.svg" alt=""><span>博客号</span>${state.demo ? '<span class="demo-badge" title="演示体验版：非最新正式版，数据每 2 小时重置">演示</span>' : ''}<button class="side-fold" id="btn-side-fold" title="${sideMini ? '展开侧栏' : '收起侧栏'}">${I.fold}</button></div>
+      <div class="side-logo"><img src="/favicon.svg" alt=""><span>博客号</span><button class="side-fold" id="btn-side-fold" title="${sideMini ? '展开侧栏' : '收起侧栏'}">${I.fold}</button></div>
       <nav class="side-nav">${sideNavHtml(active)}</nav>
       <nav class="tab-bar">
         ${barItems.map((m) => sideItemHtml(m, active)).join('')}
@@ -386,7 +366,7 @@ async function shellView(active, contentHTML) {
         <button class="side-logout" id="btn-logout">退出</button>
       </div>
     </aside>
-    <main class="main">${editionBanner}${contentHTML}</main>
+    <main class="main">${contentHTML}</main>
     <div class="sheet-mask" id="sheet-mask">
       <div class="side-sheet" role="dialog" aria-label="全部菜单">
         <div class="side-sheet-head"><span>全部菜单</span><button class="side-sheet-close" id="btn-sheet-close" type="button">✕</button></div>
@@ -518,9 +498,7 @@ async function openUpdateCenter(btn) {
   }
   if (btn) { btn.disabled = false; btn.textContent = orig }
   if (!d.checkable) {
-    const why = d.reason === 'demo'
-      ? '演示站不检查更新。'
-      : '暂时获取不到最新版本信息，请检查网络后重试。'
+    const why = '暂时获取不到最新版本信息，请检查网络后重试。'
     modal(`<div class="modal-head"><span>检查更新</span><button class="modal-close" data-close>×</button></div>
       <div class="modal-body">
         <p style="color:var(--sub);font-size:13px;margin:0 0 6px;">当前版本：博客号 v${esc(d.current || '?')}</p>
@@ -594,9 +572,9 @@ async function viewHome() {
     )
     .join('')
   // 收录守卫：整站 noindex / 闭站会把本域名整体切出搜索引擎与 AI 的索引面——
-  // 概览页常驻提醒，防手滑开了长期不自知（演示站本就刻意 noindex，不提示）
+  // 概览页常驻提醒，防手滑开了长期不自知
   const crawlWarn = (() => {
-    if (!s.crawl || s.crawl.demo) return ''
+    if (!s.crawl) return ''
     const items = []
     if (s.crawl.closed) items.push('<b>站点处于闭站状态</b>：访客只能看到闭站页，搜索引擎与 AI 都抓不到内容')
     if (s.crawl.noindex) items.push('<b>全站 noindex 开着</b>：本域名已被搜索引擎与 AI 排除（页面 noindex + robots.txt 整站 Disallow）')
@@ -4230,7 +4208,7 @@ async function viewSettings() {
           <textarea class="textarea" id="st-analyticsScript" rows="2" placeholder="&lt;script defer src=&quot;https://…/script.js&quot; data-website-id=&quot;…&quot;&gt;&lt;/script&gt;">${esc(s.analyticsScript || '')}</textarea>
         </div>
         <div class="form-item">
-          <label>robots.txt 追加段（附在内置规则之后：额外 Sitemap、屏蔽目录等；演示站固定整站 Disallow，不看这段）</label>
+          <label>robots.txt 追加段（附在内置规则之后：额外 Sitemap、屏蔽目录等；全站 noindex 时整站 Disallow，不看这段）</label>
           <textarea class="textarea" id="st-robotsExtra" rows="3" placeholder="Disallow: /drafts/">${esc(s.robotsExtra || '')}</textarea>
         </div>
         <div class="form-item">
@@ -4243,27 +4221,20 @@ async function viewSettings() {
       </div>
     </div>
 
-    <div class="panel" style="padding:20px;" data-adv="1">
-      <div class="form-section"><h3>语言版本（英文测试版 English 0.1）</h3><div class="sec-desc">前台界面语言：文章与微博正文保持原文，仅界面文案切换。英文版渲染出现异常时会自动回退中文版，并在后台顶部提醒；重新开启即重置异常状态</div>
-        <label class="mode-row"><input type="radio" name="st-edition" value="zh"><span class="mode-text"><b>中文（默认）</b><i>前台保持中文界面</i></span></label>
-        <label class="mode-row"><input type="radio" name="st-edition" value="en"><span class="mode-text"><b>English 0.1（英文测试版）</b><i>前台界面切换为英文并在页面顶部公示测试版横幅；测试期间搜索引擎不收录（noindex），出问题自动回退中文版</i></span></label>
-        ${s.edition === 'en' && s.editionEnStatus === 'fallback' ? `<div class="switch-sub" style="color:var(--warn);">⚠️ 上次英文版出现异常已自动回退中文版${s.editionEnAt ? '（' + new Date(Number(s.editionEnAt)).toLocaleString() + '）' : ''}：${esc(s.editionEnError || '未知错误')}。重新选择英文版并保存即可重试。</div>` : ''}
-      </div>
-    </div>
 
     <div class="panel" style="padding:20px;">
-      <div class="form-section"><h3>账号</h3><div class="sec-desc">${state.demo ? '演示站不支持修改密码（演示账号公示在登录页，每 2 小时随数据一起重置）' : '修改登录密码'}</div>
+      <div class="form-section"><h3>账号</h3><div class="sec-desc">修改登录密码</div>
         <div class="form-row">
-          <div class="form-item"><label>旧密码</label><input class="input" type="password" id="pw-old" autocomplete="current-password" ${state.demo ? 'disabled' : ''}></div>
-          <div class="form-item"><label>新密码（至少 8 位）</label><input class="input" type="password" id="pw-new" autocomplete="new-password" ${state.demo ? 'disabled' : ''}></div>
-          <div class="form-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn" id="btn-pw" ${state.demo ? 'disabled' : ''}>修改密码</button></div>
+          <div class="form-item"><label>旧密码</label><input class="input" type="password" id="pw-old" autocomplete="current-password"></div>
+          <div class="form-item"><label>新密码（至少 8 位）</label><input class="input" type="password" id="pw-new" autocomplete="new-password"></div>
+          <div class="form-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn" id="btn-pw">修改密码</button></div>
         </div>
       </div>
     </div>
 
     <div class="panel" style="padding:20px;" data-adv="1">
       <div class="form-section"><h3>两步验证（TOTP）</h3><div class="sec-desc">给管理员登录再加一道锁：开启后每次登录除了密码还要输验证器 App 里的 6 位数字码（Google Authenticator / 1Password / 微软 Authenticator 等都支持）。密钥只在绑定时显示一次，换手机先关闭再重新绑定。</div>
-        <div id="totp-box">${state.demo ? '演示站不提供两步验证。' : s.totpEnabled === '1'
+        <div id="totp-box">${s.totpEnabled === '1'
           ? `<div class="totp-status">✅ 两步验证已开启。关闭需输入登录密码确认。</div>
              <div class="form-row" style="margin-top:8px;"><div class="form-item"><input class="input" type="password" id="totp-disable-pw" placeholder="登录密码确认" autocomplete="current-password"></div>
              <div class="form-item" style="flex:0 0 auto;align-self:flex-end;"><button class="btn" id="btn-totp-disable">关闭两步验证</button></div></div>`
@@ -4338,10 +4309,10 @@ async function viewSettings() {
           <label class="switch"><input type="checkbox" id="st-siteGrayscale" ${s.siteGrayscale === '1' ? 'checked' : ''}><span class="track"></span></label>
         </div>
         <div class="switch-row">
-          <div><div class="switch-label">关闭站点</div><div class="switch-sub">开启后访客只能看到闭站页，RSS、评论等一并停用；后台与已登录的你不受影响</div>${state.demo ? '<div class="switch-sub" style="color:var(--warn);">🎓 演示站已停用此开关（防止有人把体验站关掉，其他体验者会看不了）</div>' : ''}</div>
-          <label class="switch"><input type="checkbox" id="st-siteClosed" ${s.siteClosed === '1' ? 'checked' : ''} ${state.demo ? 'disabled' : ''}><span class="track"></span></label>
+          <div><div class="switch-label">关闭站点</div><div class="switch-sub">开启后访客只能看到闭站页，RSS、评论等一并停用；后台与已登录的你不受影响</div></div>
+          <label class="switch"><input type="checkbox" id="st-siteClosed" ${s.siteClosed === '1' ? 'checked' : ''}><span class="track"></span></label>
         </div>
-        <div class="form-item"><label>闭站公告（展示在闭站页，支持换行；留空使用默认文案）</label><textarea class="textarea" id="st-siteClosedMessage" rows="3" maxlength="1000" placeholder="本站暂时关闭，请稍后再来。" ${state.demo ? 'disabled' : ''}>${esc(s.siteClosedMessage || '')}</textarea></div>
+        <div class="form-item"><label>闭站公告（展示在闭站页，支持换行；留空使用默认文案）</label><textarea class="textarea" id="st-siteClosedMessage" rows="3" maxlength="1000" placeholder="本站暂时关闭，请稍后再来。">${esc(s.siteClosedMessage || '')}</textarea></div>
         <div class="switch-row">
           <div><div class="switch-label">禁止搜索引擎收录（noindex）</div><div class="switch-sub">开启后全站页面加 noindex 标记、robots.txt 整站禁止抓取：页面照常可访问，只是不再被搜索引擎收录。适合空白模板站、镜像站或临时预览实例；正式运营的博客不要开</div></div>
           <label class="switch"><input type="checkbox" id="st-siteNoindex" ${s.siteNoindex === '1' ? 'checked' : ''}><span class="track"></span></label>
@@ -4506,11 +4477,10 @@ async function viewSettings() {
   )
   applyStab()
 
-  // 常用 / 全部：设置页 17 个分组、近 50 个输入控件，日常真正会动的只有站名头像、
-  // 留言规则、可见范围、闭站开关这几组（共 8 组 27 个控件）。剩下 9 组（SEO、英文版、
-  // 两步验证、会员、访客统计、外部发布、服务端插件、WordPress 导入、整站搬家）都是
-  // 「装站时配一次，之后一年不碰」，默认折起来。只 hidden 不移除：输入框还在 DOM 里，
-  // 跨页签的「保存全部」照旧一次收齐，保存语义一个字没变。
+  // 常用 / 全部：设置页分组里，日常真正会动的只有站名头像、留言规则、可见范围、闭站开关
+  // 这几组；其余（SEO、两步验证、会员、访客统计、外部发布、服务端插件、WordPress 导入、
+  // 整站搬家）都是「装站时配一次，之后一年不碰」，默认折起来。只 hidden 不移除：输入框还在
+  // DOM 里，跨页签的「保存全部」照旧一次收齐，保存语义一个字没变。
   const advPanels = Array.prototype.slice.call(document.querySelectorAll('.stab-pane .panel[data-adv]'))
   const advBtn = document.getElementById('btn-set-adv')
   const applyAdv = () => {
@@ -4520,7 +4490,7 @@ async function viewSettings() {
     advBtn.textContent = settingsShowAll ? '只看常用设置' : `显示全部设置（另有 ${advPanels.length} 组）`
     advBtn.title = settingsShowAll
       ? '收起高级设置，只留日常会动的那几组'
-      : 'SEO、英文版、两步验证、外部发布、WordPress 导入、整站搬家等'
+      : 'SEO、两步验证、外部发布、WordPress 导入、整站搬家等'
     advBtn.classList.toggle('is-on', settingsShowAll)
   }
   advBtn.addEventListener('click', () => {
@@ -4623,10 +4593,6 @@ async function viewSettings() {
   document.querySelector(`input[name="st-siteModeOrder"][value="${orderVal}"]`).checked = true
   syncOrderRow()
 
-  // 语言版本单选回填（英文测试版 English 0.1，键见 src/db.ts DEFAULT_SETTINGS）
-  const savedEdition = s.edition === 'en' ? 'en' : 'zh'
-  document.querySelector(`input[name="st-edition"][value="${savedEdition}"]`).checked = true
-
   // AI 抓取策略单选回填（三档白名单，脏值兜底为默认档 allow；键见 src/db.ts / src/seo.ts）
   const savedAiPolicy = ['seek', 'deny'].includes(s.aiPolicy) ? s.aiPolicy : 'allow'
   document.querySelector(`input[name="st-aiPolicy"][value="${savedAiPolicy}"]`).checked = true
@@ -4648,7 +4614,6 @@ async function viewSettings() {
       ogImageDefault: g('st-ogImageDefault').value.trim(),
       // 主题不在这里改（皮肤页专职）；body 里不带 theme 键，服务端对缺键即保留
       siteMode: modeGroup() === 'both' ? modeOrder() : modeGroup(),
-      edition: (document.querySelector('input[name="st-edition"]:checked') || { value: 'zh' }).value,
       allowComments: g('st-allowComments').checked ? '1' : '0',
       moderateComments: g('st-moderateComments').checked ? '1' : '0',
       showCommentRegion: g('st-showCommentRegion').checked ? '1' : '0',
@@ -5153,7 +5118,7 @@ async function viewSettings() {
     })
   })
 
-  // 演示站该区不可用（服务端 404），静默即可；api() 只在 401 时弹 toast，这里再兜一层
+  // 取列表失败静默即可；api() 只在 401 时弹 toast，这里再兜一层
   refreshBundleList().catch(() => {})
 }
 
@@ -5416,7 +5381,6 @@ async function boot() {
     const st = await api('/auth/state')
     state.user = st.user
     state.needsSetup = st.needsSetup
-    state.demo = !!st.demo
     state.needsTotp = !!st.needsTotp
   } catch (e) {
     // 超时 / 连不上 ≠ 未登录：回落到登录页会让用户以为「要重新输入密码」，

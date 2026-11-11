@@ -14,7 +14,7 @@ import { keywordLinkHtml, keywordRulesError, parseKeywordRules, parseMaxPerKeywo
 import { purgePageCache } from './pagecache'
 import { indexNowKeyOk } from './seo'
 import type { Env, SettingsMap } from './types'
-import { excerpt, isDemo } from './utils'
+import { excerpt } from './utils'
 
 export interface HookContext {
   /** 异步事件的运行环境（页脚注入是同步渲染路径，没有 env） */
@@ -473,8 +473,8 @@ async function plazaIngest(endpoint: string, token: string, body: Record<string,
  * n8n / IFTTT / 自建系统等自动化集成一个地址全接走，不再为每个平台单写同步插件。
  * body: { event, site, at, data }；配置了签名密钥时带 X-Bloghao-Timestamp /
  * X-Bloghao-Signature（HMAC-SHA256(密钥, ts + '.' + rawBody)，与广场同步 plazaSign 同口径）。
- * URL 落配置即过公网校验（fetchableUrl，与 commentWebhookUrl 同标准），触发时再复核一遍；
- * 演示站由 fireHook 总线整层短路，体验者配的地址打不出去。 */
+ * URL 落配置即过公网校验（fetchableUrl，与 commentWebhookUrl 同标准），触发时再复核一遍。
+ */
 
 const OUTBOUND_EVENTS = [
   'post_published',
@@ -954,14 +954,12 @@ export function renderPostContentHtml(settings: SettingsMap, html: string, origi
   return html
 }
 
-/** 事件广播公共件：遍历启用的插件逐个调 handler，任何失败都不影响调用方主流程；
- *  演示站不外发：体验者随手配置的 TG/webhook 不应让 demo Worker 对外发请求 */
+/** 事件广播公共件：遍历启用的插件逐个调 handler，任何失败都不影响调用方主流程 */
 async function fireHook<P>(
   env: Env,
   pick: (plugin: ServerPlugin) => ((p: P, ctx: HookContext) => void | Promise<void>) | undefined,
   p: P
 ): Promise<void> {
-  if (isDemo(env)) return
   try {
     const settings = await getSettings(env.DB)
     const ctx: HookContext = { env, settings, base: (settings.siteUrl || '').replace(/\/+$/, '') }
@@ -981,23 +979,22 @@ async function fireHook<P>(
 
 /** 发布事件广播：后台发布与定时到点两条路都会调；任何失败都不影响发布本身。
  *  发布动作附带清页面边缘缓存（pagecache.ts）：本函数是所有发布入口的单点漏斗
- *  （后台 / 开放 API / TG / MCP / 定时发布），这里清一次比在各端点散挂稳；演示站整层
- *  不缓存，跳过省两次 D1 往返 */
+ *  （后台 / 开放 API / TG / MCP / 定时发布），这里清一次比在各端点散挂稳 */
 export async function firePostPublished(env: Env, p: PostPublishedPayload): Promise<void> {
-  if (!isDemo(env)) await purgePageCache(env.DB).catch(() => {})
+  await purgePageCache(env.DB).catch(() => {})
   return fireHook(env, (plugin) => plugin.onPostPublished, p)
 }
 
 /** 微博发布事件广播：后台、开放 API、TG 机器人与草稿转发布四条路都会调；任何失败都不影响发布本身 */
 export async function fireWeiboPublished(env: Env, p: WeiboPublishedPayload): Promise<void> {
-  if (!isDemo(env)) await purgePageCache(env.DB).catch(() => {})
+  await purgePageCache(env.DB).catch(() => {})
   return fireHook(env, (plugin) => plugin.onWeiboPublished, p)
 }
 
 /** 评论事件广播：访客评论/留言三条路（文章、微博、留言板）都会调；任何失败都不影响留言本身。
  *  评论出现在公开页面上，落库即清页面边缘缓存（待审的不在页面上，清了也无害） */
 export async function fireCommentCreated(env: Env, p: CommentCreatedPayload): Promise<void> {
-  if (!isDemo(env)) await purgePageCache(env.DB).catch(() => {})
+  await purgePageCache(env.DB).catch(() => {})
   return fireHook(env, (plugin) => plugin.onCommentCreated, p)
 }
 
@@ -1007,7 +1004,7 @@ export async function fireCommentCreated(env: Env, p: CommentCreatedPayload): Pr
  *  pull 补漏不会再捞回；解锁/恢复后 6h 内 pull 自愈补回。失败只丢一条下架，不影响主流程。
  *  下架同样改变公开可见面 → 先清页面边缘缓存再走广场同步（plaza-sync 停用也不能跳过清理） */
 export async function firePlazaRetract(env: Env, entries: { kind: 'post' | 'weibo'; ref: string }[]): Promise<void> {
-  if (isDemo(env) || !entries.length) return
+  if (!entries.length) return
   await purgePageCache(env.DB).catch(() => {})
   try {
     const settings = await getSettings(env.DB)
@@ -1031,13 +1028,13 @@ export async function firePostUpdated(env: Env, p: PostUpdatedPayload): Promise<
 /** 文章软删广播：与 firePlazaRetract 同点触发（软删端点两条都会挂）。
  *  这里也清一次页面边缘缓存——幂等兜底，防未来某个删除入口只挂事件漏挂下架 */
 export async function firePostDeleted(env: Env, p: PostDeletedPayload): Promise<void> {
-  if (!isDemo(env)) await purgePageCache(env.DB).catch(() => {})
+  await purgePageCache(env.DB).catch(() => {})
   return fireHook(env, (plugin) => plugin.onPostDeleted, p)
 }
 
 /** 微博软删广播（同 firePostDeleted 口径） */
 export async function fireWeiboDeleted(env: Env, p: WeiboDeletedPayload): Promise<void> {
-  if (!isDemo(env)) await purgePageCache(env.DB).catch(() => {})
+  await purgePageCache(env.DB).catch(() => {})
   return fireHook(env, (plugin) => plugin.onWeiboDeleted, p)
 }
 

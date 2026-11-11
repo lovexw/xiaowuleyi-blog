@@ -1,5 +1,4 @@
 {
-  "demo.localhost": { "demo": true },
-  "t1.localhost": { "demo": true },
-  "main.localhost": { "demo": false }
+  "t1.localhost": {},
+  "main.localhost": {}
 }

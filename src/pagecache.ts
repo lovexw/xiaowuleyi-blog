@@ -4,7 +4,6 @@ import { getSettings, PAGE_CACHE_EPOCH_KEY, saveSettings } from './db'
 import { nodeMemoryCache } from './memory-cache'
 import { PP_COOKIE } from './protect'
 import type { Env, SessionUser } from './types'
-import { isDemo } from './utils'
 
 /* ---------------- 页面边缘缓存（公开面 · 匿名访客 30 分钟副本） ----------------
  * 单文件自洽模块（同 protect.ts / closed.ts 三件套口径），Node 测试可直接导入。
@@ -26,7 +25,7 @@ import { isDemo } from './utils'
  * - 管理员 / 会员 / 文章解锁任一 Cookie 在场（登录视角永远实时——站长发完文自查不受缓存干扰）
  * - 白名单之外的一切路由、未知 query 参数（评论成功后 site.js reloadFresh 的 _r 参数就靠
  *   这条立刻看到新评论）、sort=random（seed 现生成，同 URL 两次结果不同）
- * - 演示站（每 2 小时重灌，不值得缓存）、灰度模式（整站去色是特殊状态，回源渲染）
+ * - 灰度模式（整站去色是特殊状态，回源渲染）
  * - 闭站中间件注册在本中间件之前，503 短路在缓存之前
  *
  * 失效：settings 键 pageCacheEpoch 进缓存键。saveSettings 每次保存自动换新（db.ts 单点，
@@ -141,12 +140,11 @@ export function pageCacheKeyFor(input: {
   method: string
   url: string
   cookie: string
-  demo: boolean
   grayscale: boolean
   epoch: string
 }): string | null {
   if (input.method !== 'GET') return null
-  if (input.demo || input.grayscale) return null
+  if (input.grayscale) return null
   let u: URL
   try {
     u = new URL(input.url)
@@ -191,7 +189,6 @@ export function pageCacheMiddleware(): MiddlewareHandler<AppEnv> {
       method: c.req.method,
       url: c.req.url,
       cookie: c.req.header('cookie') || '',
-      demo: isDemo(c.env),
       grayscale: settings.siteGrayscale === '1',
       epoch: settings[PAGE_CACHE_EPOCH_KEY] || '0',
     })

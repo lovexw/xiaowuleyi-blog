@@ -18,8 +18,9 @@
 >
 > 本仓库**转为作者自用**，只维护「甲骨文服务器 Docker 自托管」这一条线。
 >
-> 曾支持过的 **Cloudflare Workers 部署**、**Docker 多租户托管**、**演示站**、**广场**、**官网**均已**冻结**——
-> 代码保留、随时可取用，但**不再更新、不承诺可用**。边界与理由见 **[docs/MAINTENANCE.md](docs/MAINTENANCE.md)**。
+> 曾支持过的 **Cloudflare Workers 部署**、**Docker 多租户托管**、**广场**、**官网**均已**冻结**——
+> 代码保留、随时可取用，但**不再更新、不承诺可用**。**演示站与英文版已于 2026-11-11 整体删除**（代码不再存在）。
+> 边界与理由见 **[docs/MAINTENANCE.md](docs/MAINTENANCE.md)**。
 >
 > 仓库保持公开，因为它仍是一份完整可读的实现；但请把它当作「一份能跑的自用代码」，
 > 而不是「一个还在维护的产品」——issue 与 PR 不保证回应。
@@ -167,7 +168,6 @@ npm run deploy
 npm install
 npm run db:init:local   # 初始化本地 D1（.wrangler/state，与线上互不影响）
 npm run dev             # http://127.0.0.1:8787
-npm run dev:demo        # 演示站本地预览（已冻结，仅留档；见 docs/DEMO.md）
 npm run typecheck       # TypeScript 类型检查，提交前必须通过
 npm test                # 回归测试（tests/，1000+ 用例），提交前必须通过
 npm run smoke           # 本地冒烟：起 wrangler dev 逐路由断言，改 SQL 拼接/渲染后必跑
@@ -199,7 +199,7 @@ bloghao-xwblog/
 ├── docs/               # 全部文档（部署看 DEPLOY-ORACLE.md，边界看 MAINTENANCE.md）
 ├── website/            # 官网源码（⚠️ 已冻结，不再更新）
 ├── plaza/              # 广场 hub 服务端（⚠️ 已冻结）
-├── demo/               # 演示站附属件（⚠️ 已冻结）
+├── demo/hub-node/      # 广场 hub 的 Node 形态运行器（自托管容器构建用）
 ├── migration-memos/    # Memos 旧站 → 微博 的一次性迁移工具（已完成，留档）
 └── schema.sql          # 表结构（幂等）
 ```
@@ -222,7 +222,6 @@ bloghao-xwblog/
 | [docs/VERSIONS.md](docs/VERSIONS.md) | 版本更新说明：从项目诞生到今天的大版本大事记 |
 | ⚠️ [docs/DEPLOY.md](docs/DEPLOY.md) | Cloudflare 部署教程（**已冻结**，仅留档） |
 | ⚠️ [docs/CLOUDFLARE-BASICS.md](docs/CLOUDFLARE-BASICS.md) | Cloudflare 平台入门（**已冻结**，仅留档） |
-| ⚠️ [docs/DEMO.md](docs/DEMO.md) | 演示站指南（**已冻结**，仅留档） |
 | ⚠️ [docs/PLAZA.md](docs/PLAZA.md) | 广场接入指南（**已冻结**，仅留档） |
 
 开发协作（AI / 多模型）另见 [AGENTS.md](AGENTS.md) 与 [docs/AI-COLLAB.md](docs/AI-COLLAB.md)。

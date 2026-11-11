@@ -2,119 +2,12 @@
 (function () {
   'use strict'
 
-  /* 英文测试版（English 0.1）：SSR 在 <html data-edition="en"> 上标记，前台 JS 文案随语言切换 */
-  var EN = document.documentElement.getAttribute('data-edition') === 'en'
   // 前台静态资源版本：服务端按 site.js + share-card.js 内容算好后放在 <html data-av>。
   // 按需加载的模块必须拼同一个 ?v=，否则分享卡片改了仍旧拿浏览器缓存里的旧文件。
   // 老版本 HTML（CDN 边缘副本）没有这个属性时退回原路径，与改动前行为一致。
   var AV = document.documentElement.getAttribute('data-av') || ''
   function avUrl(p) {
     return AV ? p + '?v=' + AV : p
-  }
-  var EN_STR = {
-    '请求失败': 'Request failed',
-    '上传失败': 'Upload failed',
-    'QQ 号格式不对（5-11 位数字，不以 0 开头），可留空或修改后再发':
-      'Invalid QQ ID (5–11 digits, no leading 0) — leave it empty or fix it before posting',
-    '发送中…': 'Posting…',
-    '已提交，审核通过后展示': 'Submitted — it will appear once approved',
-    '留言成功，感谢参与 🙂': 'Comment posted — thanks for joining in 🙂',
-    '发送失败，请重试': 'Failed to post — please try again',
-    '还没有评论，来抢沙发～': 'No comments yet — be the first!',
-    '评论加载失败，稍后再试': 'Failed to load comments — try again later',
-    '点击重试': 'Retry',
-    '回复': 'Reply',
-    '取消': 'Cancel',
-    '作者': 'Author',
-    '失败': 'Failed',
-    '分享': 'Share',
-    '加图': 'Add photo',
-    '上传中': 'Uploading',
-    '只支持 JPG / PNG / WebP / GIF 图片': 'Only JPG / PNG / WebP / GIF images are supported',
-    '视频': 'Video',
-    '这条视频的编码当前浏览器放不出来（常见于 H.265 / HEVC），换用 Safari / iPhone 可正常观看，或':
-      'This video uses a codec your browser cannot decode (usually H.265 / HEVC). Open it in Safari / on iPhone, or',
-    '视频加载失败，多半是网络问题，刷新再试一次；也可以':
-      'The video failed to load — usually a network hiccup. Refresh and try again, or',
-    '下载到本地播放': 'download it and play locally',
-    '最大 25MB，MP4 / WebM': 'Up to 25MB, MP4 / WebM',
-    '图片 / 视频，一条微博最多 1 个视频': 'Photos / video — one video per note',
-    '只支持 MP4 / WebM 视频': 'Only MP4 / WebM videos are supported',
-    'HEVC 高效格式：Chrome / 安卓大部分浏览器放不出来（iPhone / Mac 可以，要全平台可播就导出 H.264 的 MP4）':
-      'HEVC video: Chrome and most Android browsers cannot play it (iPhone / Mac can) — export an H.264 MP4 for the widest support',
-    '网络错误，上传失败': 'Network error — upload failed',
-    '置顶': 'Pin',
-    '取消置顶': 'Unpin',
-    '删除': 'Delete',
-    '删除中…': 'Deleting…',
-    '删除失败': 'Failed to delete',
-    '删除这条评论（其下回复一并删除，不可恢复）': 'Delete this comment (its replies go too, and this cannot be undone)',
-    '删除这条评论？其下的回复会一并删除，且不可恢复。': 'Delete this comment? Its replies go too, and this cannot be undone.',
-    '保存': 'Save',
-    '保存中…': 'Saving…',
-    '保存失败': 'Failed to save',
-    '保存失败，请重试': 'Failed to save — please try again',
-    '加载失败，请取消后重新进编辑': 'Failed to load — cancel and reopen the editor',
-    '操作失败': 'Action failed',
-    '提交中…': 'Submitting…',
-    '提交失败，请重试': 'Failed to submit — please try again',
-    '已提交，站长审核通过后就会展示在这里 🎉': 'Submitted — it will show up here once the site owner approves it 🎉',
-    '注册中…': 'Signing up…',
-    '登录中…': 'Logging in…',
-    '注册成功，正在进入…': 'Account created — signing you in…',
-    '登录成功，正在进入…': 'Logged in — redirecting…',
-    '请先完成人机验证': 'Please complete the verification first',
-    '请填写邮箱': 'Please enter your email',
-    '两次输入的邮箱不一致，请核对': 'The two email addresses do not match — please check them',
-    '文件太大了，换小一点的试试': 'That file is too large — try a smaller one',
-    '服务器正忙，请稍后重试': 'The server is busy — please try again in a moment',
-    '服务器开小差了，请稍后再试': 'The server hiccuped — please try again',
-    '服务器返回了意外的内容，请刷新重试': 'The server returned something unexpected — please refresh and retry',
-    '人机验证还没就绪，请稍候再试': 'Verification is still loading — please wait a moment and retry',
-    '操作失败，请重试': 'Something went wrong — please try again',
-    '昵称不能为空': 'Display name cannot be empty',
-    '保存中': 'Saving',
-    '昵称已更新，正在刷新…': 'Name updated — refreshing…',
-    'QQ 号格式不对（5-11 位数字，不以 0 开头）': 'Invalid QQ ID (5–11 digits, no leading 0)',
-    'QQ 已绑定，但头像没抓到，稍后再点一次重试': 'QQ linked but the avatar has not been fetched yet — retry later',
-    '已保存，正在刷新…': 'Saved — refreshing…',
-    '请填写当前密码与新密码': 'Enter both the current and the new password',
-    '新密码至少 8 位': 'The new password must be at least 8 characters',
-    '密码已修改，其他设备已退出登录。请务必记好新密码':
-      'Password changed and other devices signed out. Keep the new one safe',
-    '修改失败，请重试': 'Failed to change — please try again',
-    '退出失败，请重试': 'Failed to log out — please try again',
-    '说点什么…': 'Say something…',
-    '😊 表情': '😊 Emoji',
-    '移除': 'Remove',
-    '返回顶部': 'Back to top',
-    '复制代码': 'Copy code',
-    '已复制': 'Copied',
-    '复制失败': 'Copy failed',
-    '复制本节链接': 'Copy link to this section',
-    '更多操作': 'More',
-    '复制链接': 'Copy link',
-    '已复制链接': 'Link copied',
-    '复制链接失败': 'Failed to copy the link',
-    '字号': 'Text size',
-    '小': 'Small',
-    '标准': 'Standard',
-    '大': 'Large',
-    '特大': 'Extra large',
-    '保存图片': 'Save image',
-    '已保存，若未开始下载请长按图片另存': 'Saved — if nothing downloaded, long-press the image to save it',
-    '复制图片地址': 'Copy image address',
-    '已复制图片地址': 'Image address copied',
-  }
-  function T(zh) {
-    return EN ? EN_STR[zh] || zh : zh
-  }
-  /* 带数字的句子按英文语序重组：与服务端 weiboTime 口径一致（+8h 取 UTC 分量） */
-  function addImagesEn(n) {
-    return 'Posted ' + n + (n === 1 ? ' photo' : ' photos')
-  }
-  function addLabelEn(n, max) {
-    return 'Add photo (' + n + '/' + max + ')'
   }
 
   /* 旧式裸锚点深链兜底（/weibo#wb-<id>，历史遗留的 TG 通知等）：目标微博不在当前页时改用
@@ -136,10 +29,10 @@
         d = null
       }
       if (d && d.error) throw new Error(d.error)
-      if (r.status === 413) throw new Error(T('文件太大了，换小一点的试试'))
-      if (r.status === 502 || r.status === 503 || r.status === 504) throw new Error(T('服务器正忙，请稍后重试'))
-      if (!r.ok) throw new Error(T('服务器开小差了，请稍后再试'))
-      if (!d) throw new Error(T('服务器返回了意外的内容，请刷新重试'))
+      if (r.status === 413) throw new Error('文件太大了，换小一点的试试')
+      if (r.status === 502 || r.status === 503 || r.status === 504) throw new Error('服务器正忙，请稍后重试')
+      if (!r.ok) throw new Error('服务器开小差了，请稍后再试')
+      if (!d) throw new Error('服务器返回了意外的内容，请刷新重试')
       return d
     })
   }
@@ -250,8 +143,6 @@
   // 与后端 weiboTime 保持一致：今年「10月3日 14:20」，往年带年份
   // 统一按北京时间（UTC+8）口径：+8h 后用 getUTC* 取墙上时间，
   // 与服务端 SSR 渲染同源，避免 0-8 点内容跨天、同屏两套时区
-  // 英文测试版：Oct 3, 14:20 / Oct 3, 2025（与 i18n.ts weiboTimeEn 同口径）
-  var EN_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   function fmtTime(ts) {
     var d = new Date(Number(ts) + 8 * 3600e3)
     if (isNaN(d.getTime())) return ''
@@ -260,10 +151,6 @@
     }
     var hm = p(d.getUTCHours()) + ':' + p(d.getUTCMinutes())
     var now = new Date(Date.now() + 8 * 3600e3)
-    if (EN) {
-      var md = EN_MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate()
-      return d.getUTCFullYear() === now.getUTCFullYear() ? md + ', ' + hm : md + ', ' + d.getUTCFullYear()
-    }
     if (d.getUTCFullYear() === now.getUTCFullYear()) return d.getUTCMonth() + 1 + '月' + d.getUTCDate() + '日 ' + hm
     return d.getUTCFullYear() + '年' + (d.getUTCMonth() + 1) + '月' + d.getUTCDate() + '日'
   }
@@ -275,7 +162,7 @@
       .map(function (u, i) {
         return (
           '<span class="wb-composer-tile"><img src="' + esc(u) + '" alt="">' +
-          '<button type="button" class="wb-composer-tile-del" data-i="' + i + '" title="' + T('移除') + '">×</button></span>'
+          '<button type="button" class="wb-composer-tile-del" data-i="' + i + '" title="' + '移除' + '">×</button></span>'
         )
       })
       .join('')
@@ -426,7 +313,7 @@
    *  再走 raw 上传。失败抛 Error，文案与服务端 jsonError 同源；成功时带上 hevc 标记供调用方提示。 */
   function uploadVideo(file, onProgress) {
     return prepareVideo(file).then(function (prep) {
-      if (prep.error) throw new Error(T('只支持 MP4 / WebM 视频'))
+      if (prep.error) throw new Error('只支持 MP4 / WebM 视频')
       return uploadVideoRaw(prep.file, onProgress).then(function (d) {
         // 服务端嗅探出的编码是权威（客户端只读文件头，可能漏判）；任一侧认出来都算 HEVC
         d.hevc = prep.hevc || d.codec === 'hevc'
@@ -453,11 +340,11 @@
           d = {}
         }
         if (xhr.status >= 200 && xhr.status < 300 && d.url) return resolve(d)
-        var serverMsg = d.error || (xhr.status >= 500 ? T('服务器开小差了，请稍后再试') : (xhr.responseText || '').trim())
-        reject(new Error(serverMsg ? serverMsg.slice(0, 80) : T('上传失败') + '（HTTP ' + xhr.status + '）'))
+        var serverMsg = d.error || (xhr.status >= 500 ? '服务器开小差了，请稍后再试' : (xhr.responseText || '').trim())
+        reject(new Error(serverMsg ? serverMsg.slice(0, 80) : '上传失败' + '（HTTP ' + xhr.status + '）'))
       }
       xhr.onerror = function () {
-        reject(new Error(T('网络错误，上传失败')))
+        reject(new Error('网络错误，上传失败'))
       }
       var fd = new FormData()
       fd.append('file', file)
@@ -555,7 +442,7 @@
     return (
       '<span class="wb-composer-tile wb-composer-tile--video" title="' + esc(meta || '') + '">' +
       '<video src="' + esc(v.url) + '"' + poster + ' muted playsinline preload="metadata"></video>' +
-      '<button type="button" class="wb-composer-tile-del" data-video-del title="' + T('移除') + '">×</button>' +
+      '<button type="button" class="wb-composer-tile-del" data-video-del title="' + '移除' + '">×</button>' +
       '</span>'
     )
   }
@@ -658,7 +545,7 @@
     var qq = input ? input.value.trim() : ''
     if (!qq) return ''
     if (!/^[1-9][0-9]{4,10}$/.test(qq)) {
-      if (tipEl) tipEl.textContent = T('QQ 号格式不对（5-11 位数字，不以 0 开头），可留空或修改后再发')
+      if (tipEl) tipEl.textContent = 'QQ 号格式不对（5-11 位数字，不以 0 开头），可留空或修改后再发'
       if (input) input.focus()
       return null
     }
@@ -689,7 +576,7 @@
         return
       }
       tipEl.innerHTML =
-        T('回复') + ' @' + esc(name) + ' <button type="button" class="cmt-reply-cancel">' + T('取消') + '</button>'
+        '回复' + ' @' + esc(name) + ' <button type="button" class="cmt-reply-cancel">' + '取消' + '</button>'
       var cancel = tipEl.querySelector('.cmt-reply-cancel')
       if (cancel)
         cancel.addEventListener('click', function () {
@@ -718,7 +605,7 @@
       var qq = guestQQ(form, tipEl)
       if (qq === null) return
       var label = btn.textContent
-      btn.textContent = T('发送中…')
+      btn.textContent = '发送中…'
       btn.disabled = true
       postJSON('/api/public/comments', {
         slug: form.getAttribute('data-slug'),
@@ -731,20 +618,20 @@
         .then(function (d) {
           if (qq) storeSet('cmt-qq', qq)
           if (d && d.pending) {
-            if (tipEl) tipEl.textContent = T('已提交，审核通过后展示')
+            if (tipEl) tipEl.textContent = '已提交，审核通过后展示'
             content.value = ''
             setReply(0, '')
             btn.textContent = label
             btn.disabled = false
           } else {
-            if (tipEl) tipEl.textContent = T('留言成功，感谢参与 🙂')
+            if (tipEl) tipEl.textContent = '留言成功，感谢参与 🙂'
             setTimeout(function () {
               reloadFresh()
             }, 600)
           }
         })
         .catch(function (err) {
-          if (tipEl) tipEl.textContent = err.message || T('发送失败，请重试')
+          if (tipEl) tipEl.textContent = err.message || '发送失败，请重试'
           btn.textContent = label
           btn.disabled = false
         })
@@ -768,7 +655,7 @@
         gbTip.textContent = gbTipDefault
         return
       }
-      gbTip.innerHTML = T('回复') + ' @' + esc(name) + ' <button type="button" class="cmt-reply-cancel">' + T('取消') + '</button>'
+      gbTip.innerHTML = '回复' + ' @' + esc(name) + ' <button type="button" class="cmt-reply-cancel">' + '取消' + '</button>'
       var cancel = gbTip.querySelector('.cmt-reply-cancel')
       if (cancel)
         cancel.addEventListener('click', function () {
@@ -799,7 +686,7 @@
       var qq = guestQQ(gbForm, gbTip)
       if (qq === null) return
       var label = btn.textContent
-      btn.textContent = T('发送中…')
+      btn.textContent = '发送中…'
       btn.disabled = true
       postJSON('/api/public/guestbook', {
         nickname: gbNickname ? gbNickname.value.trim() : '',
@@ -811,20 +698,20 @@
         .then(function (d) {
           if (qq) storeSet('cmt-qq', qq)
           if (d && d.pending) {
-            if (gbTip) gbTip.textContent = T('已提交，审核通过后展示')
+            if (gbTip) gbTip.textContent = '已提交，审核通过后展示'
             content.value = ''
             gbSetReply(0, '')
             btn.textContent = label
             btn.disabled = false
           } else {
-            if (gbTip) gbTip.textContent = T('留言成功，感谢参与 🙂')
+            if (gbTip) gbTip.textContent = '留言成功，感谢参与 🙂'
             setTimeout(function () {
               reloadFresh()
             }, 600)
           }
         })
         .catch(function (err) {
-          if (gbTip) gbTip.textContent = err.message || T('发送失败，请重试')
+          if (gbTip) gbTip.textContent = err.message || '发送失败，请重试'
           btn.textContent = label
           btn.disabled = false
         })
@@ -909,7 +796,7 @@
     fetch('/api/admin/comments/' + encodeURIComponent(id), { method: 'DELETE' })
       .then(function (r) {
         return r.json().then(function (d) {
-          if (!r.ok) throw new Error((d && d.error) || T('删除失败'))
+          if (!r.ok) throw new Error((d && d.error) || '删除失败')
           return d
         })
       })
@@ -934,7 +821,7 @@
       })
       .catch(function (err) {
         if (tipEl) {
-          tipEl.textContent = (err && err.message) || T('删除失败')
+          tipEl.textContent = (err && err.message) || '删除失败'
           setTimeout(function () { tipEl.textContent = tipDefault }, 4000)
         }
         btn.disabled = false
@@ -947,7 +834,7 @@
     e.preventDefault()
     var id = btn.getAttribute('data-cmt-del')
     if (!id) return
-    if (!confirm(T('删除这条评论？其下的回复会一并删除，且不可恢复。'))) return
+    if (!confirm('删除这条评论？其下的回复会一并删除，且不可恢复。')) return
     deleteComment(btn, id)
   })
 
@@ -974,24 +861,22 @@
       else (byParent[c.parent_id] = byParent[c.parent_id] || []).push(c)
     })
     if (!comments.length) {
-      listEl.innerHTML = '<p class="wb-cmt-empty">' + T('还没有评论，来抢沙发～') + '</p>'
+      listEl.innerHTML = '<p class="wb-cmt-empty">' + '还没有评论，来抢沙发～' + '</p>'
       return
     }
     // 评论圈层可见（src/commentgate.ts）：遮罩由服务端判定并清空 content，这里只画占位块——
     // 正文与回复都不在出参里，客户端不持有原文（与 SSR 评论区同一套文案口径）。viewerRank 0 = 游客
     var vRank = Number(viewerRank) || 0
     function gateTitle(c) {
-      var who = c.gate_tier_name || (EN ? 'member' : '会员')
-      return EN ? 'Only ' + who + ' members and above can read this comment' : '这条评论仅对' + who + '及以上可见'
+      var who = c.gate_tier_name || ('会员')
+      return '这条评论仅对' + who + '及以上可见'
     }
     function gateHint() {
-      if (EN) return vRank > 0 ? 'Upgrade your tier to read it' : 'Sign in as a member to read it'
       return vRank > 0 ? '升级档位后可见' : '登录会员后可见'
     }
     function gateMore(c) {
-      var who = c.gate_tier_name || (EN ? 'member' : '会员')
+      var who = c.gate_tier_name || ('会员')
       var n = Number(c.gate_hidden) || 0
-      if (EN) return n + ' more ' + (n === 1 ? 'reply' : 'replies') + ', also ' + who + ' members and above only'
       return '另有 ' + n + ' 条回复，同样仅对' + who + '及以上可见'
     }
     // 评论头像位（服务端 commentAvatarHtml 的 ES5 手工镜像，改任一侧记得同步）：
@@ -1001,7 +886,7 @@
       if (c.member_avatar) return '<img class="wb-cmt-avatar wb-cmt-avatar-img" src="' + esc(c.member_avatar) + '" alt="">'
       if (Number(c.is_admin) && adminAvatar) return '<img class="wb-cmt-avatar wb-cmt-avatar-img" src="' + esc(adminAvatar) + '" alt="">'
       if (c.avatar) return '<img class="wb-cmt-avatar wb-cmt-avatar-img" src="' + esc(c.avatar) + '" alt="">'
-      var ch = (c.nickname || (EN ? 'G' : '客')).charAt(0) || (EN ? 'G' : '客')
+      var ch = (c.nickname || ('客')).charAt(0) || ('客')
       return '<span class="wb-cmt-avatar" aria-hidden="true">' + esc(ch) + '</span>'
     }
     function item(c, nested, floor) {
@@ -1012,10 +897,10 @@
         var tc = esc(c.member_tier_color || '')
         tierBadge = '<span class="wb-cmt-badge"' + (tc ? ' style="color:' + tc + ';border-color:' + tc + '"' : '') + '>✓ ' + esc(c.member_tier_name) + '</span>'
       } else if (c.member_name) {
-        tierBadge = '<span class="wb-cmt-badge">' + (EN ? 'Member' : '会员') + '</span>'
+        tierBadge = '<span class="wb-cmt-badge">' + ('会员') + '</span>'
       }
       var gated = !!c.gated
-      var replyBtn = '<button type="button" class="wb-cmt-reply-btn" data-reply="' + c.id + '" data-name="' + esc(c.nickname) + '">' + T('回复') + '</button>'
+      var replyBtn = '<button type="button" class="wb-cmt-reply-btn" data-reply="' + c.id + '" data-name="' + esc(c.nickname) + '">' + '回复' + '</button>'
       // 遮罩项：正文换占位块，不给回复/删除键（回复权限另有服务端写侧判定）
       var body = gated
         ? '<div class="wb-cmt-gate" style="border:1px dashed currentColor;border-radius:8px;padding:8px 10px;opacity:.6;font-size:13px;line-height:1.6">' +
@@ -1027,7 +912,7 @@
       var html =
         '<li class="wb-cmt-item' + (nested ? ' wb-cmt-nested' : '') + (gated ? ' wb-cmt-item-gated' : '') + '" id="wbc-' + c.id + '">' +
         '<div class="wb-cmt-head">' + avatarHtml(c) + '<span class="wb-cmt-name">' + esc(c.nickname) +
-        (Number(c.is_admin) ? '<span class="wb-cmt-badge">' + T('楼主') + '</span>' : tierBadge) +
+        (Number(c.is_admin) ? '<span class="wb-cmt-badge">' + '楼主' + '</span>' : tierBadge) +
         '</span><span class="wb-cmt-time">' + fmtTime(c.created_at) + '</span>' +
         // IP 属地：接口在 showCommentRegion 开启时才带 ip_region（已是服务端格式化好的标签），与楼号同款小灰字
         (c.ip_region ? '<span class="wb-cmt-region" style="font-size:11px;opacity:0.45">' + esc(c.ip_region) + '</span>' : '') +
@@ -1036,7 +921,7 @@
           ? ''
           : isAdmin
             ? replyBtn +
-              '<button type="button" class="wb-cmt-del-btn" data-cmt-del="' + c.id + '" title="' + T('删除这条评论（其下回复一并删除，不可恢复）') + '">' + T('删除') + '</button>'
+              '<button type="button" class="wb-cmt-del-btn" data-cmt-del="' + c.id + '" title="' + '删除这条评论（其下回复一并删除，不可恢复）' + '">' + '删除' + '</button>'
             : memberName
               ? replyBtn
               : '') +
@@ -1058,7 +943,7 @@
     var wbId = panel.getAttribute('data-wb-cmt')
     if (!listEl || !wbId || panel.dataset.loading === '1') return
     panel.dataset.loading = '1'
-    listEl.innerHTML = '<p class="wb-cmt-loading">' + T('加载中…') + '</p>'
+    listEl.innerHTML = '<p class="wb-cmt-loading">' + '加载中…' + '</p>'
     Promise.all([getJSON('/api/public/weibo/' + encodeURIComponent(wbId) + '/comments'), authState()])
       .then(function (rs) {
         renderWeiboComments(panel, (rs[0] && rs[0].comments) || [], !!(rs[1] && rs[1].user), (rs[0] && rs[0].adminAvatar) || '', (rs[0] && rs[0].memberName) || '', (rs[0] && rs[0].viewerRank) || 0)
@@ -1072,8 +957,8 @@
           setTimeout(function () { loadWeiboComments(panel, true) }, 700)
           return
         }
-        listEl.innerHTML = '<p class="wb-cmt-empty">' + T('评论加载失败，稍后再试') +
-          ' <button type="button" class="wb-cmt-retry" style="margin-left:6px;padding:2px 10px;border:1px solid currentColor;border-radius:999px;background:transparent;color:inherit;font-size:12px;cursor:pointer">' + T('点击重试') + '</button></p>'
+        listEl.innerHTML = '<p class="wb-cmt-empty">' + '评论加载失败，稍后再试' +
+          ' <button type="button" class="wb-cmt-retry" style="margin-left:6px;padding:2px 10px;border:1px solid currentColor;border-radius:999px;background:transparent;color:inherit;font-size:12px;cursor:pointer">' + '点击重试' + '</button></p>'
       })
   }
 
@@ -1115,7 +1000,7 @@
     var tip = form.querySelector('.wb-cmt-tip')
     if (tip) {
       tip.innerHTML =
-        T('回复') + ' @' + esc(btn.getAttribute('data-name')) + ' <button type="button" class="wb-cmt-reply-cancel">' + T('取消') + '</button>'
+        '回复' + ' @' + esc(btn.getAttribute('data-name')) + ' <button type="button" class="wb-cmt-reply-cancel">' + '取消' + '</button>'
       var cancel = tip.querySelector('.wb-cmt-reply-cancel')
       if (cancel)
         cancel.addEventListener('click', function () {
@@ -1150,7 +1035,7 @@
     if (qq === null) return
     var label = btn ? btn.textContent : ''
     if (btn) {
-      btn.textContent = T('发送中…')
+      btn.textContent = '发送中…'
       btn.disabled = true
     }
     postJSON('/api/public/weibo/' + encodeURIComponent(wbId) + '/comments', {
@@ -1163,7 +1048,7 @@
       .then(function (d) {
         if (qq) storeSet('cmt-qq', qq)
         if (d && d.pending) {
-          if (tip) tip.textContent = T('已提交，审核通过后展示')
+          if (tip) tip.textContent = '已提交，审核通过后展示'
           content.value = ''
         } else {
           content.value = ''
@@ -1176,7 +1061,7 @@
         }
       })
       .catch(function (err) {
-        if (tip) tip.textContent = (err && err.message) || T('发送失败，请重试')
+        if (tip) tip.textContent = (err && err.message) || '发送失败，请重试'
       })
       .finally(function () {
         if (btn) {
@@ -1201,9 +1086,9 @@
       .catch(function () {
         var b = btn.querySelector('b')
         if (b) {
-          b.textContent = T('失败')
+          b.textContent = '失败'
           setTimeout(function () {
-            b.textContent = T('分享')
+            b.textContent = '分享'
           }, 2000)
         }
       })
@@ -1226,9 +1111,9 @@
       .catch(function () {
         var b = btn.querySelector('.share-label')
         if (b) {
-          b.textContent = T('失败')
+          b.textContent = '失败'
           setTimeout(function () {
-            b.textContent = T('分享')
+            b.textContent = '分享'
           }, 2000)
         }
       })
@@ -1312,7 +1197,7 @@
     var btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'wb-composer-add'
-    btn.textContent = T('😊 表情')
+    btn.textContent = '😊 表情'
     btn.setAttribute('data-wxq-btn', '')
     btn.addEventListener('click', function (e) {
       e.preventDefault()
@@ -1374,8 +1259,8 @@
     note.appendChild(
       document.createTextNode(
         err && err.code === 2
-          ? T('视频加载失败，多半是网络问题，刷新再试一次；也可以')
-          : T('这条视频的编码当前浏览器放不出来（常见于 H.265 / HEVC），换用 Safari / iPhone 可正常观看，或')
+          ? '视频加载失败，多半是网络问题，刷新再试一次；也可以'
+          : '这条视频的编码当前浏览器放不出来（常见于 H.265 / HEVC），换用 Safari / iPhone 可正常观看，或'
       )
     )
     if (src) {
@@ -1385,7 +1270,7 @@
       a.setAttribute('target', '_blank')
       a.setAttribute('rel', 'noopener noreferrer')
       a.setAttribute('style', 'color:#fff;text-decoration:underline;')
-      a.textContent = T('下载到本地播放')
+      a.textContent = '下载到本地播放'
       note.appendChild(a)
     }
     box.appendChild(note)
@@ -1431,7 +1316,7 @@
         cpTiles.hidden = !cpImages.length
         cpTiles.innerHTML = tileHtml(cpImages)
       }
-      if (cpAdd) cpAdd.textContent = EN ? addLabelEn(cpImages.length, WB_MAX_IMAGES) : '加图（' + cpImages.length + '/' + WB_MAX_IMAGES + '）'
+      if (cpAdd) cpAdd.textContent = '加图（' + cpImages.length + '/' + WB_MAX_IMAGES + '）'
       if (cpCount && cpText) cpCount.textContent = cpText.value.length + ' / ' + WB_MAX_CHARS
     }
 
@@ -1446,15 +1331,15 @@
 
     /** 加视频：单视频约束 + 类型/体积前置校验（省一次 25MB 白传）+ 进度 + 封面帧（best-effort） */
     function cpAddVideo(file) {
-      if (cpVideo) return cpMsg(EN ? 'One video per note — remove the current one first' : '一条微博只能带一个视频，先移除当前视频')
-      if (!isVideoFile(file)) return cpMsg(T('只支持 MP4 / WebM 视频'))
+      if (cpVideo) return cpMsg('一条微博只能带一个视频，先移除当前视频')
+      if (!isVideoFile(file)) return cpMsg('只支持 MP4 / WebM 视频')
       if (file.size > VIDEO_MAX_BYTES)
-        return cpMsg((EN ? 'Video must be under 25MB — this one is ' : '视频不能超过 25MB，当前 ') + fmtSize(file.size))
+        return cpMsg(('视频不能超过 25MB，当前 ') + fmtSize(file.size))
       var label = cpAdd ? cpAdd.textContent : ''
       cpUploading++
       if (cpAdd) {
         cpAdd.disabled = true
-        cpAdd.textContent = (EN ? 'Uploading ' : '上传视频 ') + '0%'
+        cpAdd.textContent = ('上传视频 ') + '0%'
       }
       // 元数据先到就先显示（时长/尺寸），赶在上传完成之前给回馈
       readVideoMeta(file, function (m) {
@@ -1465,17 +1350,17 @@
           cpVideo.h = m.h
         }
         cpRenderVideo()
-        cpMsg((EN ? 'Video added · ' : '已加视频 · ') + cpVideoMeta)
+        cpMsg(('已加视频 · ') + cpVideoMeta)
       })
       uploadVideo(file, function (pct) {
-        if (cpAdd) cpAdd.textContent = (EN ? 'Uploading ' : '上传视频 ') + pct + '%'
+        if (cpAdd) cpAdd.textContent = ('上传视频 ') + pct + '%'
       })
         .then(function (up) {
           cpVideo = { url: up.url, poster: '', w: 0, h: 0 }
           if (!cpVideoMeta) cpVideoMeta = fmtSize(file.size)
           cpRenderVideo()
           // HEVC（iPhone 默认的高效格式）只在部分浏览器能放：如实提示，让站长自己决定要不要换格式
-          if (up.hevc) cpMsg(T('HEVC 高效格式：Chrome / 安卓大部分浏览器放不出来（iPhone / Mac 可以，要全平台可播就导出 H.264 的 MP4）'))
+          if (up.hevc) cpMsg('HEVC 高效格式：Chrome / 安卓大部分浏览器放不出来（iPhone / Mac 可以，要全平台可播就导出 H.264 的 MP4）')
           // 封面帧慢一步补传：拿不到就保持无封面（卡片照常播放），不拖慢发布
           grabVideoPoster(file, function (shot) {
             if (!shot || !cpVideo || cpVideo.url !== up.url) return
@@ -1495,7 +1380,7 @@
           })
         })
         .catch(function (err) {
-          cpMsg((err && err.message) || T('上传失败'))
+          cpMsg((err && err.message) || '上传失败')
         })
         .finally(function () {
           cpUploading--
@@ -1521,22 +1406,22 @@
       if (vids.length) cpAddVideo(vids[0])
       var imgs = all.filter(function (f) { return /^image\//.test(f.type) })
       if (!imgs.length) {
-        if (all.length && !vids.length) cpMsg(T('只支持 JPG / PNG / WebP / GIF 图片'))
+        if (all.length && !vids.length) cpMsg('只支持 JPG / PNG / WebP / GIF 图片')
         return
       }
       var room = WB_MAX_IMAGES - cpImages.length
       if (room <= 0) {
-        cpMsg(EN ? 'At most ' + WB_MAX_IMAGES + ' photos' : '最多 ' + WB_MAX_IMAGES + ' 张图')
+        cpMsg('最多 ' + WB_MAX_IMAGES + ' 张图')
         return
       }
-      if (imgs.length > room) cpMsg(EN ? 'At most ' + WB_MAX_IMAGES + ' photos — extras ignored' : '最多 ' + WB_MAX_IMAGES + ' 张图，多出的已忽略')
+      if (imgs.length > room) cpMsg('最多 ' + WB_MAX_IMAGES + ' 张图，多出的已忽略')
       var label = cpAdd ? cpAdd.textContent : ''
       if (cpAdd) cpAdd.disabled = true
       var chain = Promise.resolve()
       imgs.slice(0, room).forEach(function (f) {
         chain = chain.then(function () {
           cpUploading++
-          if (cpAdd) cpAdd.textContent = (EN ? 'Uploading ' : '上传中 ') + f.name.slice(0, 12) + '…'
+          if (cpAdd) cpAdd.textContent = ('上传中 ') + f.name.slice(0, 12) + '…'
           return uploadCompressed(f)
             .then(function (url) {
               cpImages.push(url)
@@ -1549,7 +1434,7 @@
       })
       chain
         .catch(function (err) {
-          cpMsg((err && err.message) || T('上传失败'))
+          cpMsg((err && err.message) || '上传失败')
         })
         .finally(function () {
           if (cpAdd) {
@@ -1577,7 +1462,7 @@
         cpVideo = null
         cpVideoMeta = ''
         cpRenderVideo()
-        cpMsg(EN ? 'Video removed' : '已移除视频')
+        cpMsg('已移除视频')
       })
     }
 
@@ -1609,10 +1494,10 @@
     })
 
     function cpPublish(status) {
-      if (cpUploading > 0) return cpMsg(EN ? 'Media is still uploading — wait a moment' : '还有图片/视频在上传中，等一下再发')
+      if (cpUploading > 0) return cpMsg('还有图片/视频在上传中，等一下再发')
       var content = cpText ? cpText.value.trim() : ''
       if (!content && !cpImages.length && !cpVideo) {
-        cpMsg(T('写点什么，或者配张图 / 加段视频吧'))
+        cpMsg('写点什么，或者配张图 / 加段视频吧')
         return
       }
       cpButtons.forEach(function (b) { b.disabled = true })
@@ -1628,10 +1513,10 @@
           cpVideoMeta = ''
           cpRender()
           cpRenderVideo()
-          cpMsg(EN ? 'Draft saved — continue editing in the admin Notes page' : '草稿已保存，到后台「微博」页可继续编辑')
+          cpMsg('草稿已保存，到后台「微博」页可继续编辑')
         })
         .catch(function (err) {
-          cpMsg((err && err.message) || (EN ? 'Failed to publish — please try again' : '发布失败，请重试'))
+          cpMsg((err && err.message) || ('发布失败，请重试'))
         })
         .finally(function () {
           cpButtons.forEach(function (b) { b.disabled = false })
@@ -1757,7 +1642,7 @@
         '<div class="wb-video' + (portrait ? ' is-portrait' : '') + (v.poster ? '' : ' is-plain') + '">' +
         '<video controls playsinline preload="metadata"' + poster + ratio + '>' +
         '<source src="' + src + '" type="' + mime + '">' +
-        '<a class="wb-video-fallback" href="' + src + '" target="_blank" rel="noopener noreferrer">' + T('视频') + '</a>' +
+        '<a class="wb-video-fallback" href="' + src + '" target="_blank" rel="noopener noreferrer">' + '视频' + '</a>' +
         '</video>' + badge + '</div>'
       )
     }
@@ -1782,13 +1667,13 @@
       if (pinned && !pin && head) {
         pin = document.createElement('span')
         pin.className = 'wb-pin'
-        pin.textContent = T('置顶')
+        pin.textContent = '置顶'
         head.appendChild(pin)
       }
       if (!pinned && pin) pin.remove()
       var btn = card.querySelector('[data-wb-act="pin"]')
       if (btn) {
-        btn.textContent = pinned ? T('取消置顶') : T('置顶')
+        btn.textContent = pinned ? '取消置顶' : '置顶'
         btn.disabled = false
       }
     }
@@ -1810,15 +1695,15 @@
       form.className = 'wb-edit'
       form.setAttribute('data-wb-edit', '')
       form.innerHTML =
-        '<textarea class="wb-composer-textarea" name="content" maxlength="5000" rows="5" placeholder="' + T('说点什么…') + '"></textarea>' +
+        '<textarea class="wb-composer-textarea" name="content" maxlength="5000" rows="5" placeholder="' + '说点什么…' + '"></textarea>' +
         '<div class="wb-composer-tiles" hidden></div>' +
         '<div class="wb-composer-video" hidden></div>' +
         '<div class="wb-composer-foot">' +
-        '<button type="button" class="wb-composer-add" title="' + T('图片 / 视频，一条微博最多 1 个视频') + '">' + (EN ? addLabelEn(0, WB_MAX_IMAGES) : '加图（0/' + WB_MAX_IMAGES + '）') + '</button>' +
+        '<button type="button" class="wb-composer-add" title="' + '图片 / 视频，一条微博最多 1 个视频' + '">' + ('加图（0/' + WB_MAX_IMAGES + '）') + '</button>' +
         '<span class="wb-composer-count">0 / ' + WB_MAX_CHARS + '</span>' +
         '<span class="wb-composer-tip" aria-live="polite"></span>' +
-        '<button type="button" class="wb-composer-draft" data-wb-edit-cancel>' + T('取消') + '</button>' +
-        '<button type="button" class="wb-composer-publish" data-wb-edit-save>' + T('保存') + '</button>' +
+        '<button type="button" class="wb-composer-draft" data-wb-edit-cancel>' + '取消' + '</button>' +
+        '<button type="button" class="wb-composer-publish" data-wb-edit-save>' + '保存' + '</button>' +
         '</div>'
       form.addEventListener('submit', function (e) { e.preventDefault() })
       if (foot) card.insertBefore(form, foot)
@@ -1850,7 +1735,7 @@
       function renderTiles() {
         tiles.hidden = !images.length
         tiles.innerHTML = tileHtml(images)
-        addBtn.textContent = EN ? addLabelEn(images.length, WB_MAX_IMAGES) : '加图（' + images.length + '/' + WB_MAX_IMAGES + '）'
+        addBtn.textContent = '加图（' + images.length + '/' + WB_MAX_IMAGES + '）'
         countEl.textContent = ta.value.length + ' / ' + WB_MAX_CHARS
       }
 
@@ -1862,14 +1747,14 @@
 
       /** 加视频：类型 / 体积前置校验 + 进度 + 封面帧（best-effort）；与顶部发布器同一套流程 */
       function addVideoFile(file) {
-        if (video) return tip(EN ? 'One video per note — remove the current one first' : '一条微博只能带一个视频，先移除当前视频')
-        if (!isVideoFile(file)) return tip(T('只支持 MP4 / WebM 视频'))
+        if (video) return tip('一条微博只能带一个视频，先移除当前视频')
+        if (!isVideoFile(file)) return tip('只支持 MP4 / WebM 视频')
         if (file.size > VIDEO_MAX_BYTES)
-          return tip((EN ? 'Video must be under 25MB — this one is ' : '视频不能超过 25MB，当前 ') + fmtSize(file.size))
+          return tip(('视频不能超过 25MB，当前 ') + fmtSize(file.size))
         var label = addBtn.textContent
         uploading++
         addBtn.disabled = true
-        addBtn.textContent = (EN ? 'Uploading ' : '上传视频 ') + '0%'
+        addBtn.textContent = ('上传视频 ') + '0%'
         readVideoMeta(file, function (m) {
           if (!m) return
           videoMeta = fmtSize(file.size) + (fmtDuration(m.duration) ? ' · ' + fmtDuration(m.duration) : '')
@@ -1878,16 +1763,16 @@
             video.h = m.h
           }
           renderVideo()
-          tip((EN ? 'Video added · ' : '已加视频 · ') + videoMeta)
+          tip(('已加视频 · ') + videoMeta)
         })
         uploadVideo(file, function (pct) {
-          addBtn.textContent = (EN ? 'Uploading ' : '上传视频 ') + pct + '%'
+          addBtn.textContent = ('上传视频 ') + pct + '%'
         })
           .then(function (up) {
             video = { url: up.url, poster: '', w: 0, h: 0 }
             if (!videoMeta) videoMeta = fmtSize(file.size)
             renderVideo()
-            if (up.hevc) tip(T('HEVC 高效格式：Chrome / 安卓大部分浏览器放不出来（iPhone / Mac 可以，要全平台可播就导出 H.264 的 MP4）'))
+            if (up.hevc) tip('HEVC 高效格式：Chrome / 安卓大部分浏览器放不出来（iPhone / Mac 可以，要全平台可播就导出 H.264 的 MP4）')
             grabVideoPoster(file, function (shot) {
               if (!shot || !video || video.url !== up.url) return
               uploadImage(new File([shot.blob], 'poster.jpg', { type: 'image/jpeg' }))
@@ -1906,7 +1791,7 @@
             })
           })
           .catch(function (err) {
-            tip((err && err.message) || T('上传失败'))
+            tip((err && err.message) || '上传失败')
           })
           .finally(function () {
             uploading--
@@ -1928,7 +1813,7 @@
         video = null
         videoMeta = ''
         renderVideo()
-        tip(EN ? 'Video removed' : '已移除视频')
+        tip('已移除视频')
       })
 
       function addFiles(fileList) {
@@ -1939,14 +1824,14 @@
         var imgs = all.filter(function (f) { return /^image\//.test(f.type) })
         if (!imgs.length) return
         var room = WB_MAX_IMAGES - images.length
-        if (room <= 0) return tip(EN ? 'At most ' + WB_MAX_IMAGES + ' photos' : '最多 ' + WB_MAX_IMAGES + ' 张图')
+        if (room <= 0) return tip('最多 ' + WB_MAX_IMAGES + ' 张图')
         var label = addBtn.textContent
         addBtn.disabled = true
         var chain = Promise.resolve()
         imgs.slice(0, room).forEach(function (f) {
           chain = chain.then(function () {
             uploading++
-            addBtn.textContent = (EN ? 'Uploading ' : '上传中 ') + f.name.slice(0, 12) + '…'
+            addBtn.textContent = ('上传中 ') + f.name.slice(0, 12) + '…'
             return uploadCompressed(f)
               .then(function (url) {
                 images.push(url)
@@ -1958,7 +1843,7 @@
           })
         })
         chain
-          .catch(function (err) { tip((err && err.message) || T('上传失败')) })
+          .catch(function (err) { tip((err && err.message) || '上传失败') })
           .finally(function () {
             addBtn.disabled = false
             addBtn.textContent = label
@@ -2000,10 +1885,10 @@
       cancelBtn.addEventListener('click', leaveEdit)
 
       saveBtn.addEventListener('click', function () {
-        if (uploading > 0) return tip(EN ? 'Media is still uploading — wait a moment' : '还有图片/视频在上传中，等一下再保存')
+        if (uploading > 0) return tip('还有图片/视频在上传中，等一下再保存')
         var content = ta.value.trim()
-        if (!content && !images.length && !video) return tip(T('写点什么，或者配张图 / 加段视频吧'))
-        saveBtn.textContent = T('保存中…')
+        if (!content && !images.length && !video) return tip('写点什么，或者配张图 / 加段视频吧')
+        saveBtn.textContent = '保存中…'
         saveBtn.disabled = true
         cancelBtn.disabled = true
         // 全量更新：images 必须回传，video 显式回传（null = 清除），不然配图 / 视频会被清空
@@ -2014,7 +1899,7 @@
         })
           .then(function (r) {
             return r.json().then(function (d) {
-              if (!r.ok) throw new Error((d && d.error) || T('保存失败'))
+              if (!r.ok) throw new Error((d && d.error) || '保存失败')
               // 就地更新正文与配图（渲染与后端 weiboTextHtml / weiboImageGrid 同口径）
               if (content) {
                 if (!textEl) {
@@ -2060,8 +1945,8 @@
             })
           })
           .catch(function (err) {
-            tip((err && err.message) || T('保存失败，请重试'))
-            saveBtn.textContent = T('保存')
+            tip((err && err.message) || '保存失败，请重试')
+            saveBtn.textContent = '保存'
             saveBtn.disabled = false
             cancelBtn.disabled = false
           })
@@ -2086,7 +1971,7 @@
         })
         .catch(function (err) {
           ta.disabled = false
-          tip((err && err.message) || T('加载失败，请取消后重新进编辑'))
+          tip((err && err.message) || '加载失败，请取消后重新进编辑')
         })
     }
 
@@ -2112,24 +1997,24 @@
             }
           })
           .catch(function (err) {
-            flashBtn(btn, (err && err.message) || T('操作失败'))
+            flashBtn(btn, (err && err.message) || '操作失败')
           })
       } else if (act === 'del') {
         // 软删进回收站（后台可恢复，30 天后自动彻底清除）；前台无恢复入口，去后台「回收站」页操作
-        if (!confirm(EN ? 'Delete this note? It moves to the admin trash and can be restored within 30 days.' : '确定删除这条微博？将移入后台回收站，30 天内可恢复。')) return
-        btn.textContent = T('删除中…')
+        if (!confirm('确定删除这条微博？将移入后台回收站，30 天内可恢复。')) return
+        btn.textContent = '删除中…'
         btn.disabled = true
         fetch('/api/admin/weibo/' + encodeURIComponent(id), { method: 'DELETE' })
           .then(function (r) {
             return r.json().then(function (d) {
-              if (!r.ok) throw new Error((d && d.error) || T('删除失败'))
+              if (!r.ok) throw new Error((d && d.error) || '删除失败')
               card.style.transition = 'opacity .25s ease'
               card.style.opacity = '0'
               setTimeout(function () { card.remove() }, 260)
             })
           })
           .catch(function (err) {
-            flashBtn(btn, (err && err.message) || T('删除失败'))
+            flashBtn(btn, (err && err.message) || '删除失败')
           })
       }
     })
@@ -2148,7 +2033,7 @@
     var btn = form.querySelector('.fl-submit')
     if (!name.value.trim() || !url.value.trim()) return
     var label = btn.textContent
-    btn.textContent = T('提交中…')
+    btn.textContent = '提交中…'
     btn.disabled = true
     postJSON('/api/public/links/apply', {
       name: name.value.trim(),
@@ -2160,10 +2045,10 @@
         name.value = ''
         url.value = ''
         if (desc) desc.value = ''
-        if (tip) tip.textContent = T('已提交，站长审核通过后就会展示在这里 🎉')
+        if (tip) tip.textContent = '已提交，站长审核通过后就会展示在这里 🎉'
       })
       .catch(function (err) {
-        if (tip) tip.textContent = (err && err.message) || T('提交失败，请重试')
+        if (tip) tip.textContent = (err && err.message) || '提交失败，请重试'
       })
       .finally(function () {
         btn.textContent = label
@@ -2323,7 +2208,7 @@
     cancel.className = 'xw-sheet-cancel'
     cancel.setAttribute('role', 'button')
     cancel.setAttribute('tabindex', '0')
-    cancel.textContent = T('取消')
+    cancel.textContent = '取消'
     cancel.addEventListener('click', xwCloseSheet)
     panel.appendChild(card)
     panel.appendChild(cancel)
@@ -2434,7 +2319,7 @@
           var b = document.createElement('button')
           b.type = 'button'
           b.className = 'xw-fs-btn' + (i === cur ? ' is-on' : '')
-          b.textContent = T(FS_LABELS[i])
+          b.textContent = FS_LABELS[i]
           b.addEventListener('click', function () {
             fsSet(i)
             for (var k = 0; k < btns.length; k++) {
@@ -2446,17 +2331,17 @@
           btns.push(b)
         })(i)
       }
-      return xwSheetRow(XW_ICONS.font, T('字号'), null, seg)
+      return xwSheetRow(XW_ICONS.font, '字号', null, seg)
     }
 
     function copyLink() {
       xwCopyText(
         location.href,
         function () {
-          xwToast(T('已复制链接'))
+          xwToast('已复制链接')
         },
         function () {
-          xwToast(T('复制链接失败'))
+          xwToast('复制链接失败')
         }
       )
     }
@@ -2479,11 +2364,11 @@
     function openMore() {
       xwOpenSheet(
         [
-          xwSheetRow(XW_ICONS.share, T('分享'), function () {
+          xwSheetRow(XW_ICONS.share, '分享', function () {
             xwCloseSheet()
             doShare()
           }),
-          xwSheetRow(XW_ICONS.link, T('复制链接'), function () {
+          xwSheetRow(XW_ICONS.link, '复制链接', function () {
             xwCloseSheet()
             copyLink()
           }),
@@ -2498,8 +2383,8 @@
     fab.type = 'button'
     fab.id = 'xw-more'
     fab.className = 'xw-more-fab'
-    fab.setAttribute('aria-label', T('更多操作'))
-    fab.title = T('更多操作')
+    fab.setAttribute('aria-label', '更多操作')
+    fab.title = '更多操作'
     fab.innerHTML =
       '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>'
     fab.addEventListener('click', openMore)
@@ -2768,7 +2653,7 @@
           if (!url) return
           xwOpenSheet(
             [
-              xwSheetRow(XW_ICONS.download, T('保存图片'), function () {
+              xwSheetRow(XW_ICONS.download, '保存图片', function () {
                 xwCloseSheet()
                 var a = document.createElement('a')
                 a.href = url
@@ -2777,12 +2662,12 @@
                 document.body.appendChild(a)
                 a.click()
                 document.body.removeChild(a)
-                xwToast(T('已保存，若未开始下载请长按图片另存'))
+                xwToast('已保存，若未开始下载请长按图片另存')
               }),
-              xwSheetRow(XW_ICONS.link, T('复制图片地址'), function () {
+              xwSheetRow(XW_ICONS.link, '复制图片地址', function () {
                 xwCloseSheet()
                 xwCopyText(url, function () {
-                  xwToast(T('已复制图片地址'))
+                  xwToast('已复制图片地址')
                 })
               }),
             ],
@@ -2819,8 +2704,8 @@
   ;(function () {
     var btn = document.createElement('button')
     btn.type = 'button'
-    btn.setAttribute('aria-label', T('返回顶部'))
-    btn.title = T('返回顶部')
+    btn.setAttribute('aria-label', '返回顶部')
+    btn.title = '返回顶部'
     btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>'
     btn.style.cssText =
       'display:none;position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:50;' +
@@ -2853,7 +2738,7 @@
       btn.textContent = text
       clearTimeout(btn.__xwTimer)
       btn.__xwTimer = setTimeout(function () {
-        btn.textContent = T('复制代码')
+        btn.textContent = '复制代码'
       }, 1400)
     }
     function legacyCopy(text) {
@@ -2879,8 +2764,8 @@
         wrap.appendChild(pre)
         var btn = document.createElement('button')
         btn.type = 'button'
-        btn.textContent = T('复制代码')
-        btn.setAttribute('aria-label', T('复制代码'))
+        btn.textContent = '复制代码'
+        btn.setAttribute('aria-label', '复制代码')
         btn.style.cssText =
           'position:absolute;top:8px;right:8px;z-index:1;padding:4px 10px;font-size:12px;line-height:1.4;' +
           'border:1px solid rgba(0,0,0,0.1);border-radius:8px;cursor:pointer;' +
@@ -2890,10 +2775,10 @@
           e.stopPropagation()
           var text = pre.innerText || pre.textContent || ''
           var done = function () {
-            flash(btn, T('已复制'))
+            flash(btn, '已复制')
           }
           var fail = function () {
-            flash(btn, T('复制失败'))
+            flash(btn, '复制失败')
           }
           if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(text).then(done, function () {
@@ -2940,8 +2825,8 @@
           a.className = 'xw-hanchor'
           a.href = '#' + h.id
           a.textContent = '¶'
-          a.title = T('复制本节链接')
-          a.setAttribute('aria-label', T('复制本节链接'))
+          a.title = '复制本节链接'
+          a.setAttribute('aria-label', '复制本节链接')
           a.style.cssText = 'margin-left:8px;font-weight:400;text-decoration:none;opacity:0.55;color:inherit;'
           a.addEventListener('click', function (e) {
             e.preventDefault()
@@ -3128,12 +3013,12 @@
           var mailIn = email ? email.value.trim() : ''
           var mailAgain = emailConfirm ? emailConfirm.value.trim() : ''
           if (!mailIn) {
-            if (tip) tip.textContent = T('请填写邮箱')
+            if (tip) tip.textContent = '请填写邮箱'
             if (email) email.focus()
             return
           }
           if (mailIn.toLowerCase() !== mailAgain.toLowerCase()) {
-            if (tip) tip.textContent = T('两次输入的邮箱不一致，请核对')
+            if (tip) tip.textContent = '两次输入的邮箱不一致，请核对'
             if (emailConfirm) {
               emailConfirm.focus()
               emailConfirm.select()
@@ -3142,7 +3027,7 @@
           }
         }
         var label = btn.textContent
-        btn.textContent = kind === 'register' ? T('注册中…') : T('登录中…')
+        btn.textContent = kind === 'register' ? '注册中…' : '登录中…'
         btn.disabled = true
         var body = { username: username.value.trim(), password: password.value, link: link ? link.value : '' }
         if (kind === 'register') {
@@ -3157,7 +3042,7 @@
           if (turnstileSiteKey) {
             var tok = turnstileToken()
             if (!tok) {
-              if (tip) tip.textContent = T(turnstileReady ? '请先完成人机验证' : '人机验证还没就绪，请稍候再试')
+              if (tip) tip.textContent = turnstileReady ? '请先完成人机验证' : '人机验证还没就绪，请稍候再试'
               btn.textContent = label
               btn.disabled = false
               return
@@ -3167,13 +3052,13 @@
         }
         postJSON('/api/member/' + kind, body)
           .then(function () {
-            if (tip) tip.textContent = kind === 'register' ? T('注册成功，正在进入…') : T('登录成功，正在进入…')
+            if (tip) tip.textContent = kind === 'register' ? '注册成功，正在进入…' : '登录成功，正在进入…'
             setTimeout(function () {
               reloadFresh()
             }, 500)
           })
           .catch(function (err) {
-            if (tip) tip.textContent = err.message || T('操作失败，请重试')
+            if (tip) tip.textContent = err.message || '操作失败，请重试'
             btn.textContent = label
             btn.disabled = false
             if (kind === 'register') turnstileReset()
@@ -3192,21 +3077,21 @@
       var input = memNickForm.querySelector('[name=nickname]')
       if (!btn || btn.disabled) return
       if (!input || !input.value.trim()) {
-        if (tip) tip.textContent = T('昵称不能为空')
+        if (tip) tip.textContent = '昵称不能为空'
         return
       }
       var label = btn.textContent
       btn.disabled = true
-      btn.textContent = T('保存中…')
+      btn.textContent = '保存中…'
       postJSON('/api/member/profile', { nickname: input.value.trim() })
         .then(function () {
-          if (tip) tip.textContent = T('昵称已更新，正在刷新…')
+          if (tip) tip.textContent = '昵称已更新，正在刷新…'
           setTimeout(function () {
             reloadFresh()
           }, 500)
         })
         .catch(function (err) {
-          if (tip) tip.textContent = err.message || T('保存失败，请重试')
+          if (tip) tip.textContent = err.message || '保存失败，请重试'
           btn.textContent = label
           btn.disabled = false
         })
@@ -3225,28 +3110,28 @@
       if (!btn || btn.disabled) return
       var qq = input ? input.value.trim() : ''
       if (!/^[1-9][0-9]{4,10}$/.test(qq)) {
-        if (tip) tip.textContent = T('QQ 号格式不对（5-11 位数字，不以 0 开头）')
+        if (tip) tip.textContent = 'QQ 号格式不对（5-11 位数字，不以 0 开头）'
         return
       }
       var label = btn.textContent
       btn.disabled = true
-      btn.textContent = T('保存中…')
+      btn.textContent = '保存中…'
       postJSON('/api/member/profile', { qq: qq })
         .then(function (d) {
           if (d && d.avatarFailed) {
             // 头像抓取失败但 qq 已记上：提示重试（服务端容忍失败是设计口径）
-            if (tip) tip.textContent = T('QQ 已绑定，但头像没抓到，稍后再点一次重试')
-            btn.textContent = T('重试头像')
+            if (tip) tip.textContent = 'QQ 已绑定，但头像没抓到，稍后再点一次重试'
+            btn.textContent = '重试头像'
             btn.disabled = false
           } else {
-            if (tip) tip.textContent = T('已保存，正在刷新…')
+            if (tip) tip.textContent = '已保存，正在刷新…'
             setTimeout(function () {
               reloadFresh()
             }, 500)
           }
         })
         .catch(function (err) {
-          if (tip) tip.textContent = err.message || T('保存失败，请重试')
+          if (tip) tip.textContent = err.message || '保存失败，请重试'
           btn.textContent = label
           btn.disabled = false
         })
@@ -3263,26 +3148,26 @@
       var next = memPwdForm.querySelector('[name=next]')
       if (!btn || btn.disabled) return
       if (!cur || !cur.value || !next || !next.value) {
-        if (tip) tip.textContent = T('请填写当前密码与新密码')
+        if (tip) tip.textContent = '请填写当前密码与新密码'
         return
       }
       if (next.value.length < 8) {
-        if (tip) tip.textContent = T('新密码至少 8 位')
+        if (tip) tip.textContent = '新密码至少 8 位'
         return
       }
       var label = btn.textContent
       btn.disabled = true
-      btn.textContent = T('提交中…')
+      btn.textContent = '提交中…'
       postJSON('/api/member/password', { currentPassword: cur.value, newPassword: next.value })
         .then(function () {
-          if (tip) tip.textContent = T('密码已修改，其他设备已退出登录。请务必记好新密码')
+          if (tip) tip.textContent = '密码已修改，其他设备已退出登录。请务必记好新密码'
           if (cur) cur.value = ''
           if (next) next.value = ''
           btn.textContent = label
           btn.disabled = false
         })
         .catch(function (err) {
-          if (tip) tip.textContent = err.message || T('修改失败，请重试')
+          if (tip) tip.textContent = err.message || '修改失败，请重试'
           btn.textContent = label
           btn.disabled = false
         })
@@ -3300,16 +3185,16 @@
       postJSON('/api/member/checkin', {})
         .then(function (d) {
           if (card) card.setAttribute('data-checked', '1')
-          memCheckinBtn.textContent = T('已签到')
+          memCheckinBtn.textContent = '已签到'
           memCheckinBtn.disabled = true
-          var extra = d.bonus ? T('，连续签到加成 +') + d.bonus : ''
-          if (tip) tip.textContent = T('签到成功 +') + d.delta + extra + T('，当前连续 ') + d.streak + T(' 天')
+          var extra = d.bonus ? '，连续签到加成 +' + d.bonus : ''
+          if (tip) tip.textContent = '签到成功 +' + d.delta + extra + '，当前连续 ' + d.streak + ' 天'
           setTimeout(function () {
             reloadFresh()
           }, 1200)
         })
         .catch(function (err) {
-          if (tip) tip.textContent = err.message || T('签到失败，请重试')
+          if (tip) tip.textContent = err.message || '签到失败，请重试'
           memCheckinBtn.disabled = false
         })
     })
@@ -3322,19 +3207,19 @@
       if (memRedeemBtn.disabled) return
       var tip = document.querySelector('[data-member-redeem-tip]')
       var label = memRedeemBtn.textContent
-      if (!confirm(T('确认用积分兑换会员？兑换后积分不退。'))) return
+      if (!confirm('确认用积分兑换会员？兑换后积分不退。')) return
       memRedeemBtn.disabled = true
-      memRedeemBtn.textContent = T('兑换中…')
+      memRedeemBtn.textContent = '兑换中…'
       postJSON('/api/member/redeem-premium', {})
         .then(function (d) {
-          memRedeemBtn.textContent = T('兑换成功')
-          if (tip) tip.textContent = T('已升级为「') + d.tierName + T('」，剩余积分 ') + d.points
+          memRedeemBtn.textContent = '兑换成功'
+          if (tip) tip.textContent = '已升级为「' + d.tierName + '」，剩余积分 ' + d.points
           setTimeout(function () {
             reloadFresh()
           }, 1200)
         })
         .catch(function (err) {
-          if (tip) tip.textContent = err.message || T('兑换失败，请重试')
+          if (tip) tip.textContent = err.message || '兑换失败，请重试'
           memRedeemBtn.textContent = label
           memRedeemBtn.disabled = false
         })
@@ -3352,7 +3237,7 @@
         })
         .catch(function (err) {
           memLogout.disabled = false
-          memLogout.textContent = err.message || T('退出失败，请重试')
+          memLogout.textContent = err.message || '退出失败，请重试'
           setTimeout(function () {
             memLogout.textContent = label
           }, 2000)

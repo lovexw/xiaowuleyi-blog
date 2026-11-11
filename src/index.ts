@@ -6,7 +6,6 @@ import { cleanBotPath, identifyBot, purgeBots, recordBot, shouldRecordBot } from
 import { siteClosedResponse } from './closed'
 import { clientIp, getCookie, getMemberUser, getSessionUser, isSecureRequest, rateLimit } from './auth'
 import { ensureSchema, getPostBySlug, getSettings, listCategories, listPages, listPosts, listPublishedTags, listSitemapCategoryLastmod, listSitemapPages, listSitemapPosts, listWeiboLastmod } from './db'
-import { isEn, recordEditionFailure } from './i18n'
 import { buildLlmsFullTxt, buildLlmsStub, buildLlmsTxt } from './llms'
 import { mcpRoutes } from './mcp'
 import { goPageHtml, isTrustedOutHost } from './outlink'
@@ -24,7 +23,7 @@ import { mimeOfKey, variantBaseKey } from './store'
 import { purgeTrash } from './trash'
 import { purgeMemberVisits, recountWeiboCount, refreshFootStats, refreshOnThisDay } from './db'
 import type { Env, SessionUser } from './types'
-import { fmtDate, isDemo, siteVisibleCutoff, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { fmtDate, siteVisibleCutoff, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser | null } }>()
 
@@ -48,12 +47,6 @@ function ensureSchemaOnce(db: D1Database): Promise<void> {
   return p
 }
 app.use('*', async (c, next) => {
-  // 演示站：先幂等建表再自播种（空库冷启动要抢在 ensureSchema 之前——ensureSchema 是增量
-  // 迁移层，基础表不存在时自己会先炸）；播种期间并发请求短暂等待
-  if (isDemo(c.env)) {
-    const demo = await import('./demo')
-    await demo.demoEnsureSeeded(c.env)
-  }
   await ensureSchemaOnce(c.env.DB)
   await next()
 })
@@ -99,7 +92,7 @@ app.use('*', async (c, next) => {
 app.use('*', htmlEtagMiddleware())
 
 /* ---------------- 页面边缘缓存（src/pagecache.ts）：公开页 / 订阅源 / 公开只读 API · 匿名访客 · 30 分钟副本 ----------------
- * 命中直接吐响应跳过 SSR/API 与 D1。登录 Cookie / 演示站 / 灰度一律不进缓存；带 query 走受控
+ * 命中直接吐响应跳过 SSR/API 与 D1。登录 Cookie / 灰度一律不进缓存；带 query 走受控
  * 白名单（page/limit/wb/topic/q/sort/tag 镜像服务端 clamp 语义进键，未知参数 / sort=random 回源）。
  * 注册位必须在所有页面路由与 /api、/mcp 子应用之前（终点 handler 不调 next），且在闭站 /
  * 爬虫统计之后；设置变更 saveSettings 自动换代作废，后台「概览 → 系统」可一键清理 */
@@ -109,44 +102,28 @@ app.route('/api', api)
 // MCP 服务器（AI 助手接入，src/mcp.ts）：复用 externalToken 鉴权；闭站中间件自动覆盖（不进白名单）
 app.route('/mcp', mcpRoutes)
 
-/* ---------------- 英文测试版守卫（English 0.1，机制见 src/i18n.ts） ----------------
- * 英文版渲染抛错时：落库 editionEnStatus=fallback（下一次 getSettings 起 isEn=false，全站自动
- * 回到中文版）并当场用中文重渲染同一请求——访客无感，后台横幅提醒 + 记录错误摘要，人工重新开启 */
-type PublicHandler = (c: Context<{ Bindings: Env; Variables: { user: SessionUser | null } }>) => Promise<Response>
-function enGuard(h: PublicHandler): PublicHandler {
-  return async (c) => {
-    const settings = await getSettings(c.env.DB)
-    if (!isEn(settings)) return h(c)
-    try {
-      return await h(c)
-    } catch (err) {
-      console.error('[en-edition] render failed, falling back to zh:', err)
-      await recordEditionFailure(c.env.DB, err)
-      return h(c)
-    }
-  }
-}
-
 /* ---------------- 公开页面（SSR + 主题渲染） ---------------- */
+/** 公开页 handler 的统一签名：RSS / sitemap 这类需要复用同一份上下文类型 */
+type PublicHandler = (c: Context<{ Bindings: Env; Variables: { user: SessionUser | null } }>) => Promise<Response>
 // WordPress 风格订阅盲猜（/?feed=rss2 / rss / atom 等）：统一 302 到规范订阅地址
 // （须注册在 renderHome 之前——终点 handler 不调 next，后注册的中间件不会再被执行）
 app.get('/', async (c, next) => {
   if (c.req.query('feed')) return c.redirect('/rss.xml')
   await next()
 })
-app.get('/', enGuard(renderHome))
-app.get('/tag/:tag', enGuard(renderHome))
-app.get('/category/:slug', enGuard(renderCategory))
-app.get('/post/:slug', enGuard(renderPost))
-app.get('/page/:slug', enGuard(renderPage))
-app.get('/about', enGuard(renderAbout))
-app.get('/archives', enGuard(renderArchive))
-app.get('/guestbook', enGuard(renderGuestbook))
-app.get('/weibo', enGuard((c) => renderWeibo(c)))
-app.get('/links', enGuard(renderLinks))
-app.get('/member', enGuard(renderMember))
-app.get('/rank', enGuard(renderRank))
-app.get('/search', enGuard(renderSearch))
+app.get('/', renderHome)
+app.get('/tag/:tag', renderHome)
+app.get('/category/:slug', renderCategory)
+app.get('/post/:slug', renderPost)
+app.get('/page/:slug', renderPage)
+app.get('/about', renderAbout)
+app.get('/archives', renderArchive)
+app.get('/guestbook', renderGuestbook)
+app.get('/weibo', (c) => renderWeibo(c))
+app.get('/links', renderLinks)
+app.get('/member', renderMember)
+app.get('/rank', renderRank)
+app.get('/search', renderSearch)
 
 // 随机来一篇：从已发布文章里随机挑一篇跳过去（加密文章不进随机池——落上去就是一堵密码墙）
 app.get('/random', async (c) => {
@@ -189,7 +166,7 @@ app.get('/go', async (c) => {
     c.header('X-Content-Type-Options', 'nosniff')
     c.header('Referrer-Policy', 'no-referrer')
     c.header('Cache-Control', 'no-store')
-    return c.html(goPageHtml(target, settings.siteName || 'BlogHao', isEn(settings)))
+    return c.html(goPageHtml(target, settings.siteName || 'BlogHao'))
   }
   return c.redirect('/')
 })
@@ -300,20 +277,19 @@ app.get('/sitemap.xml', async (c) => {
   )
 })
 
-/** robots.txt（B20）：内置段 + 后台「设置 → 站点」的 robots 追加段（src/seo.ts buildRobotsTxt）；
- *  演示站固定整站 Disallow（种子数据与闭站状态不该进索引），追加段不参与 */
+/** robots.txt（B20）：内置段 + 后台「设置 → 站点」的 robots 追加段（src/seo.ts buildRobotsTxt） */
 app.get('/robots.txt', async (c) => {
   const settings = await getSettings(c.env.DB)
   // Sitemap 行必须走 siteBase（settings.siteUrl 优先）：sitemap 本体 / RSS / canonical /
   // llms 全站绝对 URL 都以 siteUrl 为准，robots 跟请求 Host 会在别名域名 / 错误 Host /
   // 反代漏传 XFP（scheme 降级）时把爬虫引去错误主机（2026-11 审计 P1-4）
-  return c.text(buildRobotsTxt(settings, siteBase(settings, new URL(c.req.url).origin), isDemo(c.env)))
+  return c.text(buildRobotsTxt(settings, siteBase(settings, new URL(c.req.url).origin)))
 })
 
 /* ---------------- AI 索引导读（llms.txt / llms-full.txt，B28）----------------
  * 新兴 AI 抓取导读约定（llmstxt.org；Cloudflare 阻止响应的内置放行路径）。文章清单走 listPosts
  * 的同一份公开口径（status=published + 站点可见窗口 + 软删过滤），防泄漏清单在 src/llms.ts 头注；
- * 演示站 / siteNoindex / AI 策略 deny 档出桩（与 robots.txt 整站 Disallow 同口径）；两路径已进
+ * siteNoindex / AI 策略 deny 档出桩（与 robots.txt 整站 Disallow 同口径）；两路径已进
  * pagecache 数据白名单 */
 const llmsHandler = (full: boolean): PublicHandler => async (c) => {
   const settings = await getSettings(c.env.DB)
@@ -321,11 +297,11 @@ const llmsHandler = (full: boolean): PublicHandler => async (c) => {
   c.header('Content-Type', 'text/markdown; charset=utf-8')
   c.header('Cache-Control', 'public, max-age=600')
   setSignalHeader(c, settings)
-  // AI 策略 deny 档：llms 面本就是给 AI 看的导读，robots 全拒时整体关闭（桩文案指向策略而非演示）。
-  // siteNoindex 的真实站单独出「不收录」文案，不冒充演示站（2026-11 审计 P2-14）
+  // AI 策略 deny 档：llms 面本就是给 AI 看的导读，robots 全拒时整体关闭（桩文案指向策略）。
+  // siteNoindex 的真实站单独出「不收录」文案（2026-11 审计 P2-14）
   const aiDenied = readAiPolicy(settings.aiPolicy) === 'deny'
-  const noindex = !isDemo(c.env) && settings.siteNoindex === '1'
-  if (isDemo(c.env) || noindex || aiDenied) return c.body(buildLlmsStub(settings, siteUrl, aiDenied, noindex))
+  const noindex = settings.siteNoindex === '1'
+  if (noindex || aiDenied) return c.body(buildLlmsStub(settings, siteUrl, aiDenied, noindex))
   const [feed, pages, tags] = await Promise.all([
     listPosts(c.env.DB, { status: 'published', limit: full ? 50 : 100, afterTs: siteVisibleCutoff(settings) }),
     listPages(c.env.DB, { status: 'published' }),
@@ -480,15 +456,6 @@ export default {
         } catch (e) {
           // 迁移失败不阻塞 cron：后续查询自会报错并走各自的兜底提醒
           console.error('ensureSchema (cron) failed:', e)
-        }
-        // 演示站的重置 cron（每 2 小时）优先处理：清库重灌种子数据，之后本轮到此为止
-        if (isDemo(env)) {
-          try {
-            const demo = await import('./demo')
-            if (await demo.demoScheduled(controller, env)) return
-          } catch (e) {
-            console.error('demo scheduled failed:', e)
-          }
         }
         await runScheduledPublish(env)
         if (isBackupCron) {

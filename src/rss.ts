@@ -1,20 +1,16 @@
 import type { PostRow, SettingsMap } from './types'
 import { parseTags } from './db'
-import { isEn, tr } from './i18n'
 import { siteMode } from './render'
 import { sanitizeHtml } from './sanitize'
 import { esc, fmtDate, isoDate, teaserHtml } from './utils'
 import { cdata, rfc822, xmlEsc } from './xml'
 
 /** 会员锁文在 RSS / JSON Feed 里的尾注（防泄漏契约 A2：locked 只出试读段 + 引导） */
-function memberOnlySuffix(en: boolean): string {
-  return en
-    ? '<p>— The rest of this post is members-only. Log in as a member on the site to keep reading.</p>'
-    : '<p>—— 本文为会员专属内容，剩余部分请到站点登录会员后阅读。</p>'
+function memberOnlySuffix(): string {
+  return '<p>—— 本文为会员专属内容，剩余部分请到站点登录会员后阅读。</p>'
 }
 
 export function buildRss(settings: SettingsMap, posts: PostRow[], siteUrl: string): string {
-  const en = isEn(settings)
   const fullText = settings.rssFullText !== '0'
   const items = posts
     .map((p) => {
@@ -30,7 +26,7 @@ export function buildRss(settings: SettingsMap, posts: PostRow[], siteUrl: strin
         fullText && p.content && !pwProtected
           ? `\n      <content:encoded>${cdata(
               memberLocked
-                ? teaserHtml(sanitizeHtml(p.content)) + memberOnlySuffix(en)
+                ? teaserHtml(sanitizeHtml(p.content)) + memberOnlySuffix()
                 : sanitizeHtml(p.content)
             )}</content:encoded>`
           : ''
@@ -48,12 +44,12 @@ export function buildRss(settings: SettingsMap, posts: PostRow[], siteUrl: strin
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:bloghao="https://bloghao.com/plaza-ns">
   <channel>
-    <title>${xmlEsc(tr(en, settings.siteName))}</title>
+    <title>${xmlEsc((settings.siteName))}</title>
     <link>${xmlEsc(siteUrl)}</link>
-    <description>${xmlEsc(tr(en, settings.siteDescription))}</description>
-    <language>${en ? 'en' : 'zh-CN'}</language>
+    <description>${xmlEsc((settings.siteDescription))}</description>
+    <language>zh-CN</language>
     <atom:link href="${xmlEsc(siteUrl)}/rss.xml" rel="self" type="application/rss+xml"/>
-    <dc:creator>${xmlEsc(tr(en, settings.siteName))}</dc:creator>
+    <dc:creator>${xmlEsc((settings.siteName))}</dc:creator>
 ${items}${lastBuild ? `\n    <lastBuildDate>${rfc822(lastBuild)}</lastBuildDate>` : ''}
   </channel>
 </rss>`
@@ -64,23 +60,22 @@ ${items}${lastBuild ? `\n    <lastBuildDate>${rfc822(lastBuild)}</lastBuildDate>
  *  日期走 isoDate（北京时间 +08:00 口径，与 JSON-LD 同源）；字段名是 JSON Feed 规范键，
  *  输出经 JSON.stringify 序列化，无需 xmlEsc */
 export function buildJsonFeed(settings: SettingsMap, posts: PostRow[], siteUrl: string): string {
-  const en = isEn(settings)
   const fullText = settings.rssFullText !== '0'
   const feed = {
     version: 'https://jsonfeed.org/version/1.1',
-    title: tr(en, settings.siteName),
+    title: settings.siteName,
     home_page_url: siteUrl,
     feed_url: `${siteUrl}/feed.json`,
-    description: tr(en, settings.siteDescription),
-    language: en ? 'en' : 'zh-CN',
-    authors: [{ name: tr(en, settings.siteName), url: siteUrl }],
+    description: settings.siteDescription,
+    language: 'zh-CN',
+    authors: [{ name: settings.siteName, url: siteUrl }],
     items: posts.map((p) => {
       const pwProtected = !!p.password_hash
       const memberLocked = !!p.min_tier && p.min_tier !== 'all'
       const contentHtml =
         fullText && p.content && !pwProtected
           ? memberLocked
-            ? teaserHtml(sanitizeHtml(p.content)) + memberOnlySuffix(en)
+            ? teaserHtml(sanitizeHtml(p.content)) + memberOnlySuffix()
             : sanitizeHtml(p.content)
           : ''
       // 封面属作者主动公开的导读面（与标题/摘要同口径），相对路径补成绝对地址

@@ -123,7 +123,6 @@ import {
   startBundleImport,
 } from './sitebundle'
 import { fetchPublicResource } from './fetchsafe'
-import { isEn } from './i18n'
 import { ipRegionLabel, regionSnapshot } from './ipregion'
 import {
   cleanServerPluginConfig,
@@ -164,7 +163,7 @@ import { fetchLinkMeta, fetchableUrl } from './linkmeta'
 import { BROWSER_UA, buildCardHtml, coverProxyHostOk, coverReferer, fetchDoubanDetail, probeRelay, resolveCardCover, sanitizeMediaItem, searchMedia, subjectIdFromUrl, validateRelay, type MediaItem } from './douban'
 import { THEMES } from './themes/registry'
 import type { CommentRow, Env, MemberRow, PostRow, SessionUser, SettingsMap } from './types'
-import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanNickname, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isDemo, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, nicknameCooldown, normalizeLinkUrl, pageWindowCutoff, sha256Hex, siteVisibleCutoff, slugify, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanNickname, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, nicknameCooldown, normalizeLinkUrl, pageWindowCutoff, sha256Hex, siteVisibleCutoff, slugify, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
 
 type AppEnv = { Bindings: Env; Variables: { user: SessionUser; memberSettings?: SettingsMap } }
 
@@ -226,9 +225,8 @@ api.get('/health', (c) => c.json({ ok: true, time: Date.now() }))
 /* ---------------- 认证 ---------------- */
 api.get('/auth/state', async (c) => {
   const [user, n, settings] = await Promise.all([getSessionUser(c.env.DB, c.req.raw), countUsers(c.env.DB), getSettings(c.env.DB)])
-  // demo 标记给后台前端用：登录页公示演示账号、禁用改密码与闭站开关；
   // needsTotp（B13）驱动登录表单预显「两步验证码」输入框（开了 TOTP 才显示，别让全员看到多余框）
-  return c.json({ needsSetup: n === 0, user, demo: isDemo(c.env), needsTotp: settings.totpEnabled === '1' })
+  return c.json({ needsSetup: n === 0, user, needsTotp: settings.totpEnabled === '1' })
 })
 
 api.post('/auth/setup', async (c) => {
@@ -468,9 +466,8 @@ api.post('/member/register', async (c) => {
   if (inviteCode && !inviteUsable) return jsonError('邀请码无效、已用完或已过期', 400)
   if (settings.memberRegOpen === '0' && !inviteUsable) return jsonError('本站暂不开放注册，有邀请码可凭码注册', 403)
   // 注册人机验证（Turnstile，A2 根治）：配置了 Secret 才启用，放在字段校验之前让无令牌机器人
-  // 最早出局；演示站跳过（凭据公示的体验站不外发 siteverify，也不给体验者加验证负担）。
-  // verifyTurnstile 拿不到结论一律 false —— 端点抖动时宁可挡注册，不留无验证窗口
-  if (settings.turnstileSecret && !isDemo(c.env)) {
+  // 最早出局。verifyTurnstile 拿不到结论一律 false —— 端点抖动时宁可挡注册，不留无验证窗口
+  if (settings.turnstileSecret) {
     const ok = await verifyTurnstile(settings.turnstileSecret, String(body?.turnstileToken || ''), ip)
     if (!ok) return jsonError('人机验证未通过，请刷新页面后重试')
   }
@@ -1139,11 +1136,9 @@ api.get('/admin/stats', async (c) => {
     },
     // 收录守卫（2026-10-17）：整站 noindex / 闭站会把本域名整体切出搜索引擎与 AI 的索引面，
     // 概览页据此常驻提醒（防手滑开了长期不自知——blog.bloghao.com 就是这么漏的）。
-    // 演示站本就刻意 noindex，单独给 demo 标志让前台不误报。
     crawl: {
       noindex: settings.siteNoindex === '1',
       closed: settings.siteClosed === '1',
-      demo: isDemo(c.env),
     },
     recent: (recent.results ?? []).map((r) => ({
       id: r.id,
@@ -1159,10 +1154,9 @@ api.get('/admin/stats', async (c) => {
  * 「更新了什么 / 优化了什么」，用户自己决定「更新到最新」还是「保持当前版本」。**不做任何自动
  * 更新**：这里只读清单 + 报状态，真正换版本靠一次部署动作（Cloudflare 重新部署 / Docker 重建，
  * 见 docs/UPDATING.md）。出网端点是固定可信地址（同 api.telegram.org 口径），仅 https、无用户
- * 输入进路径；响应按不可信输入严格校验，拿不到就降级为「暂不可检查」。演示站禁外发，直接短路 */
+ * 输入进路径；响应按不可信输入严格校验，拿不到就降级为「暂不可检查」。 */
 api.get('/admin/update', async (c) => {
   const current = APP_VERSION
-  if (isDemo(c.env)) return c.json({ ok: true, checkable: false, reason: 'demo', current, guide: UPDATE_GUIDE_URL })
   const settings = await getSettings(c.env.DB)
   let manifest = null
   try {
@@ -1267,7 +1261,6 @@ api.get('/admin/server-plugins', (c) => c.json({ plugins: listServerPlugins() })
  * 站点 token 服务端代理（不出浏览器网络面板，demo 短路与其他外呼工具同口径）；
  * hub 地址走 plazaEndpoint（留空 = 官方 hub）。传 502 让前台展示「hub 连不上」而非 500 */
 api.get('/admin/plaza-stats', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放广场数据卡', 404)
   const settings = await getSettings(c.env.DB)
   const token = (settings.plazaToken || '').trim()
   if (!token) return jsonError('还没填广场站点 Token（设置 → 服务端插件）')
@@ -1293,10 +1286,9 @@ api.get('/admin/plaza-stats', async (c) => {
 /* ---------------- 编辑器插件远程安装（B8 插件半边，机制 src/pluginpkg.ts） ----------------
  * 安装 = 抓 https 插件文件 → 内容安检 → 落 R2 → 登记 settings.pluginsInstalled；
  * 下发走 /plugins/installed.json 与 /plugin-files/:id（index.ts，管理员会话门槛）。
- * 演示站短路（装包是任意 JS 入口，凭据公示的体验站不开）。 */
+ */
 
 api.post('/admin/plugins/install', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放插件安装', 404)
   if (!rateLimit(c.env, `plugin-install:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('安装太频繁，请一分钟后再试', 429)
   const body = await c.req.json<{ url?: string; id?: string }>().catch(() => null)
   const url = String(body?.url ?? '').trim().slice(0, 2048)
@@ -1323,7 +1315,6 @@ api.post('/admin/plugins/install', async (c) => {
 })
 
 api.post('/admin/plugins/uninstall', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放插件卸载', 404)
   const body = await c.req.json<{ id?: string }>().catch(() => null)
   const id = cleanPluginId(String(body?.id ?? ''))
   if (!id) return jsonError('插件 id 不合法')
@@ -1772,8 +1763,6 @@ api.delete('/admin/weibo/:id', async (c) => {
 
 /** 服务端插件「微博同步 Buffer」的渠道拉取：设置页一键填充渠道 ID（src/hooks.ts listBufferChannels） */
 api.post('/admin/buffer/channels', async (c) => {
-  // 演示站禁外发：Buffer 渠道拉取是出网请求，demo 下不存在（体验者填的 Key 不能打出去）
-  if (isDemo(c.env)) return jsonError('演示站不开放服务端插件外呼', 404)
   const body = await c.req.json<{ token?: string }>().catch(() => null)
   // token 缺省时用已保存的（打码占位符提交 = 保持原值，与 SECRET_SETTINGS 同口径）
   const saved = (await getSettings(c.env.DB)).bufferAccessToken || ''
@@ -1918,8 +1907,6 @@ api.post('/admin/links', async (c) => {
 })
 
 api.post('/admin/links/fetch-icon', async (c) => {
-  // 演示站守卫：图标抓取是出网点（与 linkmeta 同口径短路）
-  if (isDemo(c.env)) return jsonError('演示站不开放图标抓取', 404)
   const body = await c.req.json<{ url?: string }>().catch(() => null)
   const url = normalizeLinkUrl(String(body?.url ?? ''))
   if (!url) return jsonError('网址格式不对，填一下要抓图标的站点地址')
@@ -1939,8 +1926,7 @@ api.post('/admin/links/:id/approve', async (c) => {
     .run()
   // 收录改变公开 /links 页（审计 C3）→ 页面边缘缓存作废
   c.executionCtx.waitUntil(purgePageCache(c.env.DB))
-  // 演示站照常可走收录流程，只是不出网抓图标（demo 体验者凭据公示，出网点一律短路）
-  if (!existing.icon && !isDemo(c.env)) {
+  if (!existing.icon) {
     const origin = new URL(c.req.url).origin
     c.executionCtx.waitUntil(
       fetchLinkIcon(c.env, existing.url).then((icon) =>
@@ -1958,8 +1944,6 @@ api.post('/admin/links/:id/approve', async (c) => {
 })
 
 api.post('/admin/links/:id/refresh-icon', async (c) => {
-  // 演示站守卫：图标抓取是出网点（与 linkmeta 同口径短路）
-  if (isDemo(c.env)) return jsonError('演示站不开放图标抓取', 404)
   const id = parseId(c.req.param('id'))
   if (!id) return jsonError('友链不存在', 404)
   const existing = await getFriendLinkById(c.env.DB, id)
@@ -2520,7 +2504,7 @@ api.get('/admin/comments', async (c) => {
   ])
   // IP 属地：后台列表换算成中文标签展示（审核判断用），与前台展示开关无关——数据反正在库里
   const items = (listRes.results ?? []).map((r: Record<string, unknown>) =>
-    r.ip_region ? { ...r, ip_region: ipRegionLabel(String(r.ip_region), false) } : r
+    r.ip_region ? { ...r, ip_region: ipRegionLabel(String(r.ip_region)) } : r
   )
   return c.json({ items, total: countRes?.n ?? 0, page, pending: pendingRes?.n ?? 0 })
 })
@@ -2869,16 +2853,6 @@ api.put('/admin/settings', async (c) => {
       patch[key] = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(u) ? u : ''
       continue
     }
-    if (key === 'edition') {
-      // 英文测试版（English 0.1）开关：二值白名单；重新开启即重置回退状态与错误记录
-      patch[key] = v === 'en' ? 'en' : 'zh'
-      if (patch[key] === 'en') {
-        patch.editionEnStatus = 'active'
-        patch.editionEnError = ''
-        patch.editionEnAt = ''
-      }
-      continue
-    }
     patch[key] = v.slice(0, 500)
   }
   // Turnstile 两键成对（注册人机验证）：只填一个会造出「有锁无窗」（注册被拦且无验证组件可过）
@@ -2889,8 +2863,6 @@ api.put('/admin/settings', async (c) => {
     const secret = patch.turnstileSecret !== undefined ? patch.turnstileSecret : cur.turnstileSecret
     if (!!site !== !!secret) return jsonError('Turnstile 需同时填写 Site Key 与 Secret Key（或都留空关闭）')
   }
-  // 演示站不允许闭站：有人开了开关，整个重置周期内所有体验者都会看到 503
-  if (isDemo(c.env)) patch.siteClosed = '0'
   // 可见窗口新键一旦提交，旧单键 contentVisibleRange 同步清空：旧键只服务「升级后没动过设置」的
   // 回落期（utils.visibleRangeOf），留着会让新键的 ''（全部可见）被旧值覆盖
   if (patch.contentVisibleRangePosts !== undefined || patch.contentVisibleRangeWeibo !== undefined) patch.contentVisibleRange = ''
@@ -2907,8 +2879,6 @@ api.put('/admin/settings', async (c) => {
 
 /** 手动触发一次全量备份（与每晚 Cron 同一逻辑），返回文件 Key 与体积 */
 api.post('/admin/backup', async (c) => {
-  // 演示站守卫：备份含全库行与密钥，demo 体验者凭据公示，敏感面一律短路
-  if (isDemo(c.env)) return jsonError('演示站不开放备份', 404)
   // 全表导出整包进内存，连点可在同一 isolate 堆叠多个全量导出（128MB 上限）——全局窗口内只放一次
   if (!rateLimit(c.env, 'backup:global', 1, 10 * 60_000)) return jsonError('备份刚刚执行过，请 10 分钟后再试', 429)
   const r = await runBackup(c.env)
@@ -2926,8 +2896,6 @@ api.post('/admin/backup', async (c) => {
 
 /** 一键导出整站包：流式吐 zip（与 Markdown / WXR 导出同形，不落 R2） */
 api.get('/admin/bundle/export', async (c) => {
-  // 演示站守卫：整站包含全库内容与图片，体验者凭据公示，敏感面一律短路
-  if (isDemo(c.env)) return jsonError('演示站不开放导出', 404)
   // 全表导出 + 全量图片流式打包，连点会在同一 isolate 堆叠多个任务——全局窗口内只放两次
   if (!rateLimit(c.env, 'bundle-export:global', 2, 10 * 60_000)) return jsonError('导出刚刚执行过，请稍后再试', 429)
   const now = Date.now()
@@ -2943,7 +2911,6 @@ api.get('/admin/bundle/export', async (c) => {
 
 /** 上传整站包：流式落 R2 bundles/（不缓冲，避免大包打爆 isolate），供导入读取 */
 api.post('/admin/bundle/upload', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   if (!rateLimit(c.env, `bundle-upload:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = c.req.raw.body
   if (!body) return jsonError('请求体为空')
@@ -2954,7 +2921,6 @@ api.post('/admin/bundle/upload', async (c) => {
 
 /** 列出已上传的整站包 + 当前导入状态（后台卡片回显；导入失败后可据此提示「重试 = 重来」） */
 api.get('/admin/bundle/list', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   const listed = await c.env.IMAGES.list({ prefix: BUNDLE_PREFIX, limit: 100 })
   const bundles = (listed.objects ?? [])
     .map((o) => ({ key: o.key, size: o.size ?? 0, uploaded: o.uploaded instanceof Date ? o.uploaded.getTime() : 0 }))
@@ -2964,7 +2930,6 @@ api.get('/admin/bundle/list', async (c) => {
 
 /** 导入第一步：校验包与版本 → 校验空站 → 清空目标表 → 给出步骤清单 */
 api.post('/admin/bundle/import/start', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   if (!rateLimit(c.env, `bundle-import:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ key?: string }>().catch(() => null)
   const r = await startBundleImport(c.env, String(body?.key ?? ''))
@@ -2974,7 +2939,6 @@ api.post('/admin/bundle/import/start', async (c) => {
 
 /** 导入步骤：一张表的一个分片，或一批图片（前端按步骤清单循环调用，每步一次小请求） */
 api.post('/admin/bundle/import/step', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   // 步骤数随站点规模增长（每片一请求），限额给宽；仍是重操作，按全局窗口兜底
   if (!rateLimit(c.env, 'bundle-step:global', 2000, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ key?: string; unit?: string; cursor?: number }>().catch(() => null)
@@ -2990,7 +2954,6 @@ api.post('/admin/bundle/import/step', async (c) => {
 
 /** 导入收尾：置状态 done + 清页缓存 */
 api.post('/admin/bundle/import/finish', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   const body = await c.req.json<{ key?: string }>().catch(() => null)
   const r = await finishBundleImport(c.env, String(body?.key ?? ''))
   if (!r.ok) return jsonError(r.error, r.status)
@@ -2999,7 +2962,6 @@ api.post('/admin/bundle/import/finish', async (c) => {
 
 /** 删除一个整站包（导入成功后不自动删：用户可能还要在别的实例上再导一次） */
 api.post('/admin/bundle/delete', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   const body = await c.req.json<{ key?: string }>().catch(() => null)
   const key = String(body?.key ?? '')
   if (!key.startsWith(BUNDLE_PREFIX) || key.includes('..') || key.includes('\\') || key.includes('\0')) {
@@ -3014,11 +2976,10 @@ api.post('/admin/bundle/delete', async (c) => {
  * 评论 / 分类标签（保留原状态与原发布时间），图片不阻塞、以附件清单形式返回；
  * ② POST /admin/import/wxr/step 由前端逐批驱动图片转存（Workers 子请求预算扛不住
  * 一次几百张），服务端转存后全局替换正文 / 封面里的旧地址。解析与映射的纯函数在
- * src/import-wxr.ts（tests/import-wxr.test.ts 直接导入）；防线：演示站 404、限流、
+ * src/import-wxr.ts（tests/import-wxr.test.ts 直接导入）；防线：限流、
  * 上限常量整体 400、正文 sanitizeHtml 落库、不逐篇触发发布广播（防 TG 轰炸）。 */
 
 api.post('/admin/import/wxr', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   if (!rateLimit(c.env, `wxr-import:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请 10 分钟后再试', 429)
   const xml = await c.req.text()
   if (new TextEncoder().encode(xml).length > MAX_WXR_BYTES) return jsonError(`WXR 文件超过 ${Math.floor(MAX_WXR_BYTES / 1024 / 1024)}MB 上限，请在 WordPress 用「按作者 / 日期」分卷导出`)
@@ -3187,7 +3148,6 @@ api.post('/admin/import/wxr', async (c) => {
 
 /** 图片转存分步：前端持附件清单循环驱动，每批 ≤10 张；转存成功后全局替换正文 / 封面里的旧地址 */
 api.post('/admin/import/wxr/step', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放导入', 404)
   if (!rateLimit(c.env, `wxr-step:${clientIp(c.req.raw)}`, 30, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ urls?: unknown }>().catch(() => null)
   const urls = Array.isArray(body?.urls) ? body!.urls.filter((u): u is string => typeof u === 'string') : []
@@ -3222,8 +3182,6 @@ api.post('/admin/import/wxr/step', async (c) => {
  * 不可撤销——服务端硬校验确认语（resetConfirmOk），UI 的输入框只是引导。 */
 
 api.post('/admin/site/reset', async (c) => {
-  // 演示站：体验者凭据公示，一键清站等于把全站（含种子内容）删空且 2 小时才自愈，一律短路
-  if (isDemo(c.env)) return jsonError('演示站不支持清空', 404)
   if (!rateLimit(c.env, `site-reset:${clientIp(c.req.raw)}`, 3, 10 * 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
   const body = await c.req.json<{ confirm?: string }>().catch(() => null)
   if (!resetConfirmOk(body?.confirm)) {
@@ -3235,8 +3193,6 @@ api.post('/admin/site/reset', async (c) => {
 
 /* ---------------- 密码 ---------------- */
 api.put('/admin/password', async (c) => {
-  // 演示站密码公示在登录页，改掉会导致整个重置周期内其他体验者进不了后台
-  if (isDemo(c.env)) return jsonError('演示站不支持修改密码', 403)
   const user = c.get('user')
   const body = await c.req.json<{ oldPassword?: string; newPassword?: string }>().catch(() => null)
   const oldPassword = body?.oldPassword || ''
@@ -3273,8 +3229,6 @@ api.post('/admin/tools/md', async (c) => {
  *  抓不到/解析不到返回空字段，编辑器据已有字段组卡（title 缺失时用域名兜底）。
  *  用户输入的 URL 按用户输入频控；fetch 本身限长限时（src/linkmeta.ts） */
 api.post('/admin/tools/linkmeta', async (c) => {
-  // 演示站守卫：demo 体验者凭据公示，能触达的出网点一律短路（防线同「订阅与备份」外呼）
-  if (isDemo(c.env)) return jsonError('演示站不开放链接卡抓取', 404)
   const body = await c.req.json<{ url?: string }>().catch(() => null)
   const url = String(body?.url ?? '').trim().slice(0, 2048)
   if (!url) return jsonError('请填写链接地址')
@@ -3305,8 +3259,6 @@ async function buildCardWithCover(env: Env, item: MediaItem, relayBase: string |
  *  豆瓣图床防盗链（无 Referer 418、外站 403），浏览器直连必挂；白名单限常用封面 CDN，
  *  限频 + 体积上限。仅供编辑器预览——正式卡片走转存（buildCardWithCover），不烘代理地址 */
 api.get('/admin/tools/douban/img', async (c) => {
-  // 演示站守卫：demo 体验者凭据公示，能触达的出网点一律短路
-  if (isDemo(c.env)) return jsonError('演示站不开放封面代理', 404)
   const raw = c.req.query('u') || ''
   let u: URL
   try {
@@ -3345,9 +3297,7 @@ api.get('/admin/tools/douban/img', async (c) => {
  *  封面在组卡时转存进站内图床（buildCardWithCover），零配置即可用；
  *  中转可选，提升豆瓣详情（尤其电影条目页，sec 风控最紧）的成功率 */
 api.post('/admin/tools/douban', async (c) => {
-  // 演示站守卫：豆瓣搜索/详情/中转探测全是出网调用（中转地址还随请求携带），
-  // demo 体验者凭据公示，与 linkmeta 同口径短路
-  if (isDemo(c.env)) return jsonError('演示站不开放书影音抓取', 404)
+  // 豆瓣搜索/详情/中转探测全是出网调用（中转地址还随请求携带），与 linkmeta 同口径短路
   const settings = await getSettings(c.env.DB)
   const disabled = cleanDisabledPlugins(String(settings.pluginsDisabled ?? ''))
   if (disabled === null || disabled.split(',').includes('douban-media')) return jsonError('书影音插件已停用', 404)
@@ -3424,16 +3374,15 @@ async function rehostPasteImages(env: Env, html: string): Promise<{ html: string
 }
 
 // 一键清理页面缓存（src/pagecache.ts）：换 settings epoch，旧边缘副本整代作废。
-// 后台「概览 → 系统」按钮消费；演示站页面本就不缓存，这里无害照常可用
+// 后台「概览 → 系统」按钮消费
 api.post('/admin/cache/purge', async (c) => {
   await purgePageCache(c.env.DB)
   return c.json({ ok: true })
 })
 
 api.post('/admin/tools/sanitize', async (c) => {
-  // 演示站守卫：rehostPasteImages 会以本站身份抓请求里任意 http(s) 图片（出网点，
+  // rehostPasteImages 会以本站身份抓请求里任意 http(s) 图片（出网点，
   // 与 linkmeta/douban 同口径短路）
-  if (isDemo(c.env)) return jsonError('演示站不开放粘贴转存', 404)
   const body = await c.req.json<{ html?: string }>().catch(() => null)
   const html = String(body?.html ?? '')
   if (!rateLimit(c.env, `sanitize:${clientIp(c.req.raw)}`, 30, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
@@ -3797,7 +3746,6 @@ api.get('/public/weibo/:id/comments', async (c) => {
   // IP 属地（src/ipregion.ts）：展示开关门控在服务端——关闭时连 ip_region 列都不进 SELECT，
   // 开启时出参已是格式化好的标签（en 按 isEn 口径），客户端只渲染字符串不做映射
   const showRegion = settings.showCommentRegion === '1'
-  const en = isEn(settings)
   // INDEXED BY 同 weiboCommentCountMap 口径（生产实测规划器会误选 idx_comments_status
   // 全表扫全部已审评论；「weibo_id 等值 + status 过滤」一族强制走 (weibo_id) 前导索引）
   const { results } = await c.env.DB
@@ -3836,7 +3784,7 @@ api.get('/public/weibo/:id/comments', async (c) => {
       row.member_tier_color = eff.isBase ? '' : eff.color
     }
     delete row.member_tier_expires_at
-    return showRegion ? { ...row, ip_region: ipRegionLabel(String(row.ip_region || ''), en) } : row
+    return showRegion ? { ...row, ip_region: ipRegionLabel(String(row.ip_region || '')) } : row
   })
   return c.json({
     comments,

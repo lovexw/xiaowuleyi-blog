@@ -25,7 +25,6 @@ import { Readable, pipeline } from 'node:stream'
 import xwblog from '../src/index'
 import { assetVersion, injectAdminAssetVersion, setAssetVersion, VERSIONED_ASSET_PATHS } from '../src/assets'
 import { ensureSchema } from '../src/db'
-import { DEMO_RESET_CRON } from '../src/demo-content'
 import { createD1 } from './shims/d1'
 import { createR2Disk } from './shims/r2disk'
 import { createR2S3, signAuthorization } from './shims/r2s3'
@@ -33,7 +32,7 @@ import { controlApp } from './control'
 import { resolveScheme } from './scheme'
 // D1 的建表靠部署时 `wrangler d1 execute schema.sql`，ensureSchema 只管增量补列——
 // 租户库是全新文件，这里要自己先跑一遍 schema.sql（官方幂等设计，可重复执行），
-// 与演示站 src/demo.ts 的 ensureTables 同款思路
+// 与 Worker 侧的冷启动建表同款思路
 import SCHEMA_SQL from '../schema.sql'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -96,7 +95,6 @@ export const CONTROL_HOST = (process.env.CONTROL_HOST || '').toLowerCase()
 const CONTROL_ENABLED = Boolean(CONTROL_HOST && process.env.CONTROL_PASSWORD)
 
 export interface TenantConfig {
-  demo?: boolean
   storage?: string
   /** 停用：路由摘除（一切请求 404），配置与数据保留，可重新启用 */
   disabled?: boolean
@@ -168,7 +166,6 @@ async function createTenantFor(host: string, cfg: TenantConfig, r2Shared?: R2Sha
     // 业务代码从不调用 ASSETS（静态资源在适配层直出），兜底防误用
     ASSETS: { fetch: async () => new Response('ASSETS binding is handled by the self-host adapter', { status: 404 }) },
   }
-  if (cfg.demo) env.DEMO_MODE = '1'
   const db = env.DB as { exec: (sql: string) => Promise<unknown> }
   // 建表顺序是硬要求（2026-11 审计 P1-1）：核心九表（users/posts/weibo/pages/settings/
   // comments/categories/post_categories/uploads/sessions）唯一来源是 schema.sql——ensureSchema
@@ -187,7 +184,7 @@ async function createTenantFor(host: string, cfg: TenantConfig, r2Shared?: R2Sha
     await db.exec(SCHEMA_SQL)
   }
   await ensureSchema(env.DB as never)
-  console.log(`[tenant] ${host} 就绪（存储: ${label}，${cfg?.demo ? '演示种子' : '空库'}）→ ${dir}`)
+  console.log(`[tenant] ${host} 就绪（存储: ${label}，空库）→ ${dir}`)
   return { host, env }
 }
 
@@ -549,13 +546,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, tenan
 }
 
 let firedBackupDay = ''
-let firedDemoResetHour = ''
 const CRON_TICK_MS = 60_000
 
 /**
  * cron：与 wrangler triggers.crons 同口径——每分钟扫定时发布；
  * 北京时间 00:30（UTC 16:30）那一分钟换成备份 cron，备份/visit 清理/回收站滚动一起跑；
- * 演示租户的重置 cron（DEMO_RESET_CRON，每 2 小时的第 23 分钟）清库重灌种子数据——
  * wrangler 按 UTC 评估 cron 表达式，这里用 UTC 时钟判断窗口，controller.cron 原样传给
  * src/index.ts 的 scheduled 分发。
  */
@@ -568,16 +563,8 @@ function startCron(tenants: Map<string, Tenant>) {
       if (firedBackupDay === day) return // 同一天只触发一次，防 tick 漂移双发
       firedBackupDay = day
     }
-    // demo 重置窗口：分钟位 23 + 偶数小时（'23 */2 * * *' 的 UTC 语义）；小时粒度记账防双发
-    const resetWindow =
-      !backupWindow && now.getUTCMinutes() === 23 && now.getUTCHours() % 2 === 0
-    const hourKey = now.toISOString().slice(0, 13)
-    if (resetWindow) {
-      if (firedDemoResetHour === hourKey) return
-      firedDemoResetHour = hourKey
-    }
     const controller = {
-      cron: backupWindow ? '30 16 * * *' : resetWindow ? DEMO_RESET_CRON : '* * * * *',
+      cron: backupWindow ? '30 16 * * *' : '* * * * *',
       scheduledTime: now.getTime(),
     }
     for (const t of tenants.values()) {

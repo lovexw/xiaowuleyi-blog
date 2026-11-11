@@ -120,9 +120,7 @@ test('回复权限：只有同档及以上会员与管理员能进私密楼', ()
 test('占位块文案：中文口径固定，游客提示登录、会员提示升级', () => {
   assert.deepEqual(commentGateText('咖啡会员', 0), { title: '这条评论仅对咖啡会员及以上可见', hint: '登录会员后可见' })
   assert.deepEqual(commentGateText('咖啡会员', 1), { title: '这条评论仅对咖啡会员及以上可见', hint: '升级档位后可见' })
-  assert.match(commentGateText('咖啡会员', 0, true).title, /Only 咖啡会员 members and above/)
   assert.match(commentGateMoreText('咖啡会员', 3), /另有 3 条回复/)
-  assert.match(commentGateMoreText('coffee', 1, true), /1 more reply/)
 })
 
 test('context 组装器：关闭档位下 viewerRank 照算，gateRank 0', () => {

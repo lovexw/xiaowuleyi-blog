@@ -119,7 +119,7 @@
 ### 更早的拍板
 
 - **邮件相关（发信 / 订阅 / 邮件通知 / 邮箱找回密码）**：第三方发信服务与 DNS 配置门槛高、免费档说砍就砍（MailChannels 砍 Workers 免费集成是先例）。会员密码找回已按「本站不提供密码找回」口径落地，不再视作欠账。
-- **AMP / hreflang / Google ping**：AMP 已边缘化；hreflang 与英文版单语回退形态不匹配；Google ping 已被官方弃用（sitemap 是唯一通道，Bing 系补位靠 IndexNow）。
+- **AMP / hreflang / Google ping**：AMP 已边缘化；hreflang 只对多语言站有意义，本站单语（英文版已删除）；Google ping 已被官方弃用（sitemap 是唯一通道，Bing 系补位靠 IndexNow）。
 - **AI 代理生态协议接入**（API Catalog / OAuth Discovery / A2A / WebMCP / x402 等一整批）：面向电商与 SaaS 的代理发现 / 授权 / 支付协议，博客号没有商品也没有 API 产品，逐项接入纯属自加维护负担。同页的 Content Signals 已由 AI 抓取策略落地，属另一回事。
 - **Markdown 内容协商**（按 `Accept: text/markdown` 返回 Markdown，Cloudflare Pro 套餐能力）：`/post/:slug.md` 静态镜像已达到同一目的，再做协商属重复建设。
 - **完整主题与服务端插件的运行时安装**：Workers 不能加载 bundle 外代码，重部署违背「部署即生效」体验——布局差异走官方主题演进 + 皮肤包，服务端插件走官方注册表 PR 模式。

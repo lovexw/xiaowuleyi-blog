@@ -175,9 +175,9 @@ test('weiboPager：边界——只有一页整体不渲染，首页上一页置�
   assert.match(last, /<input class="pager-input" type="number" name="page" min="1" max="3" value="3"/)
 })
 
-test('weiboPager：英文版跳转表单与文章列表同文案', () => {
-  const html = weiboPager(1, 3, undefined, true)
-  assert.match(html, /<span class="pager-jump-text">Page<\/span>/)
-  assert.match(html, /<span class="pager-jump-text">of 3<\/span>/)
-  assert.match(html, /<button class="pager-go" type="submit">Go<\/button>/)
+test('weiboPager：跳转表单与文章列表同文案', () => {
+  const html = weiboPager(1, 3)
+  assert.match(html, /<span class="pager-jump-text">跳至<\/span>/)
+  assert.match(html, /<span class="pager-jump-text">\/ 共 3 页<\/span>/)
+  assert.match(html, /<button class="pager-go" type="submit">跳转<\/button>/)
 })

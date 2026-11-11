@@ -19,7 +19,6 @@ function keyOf(over: Partial<Parameters<typeof pageCacheKeyFor>[0]> = {}) {
     method: 'GET',
     url: 'https://x.test/',
     cookie: '',
-    demo: false,
     grayscale: false,
     epoch: '100',
     ...over,
@@ -92,8 +91,7 @@ test('pageCacheKeyFor：任一登录/解锁 Cookie 在场绝不缓存（越权�
   assert.equal(keyOf({ cookie: `${PP}=tok` }), null, '文章解锁令牌在，正文可能已解锁')
 })
 
-test('pageCacheKeyFor：演示站 / 灰度 / 非 GET 一律不缓存', () => {
-  assert.equal(keyOf({ demo: true }), null)
+test('pageCacheKeyFor：灰度 / 非 GET 一律不缓存', () => {
   assert.equal(keyOf({ grayscale: true }), null, '灰度是整站去色特殊状态')
   assert.equal(keyOf({ method: 'HEAD' }), null)
   assert.equal(keyOf({ method: 'POST' }), null)

@@ -10,12 +10,11 @@
  *  - 访问密码文（password_hash 非空）：索引照常出作者摘要（与 RSS description 同口径），
  *    llms-full 只出摘要 + 加密说明；其 /post/:slug.md 直接 404（比 RSS 更严，与关键词搜索
  *    「整体退出」同口径——pages.ts renderPostMarkdown）；
- *  - 演示站 / 全站 noindex（settings.siteNoindex）/ AI 策略 deny 档（readAiPolicy）：index.ts 出桩
+ *  - 全站 noindex（settings.siteNoindex）/ AI 策略 deny 档（readAiPolicy）：index.ts 出桩
  *    （只有站名与说明，不列内容），与 robots.txt 整站 Disallow 同口径；deny 档时 .md 镜像同样
  *    404、文章页 head 不再声明 alternate——AI 面随策略整体关闭，别只关 llms 留 .md。
  */
 import type { PostRow, SettingsMap } from './types'
-import { isEn, tr } from './i18n'
 import { fmtDate } from './utils'
 import { htmlToMd } from './html-md'
 import { sanitizeHtml } from './sanitize'
@@ -47,14 +46,13 @@ function sections(parts: [string, string][]): string {
  *  「关于本站」给 AI 引用时提供出处背景（这是谁的站、在写什么）——topics 来自调用方的
  *  文章标签聚合（真实内容推导，无需站长另行配置），空标签时整行省略 */
 function frame(settings: SettingsMap, siteUrl: string, middle: string, topics: string[] = []): string {
-  const en = isEn(settings)
-  const head = `# ${oneLine(tr(en, settings.siteName))}\n\n> ${oneLine(tr(en, settings.siteDescription))}\n`
-  const aboutParts = [`- [${en ? 'About the author' : '关于我（作者介绍）'}](${siteUrl}/about)`]
-  if (topics.length) aboutParts.push(en ? `- Main topics: ${topics.join(', ')}` : `- 主要话题：${topics.join('、')}`)
-  const about = sections([[en ? '## About this site' : '## 关于本站', aboutParts.join('\n')]])
+  const head = `# ${oneLine((settings.siteName))}\n\n> ${oneLine((settings.siteDescription))}\n`
+  const aboutParts = [`- [关于我（作者介绍）](${siteUrl}/about)`]
+  if (topics.length) aboutParts.push((`- 主要话题：${topics.join('、')}`))
+  const about = sections([['## 关于本站', aboutParts.join('\n')]])
   const tools = sections([
     [
-      en ? '## Subscriptions & machine-readable surfaces' : '## 订阅与机器可读面',
+      '## 订阅与机器可读面',
       [
         `- [RSS](${siteUrl}/rss.xml)`,
         `- [JSON Feed](${siteUrl}/feed.json)`,
@@ -64,16 +62,13 @@ function frame(settings: SettingsMap, siteUrl: string, middle: string, topics: s
       ].join('\n'),
     ],
   ])
-  const mdNote = en
-    ? 'Every post is also available as Markdown: append `.md` to its URL (e.g. `' + siteUrl + '/post/example.md`).'
-    : '每篇文章另有 Markdown 镜像：在文章地址后加 `.md`（例如 `' + siteUrl + '/post/example.md`）。'
+  const mdNote = '每篇文章另有 Markdown 镜像：在文章地址后加 `.md`（例如 `' + siteUrl + '/post/example.md`）。'
   return `${head}\n${middle}${about}${tools}\n${mdNote}\n`
 }
 
 /** /llms.txt —— 导读索引：最新文章（标题 + 链接 + 一句话摘要）与独立页面。
  *  slug='about' 的页面不再进「独立页面」节（「关于本站」节已带专属链接，避免同链重复） */
 export function buildLlmsTxt(settings: SettingsMap, posts: PostRow[], pages: LlmsPage[], siteUrl: string, topics: string[] = []): string {
-  const en = isEn(settings)
   const postLines = posts.map((p) => {
     const s = oneLine(p.summary)
     return `- [${oneLine(p.title)}](${postUrl(siteUrl, p)})${s ? `: ${s}` : ''}`
@@ -85,8 +80,8 @@ export function buildLlmsTxt(settings: SettingsMap, posts: PostRow[], pages: Llm
       return `- [${oneLine(pg.title)}](${url})`
     })
   const middle = sections([
-    [en ? '## Latest posts' : '## 最新文章', postLines.join('\n')],
-    [en ? '## Pages' : '## 独立页面', pageLines.join('\n')],
+    ['## 最新文章', postLines.join('\n')],
+    ['## 独立页面', pageLines.join('\n')],
   ])
   return frame(settings, siteUrl, middle, topics)
 }
@@ -95,7 +90,6 @@ export function buildLlmsTxt(settings: SettingsMap, posts: PostRow[], pages: Llm
  *  Markdown，与导出 Markdown 包同款转换器——别按「库存即 Markdown」原样输出，标签会直接透出）；
  *  锁文/密码文只出摘要 + 引导（防泄漏） */
 export function buildLlmsFullTxt(settings: SettingsMap, posts: PostRow[], siteUrl: string, topics: string[] = []): string {
-  const en = isEn(settings)
   const items = posts.map((p) => {
     const pwProtected = !!p.password_hash
     const memberLocked = !!p.min_tier && p.min_tier !== 'all'
@@ -103,38 +97,29 @@ export function buildLlmsFullTxt(settings: SettingsMap, posts: PostRow[], siteUr
     if (pwProtected) {
       body =
         (p.summary ? oneLine(p.summary) + '\n\n' : '') +
-        (en ? '> This post is password-protected; its full text is not publicly available.' : '> 本文设有访问密码，正文不对外提供。')
+        ('> 本文设有访问密码，正文不对外提供。')
     } else if (memberLocked) {
       body =
         (p.summary ? oneLine(p.summary) + '\n\n' : '') +
-        (en
-          ? `> The rest of this post is members-only. Read it on the site after member login: ${postUrl(siteUrl, p)}`
-          : `> 本文为会员专属内容，此处仅为摘录，登录会员后可阅读全文：${postUrl(siteUrl, p)}`)
+        (`> 本文为会员专属内容，此处仅为摘录，登录会员后可阅读全文：${postUrl(siteUrl, p)}`)
     } else {
       body = htmlToMd(sanitizeHtml(String(p.content ?? ''))).trim()
     }
     const date = p.published_at || p.updated_at
-    return `## [${oneLine(p.title)}](${postUrl(siteUrl, p)})\n\n${date ? (en ? 'Published: ' : '发布：') + fmtDate(date) + '\n\n' : ''}${body}\n\n---`
+    return `## [${oneLine(p.title)}](${postUrl(siteUrl, p)})\n\n${date ? ('发布：') + fmtDate(date) + '\n\n' : ''}${body}\n\n---`
   })
-  const middle = sections([[en ? '## Posts (full text)' : '## 文章全文', items.join('\n\n')]])
+  const middle = sections([['## 文章全文', items.join('\n\n')]])
   return frame(settings, siteUrl, middle, topics)
 }
 
-/** 演示站 / 全站 noindex / AI 策略 deny 档的桩输出：与 robots.txt 整站 Disallow 同口径，不列任何内容。
- * 三种桩因文案各异（2026-11 审计 P2-14）：aiDenied=策略拒绝；noindex=站长声明不收录的**真实站**
- * （不能冒充演示站——那是在替站长说谎）；都不传 = 演示站文案 */
+/** 全站 noindex / AI 策略 deny 档的桩输出：与 robots.txt 整站 Disallow 同口径，不列任何内容。
+ * 两种桩因文案各异（2026-11 审计 P2-14）：aiDenied=策略拒绝；noindex=站长声明不收录的真实站；
+ * 都不传 = 通用「暂不提供」文案 */
 export function buildLlmsStub(settings: SettingsMap, siteUrl: string, aiDenied = false, noindex = false): string {
-  const en = isEn(settings)
   const reason = aiDenied
-    ? en
-      ? 'This site does not permit AI crawlers (see robots.txt).'
-      : '本站已声明不允许 AI 抓取（见 robots.txt），此处不提供内容。'
+    ? '本站已声明不允许 AI 抓取（见 robots.txt），此处不提供内容。'
     : noindex
-      ? en
-        ? 'This site has requested not to be indexed (see robots.txt); content is not offered here.'
-        : '本站已声明不希望被收录（见 robots.txt），此处不提供内容。'
-      : en
-        ? 'This site is a demo / preview instance and does not expose content to AI crawlers.'
-        : '本站为演示 / 预览实例，不向 AI 爬虫暴露内容。'
-  return `# ${oneLine(tr(en, settings.siteName))}\n\n> ${reason}\n`
+      ? '本站已声明不希望被收录（见 robots.txt），此处不提供内容。'
+      : '本站暂不向 AI 爬虫提供内容。'
+  return `# ${oneLine((settings.siteName))}\n\n> ${reason}\n`
 }

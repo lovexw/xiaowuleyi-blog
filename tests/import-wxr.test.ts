@@ -425,27 +425,27 @@ test('端到端：真库导入（文章/页面/评论树/分类关联/密码上�
   assert.equal(badStep.status, 400)
 })
 
-test('端到端：登录后演示站导入 404（isDemo 短路在鉴权之后）、未登录 401', async () => {
+test('端到端：登录后可导入、未登录 401（鉴权在 handler 之前）', async () => {
   const db = new DatabaseSync(':memory:')
   db.exec(SCHEMA_SQL)
   const d1 = d1FromSqlite(db)
   await ensureSchema(d1)
-  const envDemo = { DB: d1, IMAGES: {}, ASSETS: {}, DEMO_MODE: '1' } as unknown as Env
+  const env = { DB: d1, IMAGES: {}, ASSETS: {} } as unknown as Env
   const ec = { waitUntil: () => {}, passThroughOnException: () => {} } as never
 
-  // 鉴权中间件在 handler 之前——演示站的 404 短路只有「带着会话」才能摸到，
+  // 鉴权中间件在 handler 之前，导入只有「带着会话」才能摸到，
   // 直接造一个用户 + 会话（createSession 落库 SHA-256 哈希，Cookie 拿原文）
   const { createSession } = await import('../src/auth')
   const uid = Number((await d1.prepare("INSERT INTO users (username, password_hash, salt, display_name, created_at, updated_at) VALUES ('demo', 'x', 'y', '演示', 1, 1)").run()).meta.last_row_id)
   const token = await createSession(d1, uid)
 
-  const demo = await api.request(
+  const authed = await api.request(
     'https://blog.example.com/admin/import/wxr',
     { method: 'POST', headers: { 'Content-Type': 'text/xml', Cookie: `bloghao_session=${token}` }, body: SAMPLE },
-    envDemo,
+    env,
     ec
   )
-  assert.equal(demo.status, 404)
+  assert.equal(authed.status, 200)
 
   const anon = await api.request(
     'https://blog.example.com/admin/import/wxr',

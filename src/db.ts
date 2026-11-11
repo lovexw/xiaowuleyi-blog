@@ -155,13 +155,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   totpEnabled: '',
     turnstileSiteKey: '',
   turnstileSecret: '',
-  // 英文测试版（内部代号 English 0.1，见 src/i18n.ts）：edition 是后台可切的语言版本；
-  // editionEnStatus 是运行状态（active 正常 / fallback 渲染异常已自动回退中文，重新开启时重置）
-  edition: 'zh',
-  editionEnStatus: 'active',
-  // 英文版最近一次异常的错误摘要与发生时间（后台横幅展示，仅记录，渲染层不读）
-  editionEnError: '',
-  editionEnAt: '',
   // 新手引导记账位（后台概览页清单卡）：仅 /api/auth/setup 首装成功时播种 '1'（api.ts），
   // 老站没有此键 = 永不显示引导卡；'0' = 已完成/已跳过，永久消失。onboardingManual 是
   // 「打开使用手册」的点击记账。两键都进 BOOL_SETTINGS 归一化，后台设置页保存全部不含它们
@@ -711,7 +704,6 @@ export async function refreshOnThisDay(db: D1Database, dayKey = fmtDate(Date.now
   return items
 }
 
-
 export async function relatedPosts(db: D1Database, post: PostRow, limit = 3, afterTs = 0): Promise<PostRow[]> {
   // 可见窗口开启时相关文章同样限定在窗口内（链接出去就是 404）
   const vis = afterTs > 0 ? 'AND COALESCE(published_at, created_at) >= ?' : ''
@@ -1031,7 +1023,7 @@ export async function listWeibo(
 const WB_PUB_COUNT_KEY = 'wbPubCount'
 
 /** 重算并落库已发布微博总数（= listWeibo 公开口径的 COUNT）：每晚备份 cron 校准一次防增量漂移；
- *  整站包导入 / 清空本站 / 演示站播种收尾也各调一次（这些路径绕过单条写入口） */
+ *  整站包导入 / 清空本站也各调一次（这些路径绕过单条写入口） */
 export async function recountWeiboCount(db: D1Database): Promise<void> {
   const r = await db
     .prepare("SELECT COUNT(*) AS n FROM weibo WHERE deleted_at IS NULL AND status = 'published'")

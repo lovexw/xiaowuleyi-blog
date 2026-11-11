@@ -247,5 +247,5 @@ A：项目名改 `wrangler.jsonc` 的 `name`；本地端口 `npm run dev -- --po
 - **改动发布**：修改 `website/public/` 后提交、推送，线上按静态文件方式同步部署目录即刻生效（官网纯静态、无构建步骤）
 - **文档中心**：`website/public/docs/` 下的 HTML 由 `npm run build:docs` 从 `docs/*.md` 与根目录 `CHANGELOG.md` 预渲染生成（生成结果直接提交，仍是零构建静态页）；改了 Markdown 文档后重跑一次 `npm run build:docs`。该命令同时会按扫描 `website/public` 的真实页面重生成 `sitemap.xml`（**勿手改**），`robots.txt` 为手写的源站版
 - **「博客号目录」**：数据在 `website/public/data/showcase.json`，访客走官网表单投稿（落盘待审），审核通过后把站点加进 JSON 即可；GitHub Issue 为兜底入口
-- **在线示例**：官网指向的演示站 https://demo.bloghao.com 是引擎的另一套独立部署（`bloghao-demo` 仓库的 Docker 形态，DEMO_MODE 体验环境，机制见 [DEMO.md](DEMO.md)），专供访客体验；作者实例 blog.xiaowuleyi.com 不作演示用
+- **在线示例**：官网 bloghao.com 与本仓库同源（演示站已于 2026-11-11 下线并删除源码）；作者实例 blog.xiaowuleyi.com 不作演示用
 - 官网与本博客 Worker 互不影响，改动官网不涉及任何 Cloudflare 资源

@@ -43,17 +43,12 @@ code() { curl -s -o /dev/null -w '%{http_code}' --resolve "$1:${PORT}:127.0.0.1"
 
 echo "==> 基础链路"
 check "main 租户 health"          200 "$(code main.localhost /api/health)"
-check "demo 租户 health"          200 "$(code demo.localhost /api/health)"
 check "t1 租户 health"            200 "$(code t1.localhost /api/health)"
 check "未登记域名 404"            404 "$(code nobody.localhost /api/health)"
 check "后台 SPA 静态直出"         200 "$(code main.localhost /admin/)"
 check "后台无斜杠 301 补斜杠（防相对路径资源 404）" 301 "$(code main.localhost /admin)"
-check "demo 租户 RSS"             200 "$(code demo.localhost /rss.xml)"
+check "t1 租户 RSS"               200 "$(code t1.localhost /rss.xml)"
 check "main 租户首页（空库也能渲染）" 200 "$(code main.localhost /)"
-
-echo "==> 演示租户播种"
-DEMO_HOME=$(curl -s --resolve "demo.localhost:${PORT}:127.0.0.1" "http://demo.localhost:${PORT}/")
-check "demo 首页含种子文章链接" 1 "$(printf '%s' "$DEMO_HOME" | { grep -o '/post/' || true; } | wc -l | awk '{print ($1>0)?1:0}')"
 
 echo "==> 真实租户：注册 → 登录 → 发文 → 传图"
 JAR=$(mktemp)
@@ -104,7 +99,7 @@ SMOKE_DIR=$(mktemp -d)
 SMOKE_CFG="${SMOKE_DIR}/tenants.json"
 SMOKE_DATA="${SMOKE_DIR}/tenants"
 cat > "$SMOKE_CFG" <<EOF
-{ "ops.localhost": {}, "main.localhost": {}, "demo.localhost": { "demo": true }, "t1.localhost": { "demo": true } }
+{ "ops.localhost": {}, "main.localhost": {}, "t1.localhost": { "disabled": true } }
 EOF
 
 # mock 广场 hub（控制面收录链路对端）：按 URL 去重的注册 409 / stats / pull / 站点增删改
@@ -225,13 +220,13 @@ curl -s -o /dev/null --resolve "ops.localhost:${PORT}:127.0.0.1" -b "$CJAR" -c "
 DELETE_FLASH=$(curl -s --resolve "ops.localhost:${PORT}:127.0.0.1" -b "$DJAR" http://ops.localhost:${PORT}/)
 check "删站同步清除广场条目" 1 "$(printf '%s' "$DELETE_FLASH" | grep -c '广场条目已同步清除' | awk '{print ($1>0)?1:0}')"
 
-# 广场收录同步（仪表盘按钮）：存量站补录 + 触发补漏；演示租户（demo/t1）必须被排除
+# 广场收录同步（仪表盘按钮）：存量站补录 + 触发补漏；停用租户（t1）必须被排除
 SJAR=$(mktemp)
 curl -s -o /dev/null --resolve "ops.localhost:${PORT}:127.0.0.1" -b "$CJAR" -c "$SJAR" -X POST http://ops.localhost:${PORT}/plaza-sync
 SYNC_FLASH=$(curl -s --resolve "ops.localhost:${PORT}:127.0.0.1" -b "$SJAR" http://ops.localhost:${PORT}/)
 check "广场收录同步：新收录 ops/main 两站" 1 "$(printf '%s' "$SYNC_FLASH" | grep -c '新收录 2 站' | awk '{print ($1>0)?1:0}')"
 check "广场收录同步：已收录站不重复并触发补漏" 1 "$(printf '%s' "$SYNC_FLASH" | grep -c '补漏已触发' | awk '{print ($1>0)?1:0}')"
-check "演示租户不进广场" 0 "$(grep -cE 'demo\.localhost|t1\.localhost' "$MOCK_LOG" || true)"
+check "停用租户不进广场" 0 "$(grep -c 't1\.localhost' "$MOCK_LOG" || true)"
 check "仪表盘广场卡含收录按钮" 1 "$(printf '%s' "$SYNC_FLASH" | grep -c '分站收录进广场' | awk '{print ($1>0)?1:0}')"
 
 # 分站数据统计与详情页：仪表盘出数据列；详情页出完整统计与前台/后台入口

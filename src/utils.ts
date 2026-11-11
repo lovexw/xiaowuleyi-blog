@@ -295,14 +295,6 @@ export function normalizeLinkUrl(input: string): string {
   }
 }
 
-/* ---------------- 演示站模式 ----------------
- * 仅 demo Worker（wrangler.demo.jsonc 注入 DEMO_MODE）为真；生产 Worker 不带此变量。
- * 门控三类行为：播种/重置（src/demo.ts，动态 import）、防搞坏守卫（改密码/闭站/外发通知）、robots 与 noindex。
- */
-export function isDemo(env: { DEMO_MODE?: string } | undefined): boolean {
-  return env?.DEMO_MODE === '1' || env?.DEMO_MODE === 'true'
-}
-
 /** 字节流的 SHA-256 十六进制指纹：媒体「体检」查重复文件用（uploads.hash，见 src/audit.ts）。
  *  Workers 与 Node 18+ 都内置 webcrypto */
 export async function sha256Hex(buf: ArrayBuffer): Promise<string> {

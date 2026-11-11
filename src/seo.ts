@@ -327,15 +327,14 @@ function aiRobotsBlock(policy: AiPolicy): string {
 }
 
 /** robots.txt 组装：内置段（Allow / Disallow: /admin / 微博分页禁令 / Sitemap）+ settings.robotsExtra
- *  追加段 + AI 抓取策略声明段。演示站固定整站 Disallow（种子数据与闭站状态不该进索引），追加段与
- *  AI 段都不参与；全站 noindex 开关（settings.siteNoindex）同理整站 Disallow——空白模板站 / 镜像站
- *  不进索引，页面侧 <meta noindex> 由 pages.ts pageOpts 同口径注入。
+ *  追加段 + AI 抓取策略声明段。全站 noindex 时整站 Disallow（追加段与 AI 段都不参与）——
+ *  空白模板站 / 镜像站不进索引，页面侧 <meta noindex> 由 pages.ts pageOpts 同口径注入。
  *  `Disallow: /weibo?page=`（2026-10-23，D1 读放大治理）：微博时间线翻页是薄聚合页，OFFSET 深翻页
  *  每页读 O(页深) 行——搜索引擎顺着「下一页」把 5k+ 条时间线完整走一遍就是 ~200 万行读（10-22 实测
  *  烧掉当日额度 42%）。?wb= 深链与 ?topic= 话题页不受影响照旧可爬；siteMode=blog 时该路径 302 回
  *  首页，禁令无害。改它先跑 tests/seo.test.ts。 */
-export function buildRobotsTxt(settings: SettingsMap, origin: string, demo = false): string {
-  if (demo || settings.siteNoindex === '1') return 'User-agent: *\nDisallow: /\n'
+export function buildRobotsTxt(settings: SettingsMap, origin: string): string {
+  if (settings.siteNoindex === '1') return 'User-agent: *\nDisallow: /\n'
   const policy = readAiPolicy(settings.aiPolicy)
   const base = `User-agent: *\n${contentSignalLine(policy)}Allow: /\nDisallow: /admin\nDisallow: /weibo?page=\nSitemap: ${origin}/sitemap.xml\n`
   const extra = cleanRobotsExtra(settings.robotsExtra || '')

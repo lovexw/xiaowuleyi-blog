@@ -45,16 +45,3 @@ test('zipEntrySlug：脏 slug 退回 post-<id> 命名（防 zip 条目目录逃�
   assert.equal(zipEntrySlug('a\0b', 3), 'post-3')
   assert.equal(zipEntrySlug('', 3), 'post-3')
 })
-
-// ── 演示站导出守卫（安全审计 F3 修复的守卫）：demo 下两条导出路由一律 404，不能让
-// 凭据公示的体验者整包拖走内容。守卫在 DB 触碰之前，环境里不需要真库 ──
-
-test('演示站 /api/admin/export/* 整体 404（markdown 与 wxr 两路）', async () => {
-  const demoEnv = { DEMO_MODE: '1', DB: {}, IMAGES: {} }
-  for (const path of ['/markdown', '/wxr']) {
-    const res = await exportRoutes.request(path, undefined, demoEnv)
-    assert.equal(res.status, 404, `demo 下 ${path} 必须短路`)
-    const body = (await res.json()) as { error?: string }
-    assert.match(body.error ?? '', /演示站/)
-  }
-})

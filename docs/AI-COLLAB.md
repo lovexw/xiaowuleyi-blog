@@ -14,7 +14,7 @@
 | 任务场景 | 读哪份 | 说明 |
 | --- | --- | --- |
 | 任何改动（每次） | `AGENTS.md` + 本页 | AGENTS.md 是宪法：防线、红线、结构速查全在里面 |
-| **改之前先确认边界** | `docs/MAINTENANCE.md` | **自用项目**：只有甲骨文自托管是主线；CF 部署 / 多租户托管 / 演示站 / 广场 / 官网全部冻结，别顺手去改 |
+| **改之前先确认边界** | `docs/MAINTENANCE.md` | **自用项目**：只有甲骨文自托管是主线；CF 部署 / 多租户托管 / 广场 / 官网全部冻结，别顺手去改（演示站与英文版已整体删除） |
 | 改 UI（前台 / 后台 / 编辑器） | `docs/MOBILE-UX.md` | 移动端是硬要求，改前读检查清单 |
 | 前台「微信同款」阅读增强 | `docs/WECHAT-PLAYBOOK.md` | 设计语言拆解 + 能力门槛红线，做这类功能才读 |
 | 发布新版本 | `docs/RELEASING.md` | 版本号规则、挑洗、CHANGELOG 回填 |
@@ -24,7 +24,7 @@
 | 主题 / 插件 | `docs/THEMES.md`、`docs/PLUGINS.md` | 各子系统的协议与规矩 |
 | 会员 / 跨站继承 | `docs/PARTNER.md` | 分站模式下的单向权益通道：数据模型、签名、两站配置、风险与防线 |
 | 下一批做什么 | `docs/ROADMAP.md` | 已折叠：保留的待办 + 已上线大事记 + 不做清单 |
-| 冻结形态的旧文档 | `docs/DEPLOY.md`、`docs/DEMO.md`、`docs/PLAZA.md`、`docs/CLOUDFLARE-BASICS.md` | 已挂冻结横幅，只在考古 / 对照时读，**不作为操作依据** |
+| 冻结形态的旧文档 | `docs/DEPLOY.md`、`docs/PLAZA.md`、`docs/CLOUDFLARE-BASICS.md` | 已挂冻结横幅，只在考古 / 对照时读，**不作为操作依据** |
 | 历史审计 / 提案 / 契约 | `docs/archive/` | 只在考古时读，日常不用管 |
 
 ---

@@ -1,5 +1,5 @@
 # 用法：cd docker-poc && docker compose up --build
-# 然后访问 http://demo.localhost:8787 （*.localhost 现代浏览器自动解析到 127.0.0.1；
+# 然后访问 http://main.localhost:8787 （*.localhost 现代浏览器自动解析到 127.0.0.1；
 # 手机/其他设备访问时把 tenants.json 里的域名换成一个解析到本机 IP 的真域名）
 services:
   xwblog:

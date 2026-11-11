@@ -146,6 +146,7 @@ test('渲染函数自身抛错也会走重试链路，不再伪装成「加载�
   assert.ok(!/评论加载失败/.test(listEl.innerHTML))
 })
 
-test('英文版文案有 Retry 映射', () => {
-  assert.match(src, /'点击重试': 'Retry'/, 'site.js 英文文案表缺 Retry')
+test('评论加载失败给可点重试（不再只给一句灰字）', () => {
+  assert.match(src, /评论加载失败/, '失败提示')
+  assert.match(src, /点击重试/, '重试入口')
 })

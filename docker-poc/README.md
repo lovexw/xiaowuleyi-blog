@@ -15,8 +15,8 @@ Cloudflare 在这个架构里只做 DNS + CDN，不再运行代码。已在甲�
 ```
 一个 Node 进程（Docker 容器）
  ├─ Host 路由：按域名切租户
- │    ├─ data/tenants/demo.localhost/blog.db     ← D1 → node:sqlite（WAL）
- │    ├─ data/tenants/demo.localhost/uploads/    ← R2 → 磁盘目录
+ │    ├─ data/tenants/main.localhost/blog.db     ← D1 → node:sqlite（WAL）
+ │    ├─ data/tenants/main.localhost/uploads/    ← R2 → 磁盘目录
  │    ├─ data/tenants/main.localhost/blog.db     ← 每个租户完全独立，互不可见
  │    └─ …
  ├─ 静态资源 public/ 直出（对齐 wrangler assets 行为）
@@ -50,7 +50,7 @@ npm start            # 默认 127.0.0.1:8787
 
 浏览器直接开（`*.localhost` 现代浏览器自动解析到 127.0.0.1）：
 
-- http://demo.localhost:8787 —— 演示租户，首次访问自动建表+播种（demo 账号 demo / demo1234）
+- http://main.localhost:8787 —— 首个租户，首次访问自动建表，进 /admin/ 创建管理员
 - http://t1.localhost:8787 —— 第二个演示租户（种子内容相同，库完全独立）
 - http://main.localhost:8787 —— 空库真实租户：首次进 `/admin/` 走「创建管理员」
 
@@ -86,8 +86,8 @@ R2 **零出口流量费**，200GB 图片约 $3/月。
     "secretAccessKey": "xxx"
   },
   "tenants": {
-    "blog1.example.com": { "demo": false, "storage": "r2" },
-    "main.localhost": { "demo": false }
+    "blog1.example.com": { "storage": "r2" },
+    "main.localhost": {}
   }
 }
 ```
@@ -125,14 +125,14 @@ docker compose up --build      # 镜像约 70MB（node:26-alpine + server.js + p
 
 ```bash
 ./add-tenant.sh blog1.example.com           # 登记 → 重启 → 健康检查，一条命令
-./add-tenant.sh try.example.com --demo      # 演示种子站（每 2 小时清库重灌）
+./add-tenant.sh blog2.example.com           # 再来一个真实站（空库）
 ./add-tenant.sh blog1.example.com --remove  # 下线（数据目录保留）
 ```
 
 DNS 用泛域名（`*.example.com` 一条 A 记录指向服务器）时无需再动 DNS；逐域名解析
 时先加 DNS 再跑脚本。脚本要求宿主机有 jq 或 node 之一（改 JSON 用）。手工方式：
 
-1. `tenants.json` 加一行 `"新域名": { "demo": false }`
+1. `tenants.json` 加一行 `"新域名": {}`
 2. 重启进程（重启 < 1s）
 3. 域名 DNS 指到这台服务器（Cloudflare 橙云代理即可）
 
@@ -182,7 +182,7 @@ tenants.json 挂载不能是 `:ro`；不用控制面时保持未配置状态即�
 hub 删站级联清内容；仪表盘「广场 hub」卡片的「分站收录进广场」按钮用于存量站补录。
 演示租户（种子假数据）与停用租户一律不收录；未配这两个 env 时行为不变。
 
-面板的「租户」列表每行还带**收录状态**（✓ 可被抓取 / ⛔ 不收录 / ⛔ 已闭站 / 演示站·刻意
+面板的「租户」列表每行还带**收录状态**（✓ 可被抓取 / ⛔ 不收录 / ⛔ 已闭站
 不进索引，来自各租户库的 `siteNoindex` / `siteClosed`），分站详情页给同样的状态与「去哪关」
 的指路——多站点下哪个二级域名掉出搜索引擎与 AI 的视野，面板上一眼可见。
 
@@ -196,8 +196,8 @@ hub 删站级联清内容；仪表盘「广场 hub」卡片的「分站收录进
 | `shims/d1.ts` | D1 → node:sqlite |
 | `shims/r2disk.ts` | R2 → 磁盘目录（默认存储后端） |
 | `shims/r2s3.ts` | R2 S3 兼容接口适配层（租户选 `storage: "r2"` 时启用，SigV4 零依赖） |
-| `tenants.json` | 域名 → 租户配置（demo 种子开关） |
-| `add-tenant.sh` | 开台脚本：登记域名 → 重启 → 健康检查（`--demo` 演示种子 / `--remove` 下线） |
+| `tenants.json` | 域名 → 租户配置（存储方式 / 停用开关） |
+| `add-tenant.sh` | 开台脚本：登记域名 → 重启 → 健康检查（`--remove` 下线） |
 | `smoke.sh` | 端到端冒烟 |
 | `entrypoint.sh` | 容器入口：修数据卷属主 → 降权 node 运行 |
 | `Dockerfile` / `docker-compose.yml` | 容器化（构建上下文 = 仓库根目录） |

@@ -18,7 +18,7 @@ import { fireWeiboPublished } from './hooks'
 import { siteBase } from './render'
 import { imageExtOf, MAX_UPLOAD_BYTES, saveUpload, sniffImageExt } from './store'
 import type { Env, SessionUser, SettingsMap, WeiboRow } from './types'
-import { excerpt, extractWeiboTopics, isDemo } from './utils'
+import { excerpt, extractWeiboTopics } from './utils'
 
 const TG_FILE_LIMIT = 20 * 1024 * 1024 // Bot API getFile 上限 20MB
 
@@ -257,15 +257,13 @@ interface TgApiResponse<T> {
   description?: string
 }
 
-/** Telegram Bot API 统一出口：演示站一律短路（DEMO_MODE 下体验者随手配的 Bot Token
- *  不能让官方演示 Worker 变成对外发送中继，见「演示站禁外发」防线） */
+/** Telegram Bot API 统一出口：Bot Token 由站长在后台配置，未配置时各调用方自行降级 */
 async function tgApi<T>(
   env: Env,
   botToken: string,
   method: string,
   payload?: Record<string, unknown>
 ): Promise<TgApiResponse<T> | null> {
-  if (isDemo(env)) return null
   try {
     const res = await fetch(`${TG_API}/bot${botToken}/${method}`, {
       method: 'POST',
@@ -297,10 +295,9 @@ function notifyChatId(settings: SettingsMap): string {
 }
 
 /** 给站长推一条纯文本消息（站点级事件，不受留言推送开关限制）；任何失败都吞掉，只返回是否送达。
- *  演示站短路：备份/评论/定时发布通知也不外发（demo 凭据是公示的，体验者能触达这些链路） */
+ *  只走站长配置的 Bot，未配置直接返回 false */
 export async function notifyAdminText(env: Env, text: string): Promise<boolean> {
   try {
-    if (isDemo(env)) return false
     const settings = await getSettings(env.DB)
     const botToken = (settings.telegramBotToken || '').trim()
     if (!botToken) return false
@@ -488,13 +485,11 @@ telegramRoutes.use('/webhook', async (c, next) => {
   const updateId = probe && typeof probe.update_id === 'number' ? probe.update_id : null
   if (updateId !== null && tgUpdateDone(c.env, updateId)) return c.json({ ok: true })
   await next()
-  // 401（secret 错）/ 403（未配置）/ 404（演示站）都不记账，TG 重投仍能进正常链路
+  // 401（secret 错）/ 403（未配置）/ 404 都不记账，TG 重投仍能进正常链路
   if (updateId !== null && c.res.status >= 200 && c.res.status < 300) tgMarkUpdateDone(c.env, updateId)
 })
 
 telegramRoutes.post('/webhook', async (c) => {
-  // 演示站禁外发：TG webhook 整条路都不存在（tgApi 内部还有兜底短路）
-  if (isDemo(c.env)) return c.json({ ok: false }, 404)
   const settings = await getSettings(c.env.DB)
   const botToken = (settings.telegramBotToken || '').trim()
   const secret = settings.telegramWebhookSecret || ''
@@ -606,17 +601,15 @@ telegramRoutes.post('/webhook', async (c) => {
 
 export const adminExternalRoutes = new Hono<AppEnv>()
 
-/** 生成并保存新的 API Token（旧的立即失效）；演示站禁用（禁外发守卫同口径） */
+/** 生成并保存新的 API Token（旧的立即失效） */
 adminExternalRoutes.post('/token', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放外部发布配置', 404)
   const token = randomToken(24)
   await saveSettings(c.env.DB, { externalToken: token })
   return c.json({ ok: true, token })
 })
 
-/** 校验 Bot Token 并一键设置 Webhook（首次会自动生成 Webhook 密钥）；演示站禁用 */
+/** 校验 Bot Token 并一键设置 Webhook（首次会自动生成 Webhook 密钥） */
 adminExternalRoutes.post('/telegram/webhook', async (c) => {
-  if (isDemo(c.env)) return jsonError('演示站不开放外部发布配置', 404)
   const settings = await getSettings(c.env.DB)
   const botToken = (settings.telegramBotToken || '').trim()
   if (!botToken) return jsonError('先填写并保存 Telegram Bot Token')

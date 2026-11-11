@@ -33,7 +33,7 @@ import { mdToHtml } from './markdown'
 import { siteBase } from './render'
 import { sanitizeHtml } from './sanitize'
 import type { Env, PostRow } from './types'
-import { clampInt, cleanSlug, excerpt, isDemo, slugify } from './utils'
+import { clampInt, cleanSlug, excerpt, slugify } from './utils'
 
 /* ---------------- 协议层（纯函数，Node 可测） ---------------- */
 
@@ -427,8 +427,6 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>()
 const MCP_TOKEN_ERR = '无效的 API Token，或尚未在后台「设置 → 外部发布」生成'
 
 mcpRoutes.post('/', async (c) => {
-  // 演示站关闭：对齐 /api/admin/external/* 口径（演示体验者凭据公示，不给写入面）
-  if (isDemo(c.env)) return c.json({ error: '演示站不开放 MCP 接入' }, 404)
   const settings = await getSettings(c.env.DB)
   const expected = settings.externalToken || ''
   const auth = c.req.header('Authorization') || ''

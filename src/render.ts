@@ -11,10 +11,6 @@ import { appearanceHeadStyle } from './appearance'
 import { customCssHeadStyle } from './skinpack'
 import { ipRegionLabel } from './ipregion'
 import { readAiPolicy, seoHeadHtml } from './seo'
-import { enBetaBannerHtml, fmtDateEn, fmtDateEnShort, fmtDateTimeEn, isEn, plural, tr, weiboTimeEn } from './i18n'
-
-// 英文测试版（English 0.1）的词典与日期随共享构建器一起再导出：主题与 pages.ts 只认 render 一个进口
-export { enBetaBannerHtml, fmtDateEn, fmtDateEnShort, fmtDateTimeEn, isEn, plural, tr, weiboTimeEn } from './i18n'
 
 export interface ThemePageOptions {
   settings: SettingsMap
@@ -34,8 +30,6 @@ export interface ThemePageOptions {
   origin?: string
   /** 工具型页面（搜索、草稿预览）：要求搜索引擎不收录 */
   noindex?: boolean
-  /** 演示体验版（DEMO_MODE）：所有公开页顶部公示站点性质横幅，见 demoBannerHtml() */
-  demo?: boolean
   /** 结构化数据（JSON-LD）：对象序列化进 <script type="application/ld+json">，文章页传 articleJsonLd() 的产物；
    *  传数组时逐块输出（文章页 = BlogPosting + 面包屑 BreadcrumbList，见 src/seo.ts） */
   jsonLd?: Record<string, unknown> | Record<string, unknown>[]
@@ -76,12 +70,10 @@ export function siteBase(settings: SettingsMap, origin?: string): string {
 }
 
 /** HTML 骨架：meta/OG/JSON-LD/内联主题 CSS/站点脚本，所有主题共用。
- *  英文测试版（settings.edition=en 且未回退）：lang=en、顶部测试版横幅、noindex（测试期不让搜索
- *  引擎把英文界面收进中文站的索引，回退中文版后自动恢复收录），data-edition 供 site.js 切前台文案 */
+ *  lang 固定 zh-CN（英文版 2026-11-11 已删除，前台只有中文一种输出） */
 export function page(o: ThemePageOptions): string {
-  const en = isEn(o.settings)
-  const siteName = tr(en, o.settings.siteName) || 'BlogHao'
-  const desc = tr(en, o.description || o.settings.siteDescription || '').slice(0, 160)
+  const siteName = o.settings.siteName || 'BlogHao'
+  const desc = (o.description || o.settings.siteDescription || '').slice(0, 160)
   const base = siteBase(o.settings, o.origin)
   const title = o.title ? `${o.title} - ${siteName}` : siteName
   const ogType = o.path.startsWith('/post/') ? 'article' : 'website'
@@ -101,7 +93,7 @@ export function page(o: ThemePageOptions): string {
         .join('\n')
     : ''
   return `<!DOCTYPE html>
-<html lang="${en ? 'en' : 'zh-CN'}"${en ? ' data-edition="en"' : ''}${
+<html lang="zh-CN"${
     // 注册人机验证（Turnstile）：sitekey 是公开值，仅 /member 页下发给 site.js 懒挂载组件
     o.path === '/member' && o.settings.turnstileSiteKey ? ` data-turnstile="${esc(o.settings.turnstileSiteKey)}"` : ''
   }${assetVersion() ? ` data-av="${assetVersion()}"` : ''}>
@@ -110,7 +102,7 @@ export function page(o: ThemePageOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>${esc(title)}</title>
 <meta name="description" content="${esc(desc)}">
-${o.noindex || en ? '<meta name="robots" content="noindex">' : '<meta name="robots" content="max-snippet:-1, max-image-preview:large, max-video-preview:-1">'}
+${o.noindex ? '<meta name="robots" content="noindex">' : '<meta name="robots" content="max-snippet:-1, max-image-preview:large, max-video-preview:-1">'}
 ${o.settings.statsEnabled === '0' ? '<meta name="xw-stats" content="off">' : ''}
 ${canonicalHtml}
 <meta property="og:title" content="${esc(o.title || siteName)}">
@@ -133,19 +125,12 @@ ${grayscaleStyle(o.settings)}
 ${seoHeadHtml(o.settings)}
 </head>
 <body${o.preview ? ' data-preview="1"' : ''}>
-${en ? enBetaBannerHtml() : ''}
-${o.demo ? demoBannerHtml() : ''}
+
 ${o.body}
 <script src="${assetUrl('/site.js')}" defer></script>
 ${renderFooterHtml(o.settings)}
 </body>
 </html>`
-}
-
-/** 演示体验版横幅（DEMO_MODE 专属，所有公开页顶部公示站点性质）：体验版、非最新正式版、
- *  仅供测试体验、数据定期清空重置。内联样式避免依赖六套主题各自补 CSS。 */
-function demoBannerHtml(): string {
-  return `<div style="background:#b45309;color:#fff;font-size:13px;line-height:1.6;text-align:center;padding:7px 14px;">🎓 演示体验版（非最新正式版）· 仅供测试体验 · 数据每 2 小时自动清空重置</div>`
 }
 
 function absUrl(siteUrl: string, path: string): string {
@@ -167,16 +152,15 @@ function grayscaleStyle(settings: SettingsMap): string {
 /** 闭站页（settings.siteClosed 开启时对匿名访客返回）：脱离主题的极简独立页。
  *  状态码必须 503 + Retry-After——搜索引擎据此暂时保留收录，而不是把站点当 404 摘掉 */
 export function renderClosedPage(settings: SettingsMap): string {
-  const en = isEn(settings)
-  const siteName = tr(en, settings.siteName) || 'BlogHao'
-  const message = tr(en, settings.siteClosedMessage || '本站暂时关闭，请稍后再来。')
+  const siteName = settings.siteName || 'BlogHao'
+  const message = settings.siteClosedMessage || '本站暂时关闭，请稍后再来。'
   return `<!DOCTYPE html>
-<html lang="${en ? 'en' : 'zh-CN'}">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="robots" content="noindex">
-<title>${en ? `Temporarily closed - ${esc(siteName)}` : `站点暂时关闭 - ${esc(siteName)}`}</title>
+<title>${`站点暂时关闭 - ${esc(siteName)}`}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{color-scheme:light dark}
@@ -195,7 +179,7 @@ h1{font-size:20px;font-weight:600;margin:20px 0 12px;color:inherit}
 <body>
 <div class="card">
 <div class="badge" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="9" x2="19" y2="9"/><line x1="5" y1="15" x2="19" y2="15"/></svg></div>
-<h1>${en ? 'Temporarily closed' : '站点暂时关闭'}</h1>
+<h1>站点暂时关闭</h1>
 <p class="msg">${esc(message)}</p>
 <div class="site">${esc(siteName)}</div>
 </div>
@@ -231,8 +215,7 @@ export interface ArticleJsonLdOptions {
  * 定时发布场景 updated_at 会早于 published_at，直接用会造成「修改时间早于发布时间」的矛盾数据。
  */
 export function articleJsonLd(o: ArticleJsonLdOptions): Record<string, unknown> {
-  const en = isEn(o.settings)
-  const siteName = tr(en, o.settings.siteName) || 'BlogHao'
+  const siteName = o.settings.siteName || 'BlogHao'
   const publishedTs = o.publishedAt || o.updatedAt
   const data: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -250,7 +233,7 @@ export function articleJsonLd(o: ArticleJsonLdOptions): Record<string, unknown> 
       name: siteName,
       logo: { '@type': 'ImageObject', url: absUrl(o.base, o.settings.faviconUrl || '/favicon.svg') },
     },
-    inLanguage: en ? 'en' : 'zh-CN',
+    inLanguage: 'zh-CN',
   }
   if (o.tags?.length) data.keywords = o.tags.join(', ')
   if (o.commentCount != null) data.commentCount = o.commentCount
@@ -307,7 +290,6 @@ export interface NavPage {
  * 分类与标签收进同一折叠菜单（标签可能很多，菜单内部滚动），
  * active 传 'home' / 'weibo' / 'archives' / 'guestbook' / 'links' / 'member' / 'rank' / 'about' / 分类 slug / 'tag:标签名' / 'p:页面slug'。
  * memberEnabled 传 settings.membersEnabled === '1'：true 时在「关于我」前渲染会员中心与排行榜入口。
- * en 传 isEn(settings)：英文测试版输出英文导航词（Home / Notes / Archives…）。
  */
 export function siteNav(o: {
   cls: string
@@ -321,10 +303,7 @@ export function siteNav(o: {
   compact?: boolean
   /** 吸顶导航（wechat 先行）：输出 data-xw-nav-sticky 标记，site.js 据此做下滚收起/上滑浮现（阅读工具条联动） */
   sticky?: boolean
-  /** 英文测试版：导航词走词典（tr），中文路径不传即原样 */
-  en?: boolean
 }): string {
-  const en = !!o.en
   const m = o.mode || 'blog-weibo'
   // href 一并转义：当前调用方全是内部构造的路径/经 cleanSlug 的 slug，转义是给未来调用方的护栏
   const item = (href: string, label: string, active = false) =>
@@ -338,52 +317,52 @@ export function siteNav(o: {
   const menu =
     cats.length || tags.length
       ? `<div class="${o.cls}-menu">
-  ${cats.length ? `<div class="${o.cls}-group"><span class="${o.cls}-label">${tr(en, '分类')}</span><div class="${o.cls}-chips">${cats.join('')}</div></div>` : ''}
-  ${tags.length ? `<div class="${o.cls}-group"><span class="${o.cls}-label">${tr(en, '话题')}</span><div class="${o.cls}-chips">${tags.join('')}</div></div>` : ''}
+  ${cats.length ? `<div class="${o.cls}-group"><span class="${o.cls}-label">分类</span><div class="${o.cls}-chips">${cats.join('')}</div></div>` : ''}
+  ${tags.length ? `<div class="${o.cls}-group"><span class="${o.cls}-label">话题</span><div class="${o.cls}-chips">${tags.join('')}</div></div>` : ''}
 </div>`
       : ''
   const drop = menu
     ? `<details class="${o.cls}-dd snav-dd">
-  <summary class="${o.cls}-link">${tr(en, '分类话题')}<svg class="${o.cls}-caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+  <summary class="${o.cls}-link">分类话题<svg class="${o.cls}-caret" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
   ${menu}
 </details>`
       : ''
   // RSS 订阅图标：博客文化的入口，内联塑造（currentColor 随各主题导航链接色），compact 与完整形态都保留
-  const rssIcon = `<a class="${o.cls}-rss" href="/rss.xml" title="${tr(en, 'RSS 订阅')}" aria-label="RSS" style="display:inline-flex;align-items:center;opacity:.55"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.18 17.82a2.18 2.18 0 1 1-4.36 0 2.18 2.18 0 0 1 4.36 0zM2 8.73a13.27 13.27 0 0 1 13.27 13.27h-3.64A9.64 9.64 0 0 0 2 12.36V8.73zm0-6.36A19.64 19.64 0 0 1 21.64 22H18A16 16 0 0 0 2 6V2.36z"/></svg></a>`
+  const rssIcon = `<a class="${o.cls}-rss" href="/rss.xml" title="RSS 订阅" aria-label="RSS" style="display:inline-flex;align-items:center;opacity:.55"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.18 17.82a2.18 2.18 0 1 1-4.36 0 2.18 2.18 0 0 1 4.36 0zM2 8.73a13.27 13.27 0 0 1 13.27 13.27h-3.64A9.64 9.64 0 0 0 2 12.36V8.73zm0-6.36A19.64 19.64 0 0 1 21.64 22H18A16 16 0 0 0 2 6V2.36z"/></svg></a>`
   // 纯微博：'/' 即微博时间线，导航首位「微博」直达 /weibo（首页 item 退出）；纯博客：去掉「微博」
-  const weiboItem = m === 'blog' ? '' : item('/weibo', tr(en, '微博'), o.active === 'weibo' || (m === 'weibo' && o.active === 'home'))
-  const homeItem = m === 'weibo' ? '' : item('/', tr(en, '首页'), o.active === 'home')
+  const weiboItem = m === 'blog' ? '' : item('/weibo', ('微博'), o.active === 'weibo' || (m === 'weibo' && o.active === 'home'))
+  const homeItem = m === 'weibo' ? '' : item('/', ('首页'), o.active === 'home')
   if (o.compact) {
     // 会员走 accent 药丸（主题 CSS 塑形），与普通链接拉开视觉层级；is-active 口径与普通链接一致
     const memberPill = o.memberEnabled
-      ? `<a class="${o.cls}-member${o.active === 'member' ? ' is-active' : ''}" href="/member">${tr(en, '会员')}</a>`
+      ? `<a class="${o.cls}-member${o.active === 'member' ? ' is-active' : ''}" href="/member">会员</a>`
       : ''
     // 微博不单独进顶栏：混合模式首页已展示微博流（头部「全部 →」指向 /weibo），
     // 纯微博模式的「首页」本身就是微博（homeItem || weiboItem 兜底）
-    return `<nav class="${o.cls}"${o.sticky ? ' data-xw-nav-sticky' : ''} aria-label="${tr(en, '站点导航')}">
+    return `<nav class="${o.cls}"${o.sticky ? ' data-xw-nav-sticky' : ''} aria-label="站点导航">
   ${homeItem || weiboItem}
-  ${m === 'weibo' ? '' : item('/archives', tr(en, '归档'), o.active === 'archives')}
+  ${m === 'weibo' ? '' : item('/archives', ('归档'), o.active === 'archives')}
   ${m === 'weibo' ? '' : drop}
   ${(o.pages || []).map((p) => item(p.href, p.title, o.active === p.key)).join('')}
-  ${item('/about', tr(en, '关于我'), o.active === 'about')}
-  ${item('/guestbook', tr(en, '留言板'), o.active === 'guestbook')}
-  ${item('/links', tr(en, '友情链接'), o.active === 'links')}
+  ${item('/about', ('关于我'), o.active === 'about')}
+  ${item('/guestbook', ('留言板'), o.active === 'guestbook')}
+  ${item('/links', ('友情链接'), o.active === 'links')}
   ${rssIcon}
   ${memberPill}
 </nav>`
   }
-  return `<nav class="${o.cls}"${o.sticky ? ' data-xw-nav-sticky' : ''} aria-label="${tr(en, '站点导航')}">
+  return `<nav class="${o.cls}"${o.sticky ? ' data-xw-nav-sticky' : ''} aria-label="站点导航">
   ${homeItem || weiboItem}
   ${m === 'weibo' ? '' : weiboItem}
-  ${m === 'weibo' ? '' : item('/archives', tr(en, '归档'), o.active === 'archives')}
-  ${item('/guestbook', tr(en, '留言板'), o.active === 'guestbook')}
+  ${m === 'weibo' ? '' : item('/archives', ('归档'), o.active === 'archives')}
+  ${item('/guestbook', ('留言板'), o.active === 'guestbook')}
   ${m === 'weibo' ? '' : drop}
-  ${item('/links', tr(en, '友情链接'), o.active === 'links')}
+  ${item('/links', ('友情链接'), o.active === 'links')}
   ${(o.pages || []).map((p) => item(p.href, p.title, o.active === p.key)).join('')}
-  ${o.memberEnabled ? item('/member', tr(en, '会员'), o.active === 'member') : ''}
-  ${o.memberEnabled ? item('/rank', tr(en, '排行榜'), o.active === 'rank') : ''}
-  ${item('/about', tr(en, '关于我'), o.active === 'about')}
-  ${m === 'weibo' ? '' : item('/random', tr(en, '随机'))}
+  ${o.memberEnabled ? item('/member', ('会员'), o.active === 'member') : ''}
+  ${o.memberEnabled ? item('/rank', ('排行榜'), o.active === 'rank') : ''}
+  ${item('/about', ('关于我'), o.active === 'about')}
+  ${m === 'weibo' ? '' : item('/random', ('随机'))}
   ${rssIcon}
 </nav>`
 }
@@ -425,9 +404,8 @@ export function archiveGroups(posts: ArchiveItemView[]): ArchiveYearGroup[] {
 
 /** 归档页头部「今年已写」统计后缀：拼进各主题的副标题 <p>（muted 样式随主题）。
  * 无数据/零篇不出声；字数口径 = 正文字符量（含 Markdown 标记，db.ts yearArchiveStats），展示用「约」 */
-export function yearStatsSuffix(stats: { count: number; chars: number } | undefined, en = false): string {
+export function yearStatsSuffix(stats: { count: number; chars: number } | undefined): string {
   if (!stats || !stats.count) return ''
-  if (en) return ` · ${stats.count} ${plural(stats.count, 'post', 'posts')} this year`
   const wan =
     stats.chars >= 10000 ? ` · 约 ${(stats.chars / 10000).toFixed(1)} 万字` : stats.chars > 0 ? ` · 约 ${stats.chars} 字` : ''
   return ` · 今年已写 ${stats.count} 篇${wan}`
@@ -449,7 +427,7 @@ export function headingAnchors(contentHtml: string): { html: string; items: { le
 
 /** 页脚「站点名片 + 足迹」（七主题共享）：左侧头像/站名/简介，右侧累计篇数、字数与写作年份。
  * 统计读 settings.siteFoot（cron 每晚刷新 + 冷启动播种，滞后一夜属展示口径），未播种只出名片半边 */
-export function footCardHtml(s: SettingsMap, en = false): string {
+export function footCardHtml(s: SettingsMap): string {
   let stats: { posts: number; chars: number; since: number } | null = null
   try {
     const v: unknown = JSON.parse(s.siteFoot || 'null')
@@ -459,16 +437,14 @@ export function footCardHtml(s: SettingsMap, en = false): string {
   } catch {
     /* 脏数据按未播种处理，名片照常 */
   }
-  const ch = (s.siteName || (en ? 'B' : '博')).trim().charAt(0) || (en ? 'B' : '博')
+  const ch = (s.siteName || '博').trim().charAt(0) || '博'
   const avatar = s.avatarUrl
-    ? `<span class="fc-avatar"><img src="${esc(variantUrl(s.avatarUrl, 192))}" alt="${esc(tr(en, s.siteName))}"></span>`
+    ? `<span class="fc-avatar"><img src="${esc(variantUrl(s.avatarUrl, 192))}" alt="${esc((s.siteName))}"></span>`
     : `<span class="fc-avatar" aria-hidden="true">${esc(ch)}</span>`
   let statsHtml = ''
   if (stats) {
     const year = stats.since ? cstDate(stats.since).getUTCFullYear() : 0
-    const parts = en
-      ? [`${stats.posts} ${plural(stats.posts, 'post', 'posts')}`, `${stats.chars} characters`, year ? `since ${year}` : '']
-      : [
+    const parts = [
           `共 ${stats.posts} 篇`,
           stats.chars >= 10000 ? `约 ${(stats.chars / 10000).toFixed(1)} 万字` : stats.chars > 0 ? `约 ${stats.chars} 字` : '',
           year ? `${year} 年写起` : '',
@@ -477,8 +453,8 @@ export function footCardHtml(s: SettingsMap, en = false): string {
     if (line) statsHtml = `<div class="fc-stats">${line}</div>`
   }
   return `<div class="fc">
-  <div class="fc-id">${avatar}<div class="fc-main"><span class="fc-name">${esc(tr(en, s.siteName))}</span>${
-    s.siteDescription ? `<span class="fc-desc">${esc(tr(en, s.siteDescription))}</span>` : ''
+  <div class="fc-id">${avatar}<div class="fc-main"><span class="fc-name">${esc((s.siteName))}</span>${
+    s.siteDescription ? `<span class="fc-desc">${esc((s.siteDescription))}</span>` : ''
   }</div></div>
   ${statsHtml}
 </div>`
@@ -486,19 +462,19 @@ export function footCardHtml(s: SettingsMap, en = false): string {
 
 /** 新站引导卡（首页空状态）：一篇文章和一条微博都没有时给部署者指路——三步开张，直达后台对应页。
  * 无背景虚线卡 + currentColor 中性半透明，任何主题（亮暗）都长在自己的语言里，七主题零 CSS 成本 */
-export function newSiteGuideHtml(en = false): string {
+export function newSiteGuideHtml(): string {
   const step = (href: string, label: string) =>
     `<a href="${href}" style="display:block;padding:10px 14px;border-radius:10px;background:rgba(128,128,128,0.08);color:inherit;text-decoration:none;font-size:14px;text-align:left;">${label}</a>`
   return `<section class="xw-guide" style="max-width:560px;margin:34px auto 8px;padding:26px 24px 20px;border:2px dashed rgba(128,128,128,0.35);border-radius:16px;text-align:center;">
   <div style="font-size:30px;line-height:1;" aria-hidden="true">🎉</div>
-  <h2 style="font-size:17px;margin:10px 0 6px;">${tr(en, '开张大吉，还差三步')}</h2>
-  <p style="font-size:13.5px;opacity:.75;margin:0 0 16px;">${tr(en, '这里还是一张白纸。登录后台，几分钟就能迎来第一位读者：')}</p>
+  <h2 style="font-size:17px;margin:10px 0 6px;">开张大吉，还差三步</h2>
+  <p style="font-size:13.5px;opacity:.75;margin:0 0 16px;">这里还是一张白纸。登录后台，几分钟就能迎来第一位读者：</p>
   <div style="display:flex;flex-direction:column;gap:8px;max-width:320px;margin:0 auto 14px;">
-    ${step('/admin', '✍️ ' + tr(en, '写下第一篇文章'))}
-    ${step('/admin/#/appearance', '🎨 ' + tr(en, '挑一套顺眼的皮肤'))}
-    ${step('/admin/#/settings', '⚙️ ' + tr(en, '补上站名、头像与简介'))}
+    ${step('/admin', '✍️ ' + ('写下第一篇文章'))}
+    ${step('/admin/#/appearance', '🎨 ' + ('挑一套顺眼的皮肤'))}
+    ${step('/admin/#/settings', '⚙️ ' + ('补上站名、头像与简介'))}
   </div>
-  <p style="font-size:12px;opacity:.5;margin:0;">${tr(en, '这张卡片只在没有内容时出现，发布第一篇后自动消失')}</p>
+  <p style="font-size:12px;opacity:.5;margin:0;">这张卡片只在没有内容时出现，发布第一篇后自动消失</p>
 </section>`
 }
 
@@ -508,7 +484,6 @@ export function newSiteGuideHtml(en = false): string {
  * 无数据返回空串；legend 与「过去一年写了 N 篇」一并输出 */
 export function heatmapHtml(
   data: { days: { day: string; count: number }[]; total: number } | undefined,
-  en = false,
   now = Date.now()
 ): string {
   if (!data || !data.days.length) return ''
@@ -519,7 +494,6 @@ export function heatmapHtml(
   const DAY = 86_400_000
   const end = Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate())
   const start = end - (52 * 7 + new Date(end).getUTCDay()) * DAY
-  const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
   const totalDays = Math.floor((end - start) / DAY) + 1
   const cols = Math.ceil(totalDays / 7)
   let lastMonth = -1
@@ -529,7 +503,7 @@ export function heatmapHtml(
     const d0 = new Date(colStart)
     // 行 1：月份标签（该列首日进入新月份时贴一个），否则占位空格保持网格对位
     if (d0.getUTCMonth() !== lastMonth) {
-      body += `<span class="hm-month">${en ? MONTHS_EN[d0.getUTCMonth()] : d0.getUTCMonth() + 1 + '月'}</span>`
+      body += `<span class="hm-month">${d0.getUTCMonth() + 1 + '月'}</span>`
       lastMonth = d0.getUTCMonth()
     } else {
       body += '<span class="hm-sp"></span>'
@@ -540,16 +514,14 @@ export function heatmapHtml(
       const day = new Date(t).toISOString().slice(0, 10)
       const n = counts.get(day) || 0
       const lvl = n >= 4 ? 4 : n
-      const title = n > 0 ? ` title="${day} · ${n} ${en ? (n === 1 ? 'post' : 'posts') : '篇'}"` : ''
+      const title = n > 0 ? ` title="${day} · ${n} 篇"` : ''
       body += `<i class="hm-cell${lvl ? ` hm-l${lvl}` : ''}"${title}></i>`
     }
   }
-  const summary = en
-    ? `${data.total} ${plural(data.total, 'post', 'posts')} in the last year`
-    : `过去一年写了 ${data.total} 篇`
+  const summary = `过去一年写了 ${data.total} 篇`
   const legend = `<i class="hm-cell"></i><i class="hm-cell hm-l1"></i><i class="hm-cell hm-l2"></i><i class="hm-cell hm-l3"></i><i class="hm-cell hm-l4"></i>`
   return `<section class="hm"><div class="hm-scroll"><div class="hm-grid">${body}</div></div>` +
-    `<p class="hm-foot"><span>${summary}</span><span class="hm-legend">${en ? 'Less' : '少'}${legend}${en ? 'More' : '多'}</span></p></section>`
+    `<p class="hm-foot"><span>${summary}</span><span class="hm-legend">少${legend}多</span></p></section>`
 }
 
 /** 上一篇/下一篇导航（prev = 更早一篇、next = 更新一篇）：七主题共享结构、各主题按自己的
@@ -557,27 +529,27 @@ export function heatmapHtml(
 export function postNeighborsHtml(
   prev: { slug: string; title: string } | null | undefined,
   next: { slug: string; title: string } | null | undefined,
-  en = false
+
 ): string {
   if (!prev && !next) return ''
   const cell = (n: { slug: string; title: string } | null | undefined, label: string, side: 'prev' | 'next') =>
     n
       ? `<a class="pn-cell pn-${side}" href="/post/${esc(n.slug)}"><span class="pn-label">${label}</span><span class="pn-title">${esc(n.title)}</span></a>`
       : `<span class="pn-cell pn-${side} pn-empty" aria-hidden="true"></span>`
-  return `<nav class="pn-nav">${cell(prev, tr(en, '上一篇'), 'prev')}${cell(next, tr(en, '下一篇'), 'next')}</nav>`
+  return `<nav class="pn-nav">${cell(prev, ('上一篇'), 'prev')}${cell(next, ('下一篇'), 'next')}</nav>`
 }
 
 /** 归档列表 HTML：每篇一行的 <time> + 标题链接（纯静态超链接，利于搜索引擎收录）；en 时日期换英文短格式 */
-export function archiveListHtml(groups: ArchiveYearGroup[], en = false): string {
+export function archiveListHtml(groups: ArchiveYearGroup[]): string {
   return groups
     .map(
       (g) => `<section class="ar-group">
-  <h2 class="ar-year">${g.year}<i>${en ? `${g.count} ${plural(g.count, 'post', 'posts')}` : `${g.count} 篇`}</i></h2>
+  <h2 class="ar-year">${g.year}<i>${`${g.count} 篇`}</i></h2>
   <ul class="ar-list">${g.items
     .map(
       (p) => `<li class="ar-item">
   <a class="ar-link" href="/post/${esc(p.slug)}">
-    <time class="ar-date" datetime="${fmtDate(p.ts)}">${en ? fmtDateEnShort(p.ts) : fmtDate(p.ts).replace(/-/g, '.')}</time>
+    <time class="ar-date" datetime="${fmtDate(p.ts)}">${fmtDate(p.ts).replace(/-/g, '.')}</time>
     <span class="ar-title">${esc(p.title)}</span>
   </a>
 </li>`
@@ -609,7 +581,7 @@ function safeIso(ts: number): string {
 /** 友链卡片：有图标用图标，没有用站名首字。url/icon 渲染前过 scheme 白名单——
  *  写侧已拦 javascript: 等协议，这里兜底防备份恢复/导入路径的脏数据流进 href/src。
  *  协议相对地址 //host 是外链不是站内路径，同样不放行（`/[^/]` 要求斜杠后还有字符） */
-export function friendLinkCards(items: FriendLinkView[], en = false): string {
+export function friendLinkCards(items: FriendLinkView[]): string {
   const safeUrl = (u: string): string => (/^(https?:\/\/|\/[^/])/i.test(u) ? u : '')
   return items
     .map((l) => {
@@ -617,7 +589,7 @@ export function friendLinkCards(items: FriendLinkView[], en = false): string {
       const icon = safeUrl(l.icon)
       const ico = icon
         ? `<span class="fl-ico"><img src="${esc(icon)}" loading="lazy" alt=""></span>`
-        : `<span class="fl-ico fl-ico-letter" aria-hidden="true">${esc((l.name || (en ? 'W' : '链')).trim().charAt(0))}</span>`
+        : `<span class="fl-ico fl-ico-letter" aria-hidden="true">${esc((l.name || '链').trim().charAt(0))}</span>`
       const main = `<span class="fl-main">
     <span class="fl-name">${esc(l.name)}</span>
     ${l.description ? `<span class="fl-desc">${esc(l.description)}</span>` : ''}
@@ -637,20 +609,20 @@ export function friendLinkCards(items: FriendLinkView[], en = false): string {
 }
 
 /** 申请收录表单：提交交给 site.js（POST /api/public/links/apply，进待审核）；en 输出英文表单 */
-export function friendLinkApply(en = false): string {
+export function friendLinkApply(): string {
   return `<section class="fl-apply" id="fl-apply">
-  <h2 class="fl-apply-title">${tr(en, '申请收录')}</h2>
-  <p class="fl-apply-sub">${tr(en, '想和本站交个朋友？留下你的站点，审核通过后就会出现在上面。')}</p>
+  <h2 class="fl-apply-title">申请收录</h2>
+  <p class="fl-apply-sub">想和本站交个朋友？留下你的站点，审核通过后就会出现在上面。</p>
   <form class="fl-form">
     <div class="fl-form-row">
-      <input class="fl-input" name="name" maxlength="40" placeholder="${tr(en, '站点名称')}" required aria-label="${tr(en, '站点名称')}">
-      <input class="fl-input" name="url" type="url" inputmode="url" maxlength="500" placeholder="${tr(en, 'https:// 你的网址')}" required aria-label="${en ? 'Site URL' : '站点网址'}">
+      <input class="fl-input" name="name" maxlength="40" placeholder="站点名称" required aria-label="站点名称">
+      <input class="fl-input" name="url" type="url" inputmode="url" maxlength="500" placeholder="https:// 你的网址" required aria-label="站点网址">
     </div>
-    <textarea class="fl-textarea" name="description" maxlength="120" rows="2" placeholder="${tr(en, '一两句介绍你的网站（可选）')}" aria-label="${tr(en, '站点介绍')}"></textarea>
+    <textarea class="fl-textarea" name="description" maxlength="120" rows="2" placeholder="一两句介绍你的网站（可选）" aria-label="站点介绍"></textarea>
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
     <div class="fl-form-foot">
-      <span class="fl-tip">${tr(en, '提交后由站长审核')}</span>
-      <button class="fl-submit" type="submit">${tr(en, '提交申请')}</button>
+      <span class="fl-tip">提交后由站长审核</span>
+      <button class="fl-submit" type="submit">提交申请</button>
     </div>
   </form>
 </section>`
@@ -668,7 +640,7 @@ export function stripCoverDuplicate(contentHtml: string, cover: string): string 
   if (!src) return contentHtml
   const norm = (u: string) => u.replace(/&amp;/g, '&').trim()
   if (norm(src[1]) !== norm(cover)) return contentHtml
-  const imgRe = img[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const imgRe = img[0].replace(/[.*+?^()|[\]\\]/g, '\\$&')
   const withoutP = contentHtml.replace(new RegExp(`<p>\\s*${imgRe}\\s*</p>`), '')
   return withoutP !== contentHtml ? withoutP : contentHtml.replace(img[0], '')
 }
@@ -769,8 +741,7 @@ export interface WeiboItemView {
 }
 
 /** 微博时间：今年「10月3日 14:20」，往年带年份（北京时间口径，与 utils 时间函数一致）；en 换 Oct 3, 14:20 */
-export function weiboTime(ts: number, en = false): string {
-  if (en) return weiboTimeEn(ts)
+export function weiboTime(ts: number): string {
   const d = cstDate(ts)
   const now = cstDate(Date.now())
   const p = (x: number) => String(x).padStart(2, '0')
@@ -792,7 +763,7 @@ export function weiboImageGrid(images: string[]): string {
 /** 微博视频块（B19）：单视频，控件齐全、只预载元数据（不预下整段），有原始宽高时换算占位比例避免加载抖动。
  *  无封面帧时叠一个 ▶ 角标（播放后由 site.js 给 .wb-video 挂 is-playing 收起）；竖屏视频交主题 CSS 居中限高。
  *  src 只可能来自 parseWeiboVideo 白名单（站内 /images/ 或 http(s)），仍统一过 esc。 */
-export function weiboVideoHtml(v: WeiboVideoView, en = false): string {
+export function weiboVideoHtml(v: WeiboVideoView): string {
   const portrait = v.w > 0 && v.h > 0 && v.h > v.w
   const ratio = v.w > 0 && v.h > 0 ? ` style="aspect-ratio:${v.w}/${v.h}"` : ''
   const poster = v.poster ? ` poster="${esc(v.poster)}"` : ''
@@ -801,7 +772,7 @@ export function weiboVideoHtml(v: WeiboVideoView, en = false): string {
   const src = esc(v.url)
   // 单行输出（与 weiboImageGrid 一致）：site.js 的 wbVideoHtmlJs 是它的手工 ES5 镜像，
   // tests/weibo-admin.test.ts 把两侧同输入比对，别为了好看加换行缩进
-  return `<div class="wb-video${portrait ? ' is-portrait' : ''}${v.poster ? '' : ' is-plain'}"><video controls playsinline preload="metadata"${poster}${ratio}><source src="${src}" type="${mime}"><a class="wb-video-fallback" href="${src}" target="_blank" rel="noopener noreferrer">${tr(en, '视频')}</a></video>${badge}</div>`
+  return `<div class="wb-video${portrait ? ' is-portrait' : ''}${v.poster ? '' : ' is-plain'}"><video controls playsinline preload="metadata"${poster}${ratio}><source src="${src}" type="${mime}"><a class="wb-video-fallback" href="${src}" target="_blank" rel="noopener noreferrer">视频</a></video>${badge}</div>`
 }
 
 /** 微博正文链接尾部标点（句读/引号/右括号）留在链接外，括号配对时保留（维基百科类 URL）。
@@ -858,22 +829,22 @@ export function weiboTextHtml(content: string): string {
 }
 
 /** 微博话题条：默认不显示（避免标签堆满页头）；仅从正文 #话题 链接进入筛选时，显示「全部 + 当前话题」方便退出筛选 */
-export function weiboTopicBar(topics: { name: string; count: number }[], active?: string, en = false): string {
+export function weiboTopicBar(topics: { name: string; count: number }[], active?: string): string {
   if (!active) return ''
   const hit = topics.find((t) => t.name === active)
   const chip = (name: string, label: string, count?: number) =>
     `<a class="wb-topic-chip${name === (active || '') ? ' is-active' : ''}" href="/weibo${
       name ? `?topic=${encodeURIComponent(name)}` : ''
     }">${esc(label)}${count != null ? `<i>${count}</i>` : ''}</a>`
-  return `<nav class="wb-topics" aria-label="${tr(en, '微博话题')}">${chip('', tr(en, '全部'))}${chip(active, '#' + active, hit?.count)}</nav>`
+  return `<nav class="wb-topics" aria-label="微博话题">${chip('', ('全部'))}${chip(active, '#' + active, hit?.count)}</nav>`
 }
 
 /** 卡片底栏右侧管理操作（仅管理员登录时渲染，访客 HTML 里不存在；交互在 site.js） */
-function weiboAdminBar(w: WeiboItemView, en: boolean): string {
+function weiboAdminBar(w: WeiboItemView): string {
   return `<div class="wb-admin" data-wb-admin="${w.id}">
-  <button class="wb-admin-btn" type="button" data-wb-act="edit">${tr(en, '编辑')}</button>
-  <button class="wb-admin-btn" type="button" data-wb-act="pin">${w.pinned ? tr(en, '取消置顶') : tr(en, '置顶')}</button>
-  <button class="wb-admin-btn is-danger" type="button" data-wb-act="del">${tr(en, '删除')}</button>
+  <button class="wb-admin-btn" type="button" data-wb-act="edit">编辑</button>
+  <button class="wb-admin-btn" type="button" data-wb-act="pin">${w.pinned ? '取消置顶' : '置顶'}</button>
+  <button class="wb-admin-btn is-danger" type="button" data-wb-act="del">删除</button>
 </div>`
 }
 
@@ -883,31 +854,31 @@ function heartSvg(size: number): string {
 }
 
 /** 微博卡片底栏：点赞（同文章 like-btn，data-type=weibo）+ 评论数（点开卡片内折叠评论区）+ 分享卡片 */
-export function weiboCardFoot(w: WeiboItemView, isAdmin?: boolean, en = false): string {
-  const like = `<button class="wb-action like-btn" type="button" data-type="weibo" data-id="${w.id}" data-likes="${w.likes}" aria-label="${tr(en, '点赞')}">
+export function weiboCardFoot(w: WeiboItemView, isAdmin?: boolean): string {
+  const like = `<button class="wb-action like-btn" type="button" data-type="weibo" data-id="${w.id}" data-likes="${w.likes}" aria-label="点赞">
   ${heartSvg(16)}
   <b class="like-count" data-count>${w.likes}</b>
 </button>`
-  const cmt = `<button class="wb-action wb-cmt-toggle" type="button" data-wb="${w.id}" aria-label="${tr(en, '留言')}" aria-expanded="false">
+  const cmt = `<button class="wb-action wb-cmt-toggle" type="button" data-wb="${w.id}" aria-label="留言" aria-expanded="false">
   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M21 11.5c0 4.1-4 7.5-9 7.5-1 0-2-.1-2.9-.4L4 20l1.2-3.2C3.8 15.4 3 13.5 3 11.5 3 7.4 7 4 12 4s9 3.4 9 7.5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
   <b class="wb-cmt-count" data-count>${w.commentCount}</b>
 </button>`
   // 生成分享卡片（存图/转发）：纯前端，交互在 site.js（按需加载 /share-card.js）；管理三键仍 margin-left:auto 靠右
-  const share = `<button class="wb-action wb-share" type="button" data-wb-share="${w.id}" aria-label="${en ? 'Share this note' : '生成分享卡片'}">
+  const share = `<button class="wb-action wb-share" type="button" data-wb-share="${w.id}" aria-label="生成分享卡片">
   <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 14V3.5m0 0L8.5 7m3.5-3.5L15.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.5 10.5H7a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  <b>${tr(en, '分享')}</b>
+  <b>分享</b>
 </button>`
-  return `<footer class="wb-foot">${like}${cmt}${share}${isAdmin ? weiboAdminBar(w, en) : ''}</footer>`
+  return `<footer class="wb-foot">${like}${cmt}${share}${isAdmin ? weiboAdminBar(w) : ''}</footer>`
 }
 
 /** 管理员登录时的发言身份行（文章/微博评论表单共用，免填昵称） */
-function adminIdentity(name: string, en: boolean): string {
-  return `<p class="cmt-as">${en ? 'Commenting as' : '以作者'} <b>${esc(name)}</b>${en ? '' : ' 的身份发言'}</p><input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">`
+function adminIdentity(name: string): string {
+  return `<p class="cmt-as">以作者 <b>${esc(name)}</b> 的身份发言</p><input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">`
 }
 
 /** 会员登录时的发言身份行：结构与 adminIdentity 同构（蜜罐字段随行带上），徽标文案区分身份 */
-function memberIdentity(name: string, en: boolean): string {
-  return `<p class="cmt-as">${en ? 'Commenting as member' : '以会员'} <b>${esc(name)}</b>${en ? '' : ' 的身份发言'}</p><input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">`
+function memberIdentity(name: string): string {
+  return `<p class="cmt-as">以会员 <b>${esc(name)}</b> 的身份发言</p><input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">`
 }
 
 /** 卡片内折叠评论区骨架：列表与表单内容由 site.js 按需填充；adminName / memberName 传入时表单免填昵称（管理员优先）。
@@ -917,29 +888,29 @@ export function weiboCommentPanel(
   allowComments: boolean,
   adminName?: string,
   memberName?: string,
-  en = false,
+
   showRegion = false
 ): string {
   return `<div class="wb-cmt" data-wb-cmt="${w.id}" hidden>
-  <div class="wb-cmt-list" data-role="list"><p class="wb-cmt-loading">${tr(en, '加载中…')}</p></div>
+  <div class="wb-cmt-list" data-role="list"><p class="wb-cmt-loading">加载中…</p></div>
   ${
     allowComments
       ? `<form class="wb-cmt-form${adminName ? ' is-admin' : ''}" data-role="form">
   ${
     adminName
-      ? adminIdentity(adminName, en)
+      ? adminIdentity(adminName)
       : memberName
-        ? memberIdentity(memberName, en)
+        ? memberIdentity(memberName)
         : `<div class="wb-cmt-row">
-    <input class="wb-cmt-input" name="nickname" maxlength="24" placeholder="${tr(en, '昵称')}" required>
+    <input class="wb-cmt-input" name="nickname" maxlength="24" placeholder="昵称" required>
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
   </div>
   <div class="wb-cmt-row">
-    <input class="wb-cmt-input" name="qq" inputmode="numeric" maxlength="11" placeholder="${tr(en, 'QQ 号（选填，展示头像）')}" autocomplete="off" title="${tr(en, '仅用于抓取头像，不会公开展示')}">
+    <input class="wb-cmt-input" name="qq" inputmode="numeric" maxlength="11" placeholder="QQ 号（选填，展示头像）" autocomplete="off" title="仅用于抓取头像，不会公开展示">
   </div>`
   }
-  <textarea class="wb-cmt-textarea" name="content" maxlength="1000" rows="2" placeholder="${tr(en, '说点什么…')}" required></textarea>
-  <div class="wb-cmt-foot"><span class="wb-cmt-tip">${showRegion ? esc(tr(en, '发布后将显示 IP 属地')) : ''}</span><button class="wb-cmt-submit" type="submit">${tr(en, '发送')}</button></div>
+  <textarea class="wb-cmt-textarea" name="content" maxlength="1000" rows="2" placeholder="说点什么…" required></textarea>
+  <div class="wb-cmt-foot"><span class="wb-cmt-tip">${showRegion ? esc(('发布后将显示 IP 属地')) : ''}</span><button class="wb-cmt-submit" type="submit">发送</button></div>
 </form>`
       : ''
   }
@@ -956,25 +927,24 @@ export function weiboCards(o: {
   /** 登录会员昵称（管理员未登录时生效）：评论表单免填昵称，以会员身份发言 */
   memberName?: string
 }): string {
-  const en = isEn(o.settings)
-  const name = tr(en, o.settings.siteName) || tr(en, '微博')
+  const name = o.settings.siteName || '微博'
   const allowComments = o.allowComments !== false
   const isAdmin = !!o.adminName
   return o.items
     .map((w) => {
-      const foot = weiboCardFoot(w, isAdmin, en)
-      const panel = weiboCommentPanel(w, allowComments, o.adminName, o.memberName, en, o.settings.showCommentRegion === '1')
+      const foot = weiboCardFoot(w, isAdmin)
+      const panel = weiboCommentPanel(w, allowComments, o.adminName, o.memberName,  o.settings.showCommentRegion === '1')
       return `<article class="wb-card${w.pinned ? ' is-pinned' : ''}" id="wb-${w.id}">
   <header class="wb-head">
     <span class="wb-avatar">${o.avatarHtml}</span>
     <div class="wb-who">
       <span class="wb-name">${esc(name)}</span>
-      <time class="wb-time" datetime="${safeIso(w.created_at)}">${weiboTime(w.created_at, en)}</time>
+      <time class="wb-time" datetime="${safeIso(w.created_at)}">${weiboTime(w.created_at)}</time>
     </div>
-    ${w.pinned ? `<span class="wb-pin">${tr(en, '置顶')}</span>` : ''}
+    ${w.pinned ? `<span class="wb-pin">置顶</span>` : ''}
   </header>
   ${w.content ? `<div class="wb-text">${weiboTextHtml(w.content)}</div>` : ''}
-  ${w.video ? weiboVideoHtml(w.video, en) : ''}
+  ${w.video ? weiboVideoHtml(w.video) : ''}
   ${weiboImageGrid(w.images)}
   ${foot}
   ${panel}
@@ -984,19 +954,18 @@ export function weiboCards(o: {
 }
 
 /** 微博模块头部（入口卡与首页微博流共用）：整条指向 /weibo；countLabel 换计数文案（搜索结果区用「命中 N 条」） */
-function weiboHomeHead(total: number, en: boolean, countLabel?: string): string {
+function weiboHomeHead(total: number,  countLabel?: string): string {
   return `<a class="wb-home-head" href="/weibo">
     <svg class="wb-home-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-    <span class="wb-home-title">${tr(en, '微博 · 随手记')}</span>
-    <span class="wb-home-count">${countLabel || (en ? `${total} ${plural(total, 'note', 'notes')} in total` : `共 ${total} 条`)}</span>
-    <span class="wb-home-more">${tr(en, '全部 →')}</span>
+    <span class="wb-home-title">微博 · 随手记</span>
+    <span class="wb-home-count">${countLabel || `共 ${total} 条`}</span>
+    <span class="wb-home-more">全部 →</span>
   </a>`
 }
 
 /** 首页微博入口卡：最新几条随手记摘要 + 总条数，整卡指向 /weibo（无已发布微博时不渲染） */
-export function weiboHomeEntry(o: { items: WeiboItemView[]; total: number; en?: boolean }): string {
+export function weiboHomeEntry(o: { items: WeiboItemView[]; total: number;  }): string {
   if (!o.items.length) return ''
-  const en = !!o.en
   const items = o.items
     .map((w) => {
       // 无正文时用媒体兜底文案：视频优先，其次配图数；视频的封面帧同时充当初图
@@ -1004,12 +973,8 @@ export function weiboHomeEntry(o: { items: WeiboItemView[]; total: number; en?: 
       const short = text
         ? excerpt(text, 64)
         : w.video
-          ? en
-            ? 'Posted a video'
-            : '发了一段视频'
-          : en
-            ? `Posted ${w.images.length} ${plural(w.images.length, 'photo', 'photos')}`
-            : `发了 ${w.images.length} 张图`
+          ? '发了一段视频'
+          : `发了 ${w.images.length} 张图`
       const thumbUrl = w.images[0] || (w.video ? w.video.poster : '')
       const thumb = thumbUrl
         ? `<span class="wb-home-thumb"><img src="${esc(variantUrl(thumbUrl, 192))}" loading="lazy" decoding="async" alt=""></span>`
@@ -1017,14 +982,14 @@ export function weiboHomeEntry(o: { items: WeiboItemView[]; total: number; en?: 
       return `<a class="wb-home-item" href="/weibo?wb=${w.id}#wb-${w.id}">
   <div class="wb-home-main">
     <p class="wb-home-text">${esc(short)}</p>
-    <time class="wb-home-time" datetime="${safeIso(w.created_at)}">${weiboTime(w.created_at, en)}</time>
+    <time class="wb-home-time" datetime="${safeIso(w.created_at)}">${weiboTime(w.created_at)}</time>
   </div>
   ${thumb}
 </a>`
     })
     .join('\n')
-  return `<section class="wb-home" aria-label="${en ? 'Notes' : '微博随手记'}">
-  ${weiboHomeHead(o.total, en)}
+  return `<section class="wb-home" aria-label="微博随手记">
+  ${weiboHomeHead(o.total)}
   ${items}
 </section>`
 }
@@ -1043,7 +1008,6 @@ export function weiboHomeFeed(o: {
   memberName?: string
 }): string {
   if (!o.items.length) return ''
-  const en = isEn(o.settings)
   const cards = weiboCards({
     settings: o.settings,
     items: o.items,
@@ -1052,8 +1016,8 @@ export function weiboHomeFeed(o: {
     adminName: o.adminName,
     memberName: o.memberName,
   })
-  return `<section class="wb-home-feed" aria-label="${en ? 'Notes' : '微博随手记'}">
-  ${weiboHomeHead(o.total, en)}
+  return `<section class="wb-home-feed" aria-label="微博随手记">
+  ${weiboHomeHead(o.total)}
   <div class="wb-list">${cards}</div>
 </section>`
 }
@@ -1070,15 +1034,14 @@ export function weiboSearchResults(o: {
   avatarHtml: string
 }): string {
   if (!o.items.length) return ''
-  const en = isEn(o.settings)
   const cards = weiboCards({
     settings: o.settings,
     items: o.items,
     avatarHtml: o.avatarHtml,
     allowComments: false,
   })
-  return `<section class="wb-home-feed" aria-label="${en ? 'Note search results' : '微博搜索结果'}">
-  ${weiboHomeHead(o.total, en, en ? `${o.total} ${plural(o.total, 'match', 'matches')}` : `命中 ${o.total} 条`)}
+  return `<section class="wb-home-feed" aria-label="微博搜索结果">
+  ${weiboHomeHead(o.total,  (`命中 ${o.total} 条`))}
   <div class="wb-list">${cards}</div>
 </section>`
 }
@@ -1099,16 +1062,15 @@ export const TIER_LABELS: Record<MemberTier, string> = {
 
 /** 档位 → 展示文案：脏值/缺省一律按普通会员兜底（hasOwnProperty 防原型链穿透）；en 换英文档位名。
  *  自定义档位（会员 3.0 预备）的展示名不在枚举里，调用方直接传 tierName，此函数只兜历史三档 */
-export function tierLabel(tier: string | undefined | null, en = false): string {
+export function tierLabel(tier: string | undefined | null): string {
   const key = tier && Object.prototype.hasOwnProperty.call(TIER_LABELS, tier) ? (tier as MemberTier) : 'normal'
-  return en ? { normal: 'Member', coffee: 'Coffee member', top: 'Top member' }[key] : TIER_LABELS[key]
+  return TIER_LABELS[key]
 }
 
 /** 认证徽标（会员 3.0 预备，微博认证 V 风格）：带 ✓ 与档位色的小徽标，色值来自 tiers.ts
  *  白名单（#rgb/#rrggbb，非法已清空），进 style 属性安全。color 为空 = 用主题默认色（不加 style）。
  *  基础档（普通会员）不渲染本徽标——由调用方回落到既有的「会员」普通徽标 */
-export function tierBadgeHtml(name: string, color: string, cls: string, en = false): string {
-  void en
+export function tierBadgeHtml(name: string, color: string, cls: string): string {
   const style = color ? ` style="color:${esc(color)};border-color:${esc(color)}"` : ''
   return `<span class="${cls}"${style}>✓ ${esc(name)}</span>`
 }
@@ -1213,14 +1175,14 @@ function commentAvatarHtml(c: CommentRow, adminAvatar?: string): string {
 }
 
 /** 排行榜单行（/rank 页结构） */
-function rankRow(e: RankEntryView, en: boolean): string {
+function rankRow(e: RankEntryView): string {
   // 档位徽标：自定义档位（tierName 在场）按生效档位渲染——非基础档出带色认证徽标，基础档出普通 chip；
   // 缺省（老数据/第三方调用）回落历史三档 tierLabel
   const tierChip = e.tierName
     ? e.tierIsBase
       ? `<span class="rk-tier">${esc(e.tierName)}</span>`
-      : tierBadgeHtml(e.tierName, e.tierColor || '', 'rk-tier', en)
-    : `<span class="rk-tier">${tierLabel(e.tier, en)}</span>`
+      : tierBadgeHtml(e.tierName, e.tierColor || '', 'rk-tier')
+    : `<span class="rk-tier">${tierLabel(e.tier)}</span>`
   return `<li class="rk-item${e.rank <= 3 ? ` is-top${e.rank}` : ''}${e.isMe ? ' is-me' : ''}">
   <span class="rk-no">${e.rank}</span>
   ${memberAvatarHtml(e, 'rk-avatar')}
@@ -1231,29 +1193,25 @@ function rankRow(e: RankEntryView, en: boolean): string {
 }
 
 /** /rank 完整榜单列表（页面壳由主题渲染）；空榜返回空串，由页面出空态文案 */
-export function rankListHtml(entries: RankEntryView[], en = false): string {
+export function rankListHtml(entries: RankEntryView[]): string {
   if (!entries.length) return ''
-  return `<ol class="rk-list rk-list-page">${entries.map((e) => rankRow(e, en)).join('\n')}</ol>`
+  return `<ol class="rk-list rk-list-page">${entries.map((e) => rankRow(e)).join('\n')}</ol>`
 }
 
 /** 昵称修改窗口的说明文案（30 天一次，天数从常量取防两处漂移）；冷却中附解禁日期 */
-function nicknameRuleText(m: MemberView, en: boolean): { allowed: boolean; text: string } {
+function nicknameRuleText(m: MemberView): { allowed: boolean; text: string } {
   const days = Math.round(NICKNAME_CHANGE_COOLDOWN_MS / 86_400_000)
   const cd = nicknameCooldown(m.displayNameChangedAt)
   if (cd.allowed)
-    return en
-      ? { allowed: true, text: `Display names can be changed once every ${days} days.` }
-      : { allowed: true, text: `昵称中英文均可，每 ${days} 天可修改一次` }
-  return en
-    ? { allowed: false, text: `It can only be changed once every ${days} days — next change available after ${fmtDateEn(cd.nextAt)}.` }
-    : { allowed: false, text: `每 ${days} 天只能修改一次，${fmtDateCN(cd.nextAt)}后可再改` }
+    return { allowed: true, text: `昵称中英文均可，每 ${days} 天可修改一次` }
+  return { allowed: false, text: `每 ${days} 天只能修改一次，${fmtDateCN(cd.nextAt)}后可再改` }
 }
 
 /** 活动中心条目行：href 在场 = 可点链接（目标存活），否则只出文字（目标已删/进回收站）。
  *  样式走内联（八主题零 CSS 改动），配色用 opacity 灰阶跟随主题前景色 */
-function memberActItem(it: MemberActivityItem, en: boolean): string {
+function memberActItem(it: MemberActivityItem): string {
   const inner = `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.title)}</span><time style="font-size:11px;opacity:.45;flex-shrink:0;">${fmtDate(it.ts)}</time>${
-    it.pending ? `<span style="font-size:11px;flex-shrink:0;color:#b45309;border:1px solid currentColor;border-radius:999px;padding:0 6px;">${tr(en, '待审')}</span>` : ''
+    it.pending ? `<span style="font-size:11px;flex-shrink:0;color:#b45309;border:1px solid currentColor;border-radius:999px;padding:0 6px;">待审</span>` : ''
   }`
   const row = it.href
     ? `<a class="mem-act-link" href="${esc(it.href)}" style="display:flex;gap:8px;align-items:center;text-decoration:none;color:inherit;">${inner}</a>`
@@ -1265,19 +1223,19 @@ function memberActItem(it: MemberActivityItem, en: boolean): string {
 
 /** 会员活动中心（会员 3.0 预备）：四组折叠卡，原生 <details> 无 JS 可用（CSP 禁内联脚本）；
  *  空组不渲染（新会员不看到一排「空空如也」） */
-function memberActivityHtml(a: MemberActivityView, en: boolean): string {
+function memberActivityHtml(a: MemberActivityView): string {
   const groups: { title: string; items: MemberActivityItem[] }[] = [
-    { title: tr(en, '我的足迹'), items: a.visits },
-    { title: tr(en, '我的点赞'), items: a.likes },
-    { title: tr(en, '我的评论'), items: a.comments },
-    { title: tr(en, '收到的回复'), items: a.replies },
+    { title: '我的足迹', items: a.visits },
+    { title: '我的点赞', items: a.likes },
+    { title: '我的评论', items: a.comments },
+    { title: '收到的回复', items: a.replies },
   ]
   return groups
     .filter((g) => g.items.length)
     .map(
       (g) => `<details class="mem-card mem-act">
   <summary style="cursor:pointer;font-weight:600;display:flex;justify-content:space-between;align-items:center;list-style:none;"><span>${esc(g.title)}</span><span style="font-size:12px;opacity:.45;">${g.items.length}</span></summary>
-  <ul style="margin:6px 0 0;padding:0;">${g.items.map((it) => memberActItem(it, en)).join('\n')}</ul>
+  <ul style="margin:6px 0 0;padding:0;">${g.items.map((it) => memberActItem(it)).join('\n')}</ul>
 </details>`
     )
     .join('\n')
@@ -1286,26 +1244,24 @@ function memberActivityHtml(a: MemberActivityView, en: boolean): string {
 /** 会员中心（已登录态）：身份卡 + 每日签到 + 昵称修改卡 + QQ 头像卡 + 密码修改卡 + 活动中心。
  *  档位是**生效档位**（过期已降级）：非基础档出带色认证徽标，限时档出「有效期至 / 已过期」。
  *  各卡走 .mem-* 共享结构（与登录/注册表单同套样式），提交交互在 site.js */
-export function memberCardHtml(m: MemberView, en = false): string {
-  const rule = nicknameRuleText(m, en)
+export function memberCardHtml(m: MemberView): string {
+  const rule = nicknameRuleText(m)
   const dis = rule.allowed ? '' : ' disabled'
   // 档位徽标：自定义档位（tierName 在场）按生效档位渲染；缺省回落历史三档 tierLabel
   const tierChip = m.tierName
     ? m.tierIsBase
       ? `<span class="mem-tier" data-tier="${esc(m.tier)}">${esc(m.tierName)}</span>`
-      : tierBadgeHtml(m.tierName, m.tierColor || '', 'mem-tier', en)
-    : `<span class="mem-tier" data-tier="${esc(m.tier)}">${tierLabel(m.tier, en)}</span>`
+      : tierBadgeHtml(m.tierName, m.tierColor || '', 'mem-tier')
+    : `<span class="mem-tier" data-tier="${esc(m.tier)}">${tierLabel(m.tier)}</span>`
   // 有效期行：已过期必须出提示（此时生效档位已是降级后的档，tierIsBase 可能为 false，
   // 不能因为「有徽标」就把提示挡掉）；未过期的限时档出「有效期至」；永久档不出。
   // 过期文案走降级口径（咖啡会员到期 → 现按优质会员生效），不再说「恢复为基础会员」
   const tierExpiry = m.tierExpired
     ? `<p class="mem-email">${
-        en
-          ? `${esc(m.tierDowngradedFrom || 'Membership')} expired — you are now on ${esc(m.tierName || 'Member')}. Contact the site owner to renew.`
-          : `${esc(m.tierDowngradedFrom || '会员档位')}已到期，现按「${esc(m.tierName || '会员')}」生效；续费请联系站长`
+        `${esc(m.tierDowngradedFrom || '会员档位')}已到期，现按「${esc(m.tierName || '会员')}」生效；续费请联系站长`
       }</p>`
     : m.tierExpiresAt && !m.tierIsBase
-      ? `<p class="mem-email">${tr(en, '有效期至')} ${fmtDateCN(m.tierExpiresAt)}</p>`
+      ? `<p class="mem-email">有效期至 ${fmtDateCN(m.tierExpiresAt)}</p>`
       : ''
   // 升级卡（2026-11 第五批）：优质会员的三条来路——邀请码（注册时填）、积分兑换、付费（线下，站长手动授予）。
   // 只在「当前档位低于目标档」且至少有一条来路可用时出现；已经是优质及以上就整块不出，不打扰
@@ -1313,23 +1269,17 @@ export function memberCardHtml(m: MemberView, en = false): string {
   const upgradeCard =
     m.upgradeTargetName && (canRedeem || m.paidNote)
       ? `<section class="mem-card" data-member-upgrade>
-  <h2 class="mem-form-title">${tr(en, '升级会员')}</h2>
+  <h2 class="mem-form-title">升级会员</h2>
   ${
     canRedeem
       ? `<p class="mem-swap">${
-          en
-            ? `Redeem ${esc(m.upgradeTargetName)} for ${m.upgradeCost} points. One-time, permanent once redeemed.`
-            : `用 ${m.upgradeCost} 积分兑换「${esc(m.upgradeTargetName)}」，一次兑换永久有效`
+          `用 ${m.upgradeCost} 积分兑换「${esc(m.upgradeTargetName)}」，一次兑换永久有效`
         }</p>
-  <p class="mem-swap" style="opacity:.7;">${en ? `Your balance: ${m.points} points` : `当前积分：${m.points}`}</p>
+  <p class="mem-swap" style="opacity:.7;">${`当前积分：${m.points}`}</p>
   <button class="mem-btn" type="button" data-member-redeem${m.points < (m.upgradeCost || 0) ? ' disabled' : ''}>${
           m.points < (m.upgradeCost || 0)
-            ? en
-              ? `Need ${(m.upgradeCost || 0) - m.points} more points`
-              : `还差 ${(m.upgradeCost || 0) - m.points} 积分`
-            : en
-              ? 'Redeem now'
-              : '立即兑换'
+            ? `还差 ${(m.upgradeCost || 0) - m.points} 积分`
+            : '立即兑换'
         }</button>
   <p class="mem-tip" data-member-redeem-tip aria-live="polite"></p>`
       : ''
@@ -1346,92 +1296,92 @@ export function memberCardHtml(m: MemberView, en = false): string {
       <b class="mem-name">${esc(m.nickname)}</b>
       ${tierChip}${m.fanName ? `<span class="mem-tier mem-fan" title="铁粉等级">${esc(m.fanName)}</span>` : ''}
     </div>
-    <div class="mem-points"><b>${m.points}</b><span>${tr(en, '积分')}</span></div>
+    <div class="mem-points"><b>${m.points}</b><span>积分</span></div>
   </div>
   ${m.email ? `<p class="mem-email">${esc(m.email)}</p>` : ''}
-  ${m.createdAt ? (en ? `<p class="mem-email">Joined ${fmtDateEn(m.createdAt)}</p>` : `<p class="mem-email">${fmtDateCN(m.createdAt)}加入</p>`) : ''}
+  ${m.createdAt ? (`<p class="mem-email">${fmtDateCN(m.createdAt)}加入</p>`) : ''}
   ${tierExpiry}
-  <button class="mem-btn mem-btn-ghost" type="button" data-member-logout>${tr(en, '退出登录')}</button>
+  <button class="mem-btn mem-btn-ghost" type="button" data-member-logout>退出登录</button>
 </section>
 ${upgradeCard}
 <section class="mem-card" data-member-checkin${m.checkedToday ? ' data-checked="1"' : ''}>
-  <h2 class="mem-form-title">${tr(en, '每日签到')}</h2>
+  <h2 class="mem-form-title">每日签到</h2>
   <p class="mem-swap">${m.checkedToday
-    ? tr(en, `Signed in today — streak ${m.checkinStreak ?? 0} day(s). Come back tomorrow.`)
-    : tr(en, `Check in for +2 points daily; 7-day streaks earn a bonus. Current streak: ${m.checkinStreak ?? 0}.`)}</p>
-  <button class="mem-btn" type="button" data-member-checkin-btn${m.checkedToday ? ' disabled' : ''}>${m.checkedToday ? tr(en, '已签到') : tr(en, '签到领积分')}</button>
+    ? `Signed in today — streak ${m.checkinStreak ?? 0} day(s). Come back tomorrow.`
+    : `Check in for +2 points daily; 7-day streaks earn a bonus. Current streak: ${m.checkinStreak ?? 0}.`}</p>
+  <button class="mem-btn" type="button" data-member-checkin-btn${m.checkedToday ? ' disabled' : ''}>${m.checkedToday ? '已签到' : '签到领积分'}</button>
   <p class="mem-tip" data-member-checkin-tip aria-live="polite"></p>
 </section>
 <section class="mem-card">
-  <h2 class="mem-form-title">${tr(en, '修改昵称')}</h2>
+  <h2 class="mem-form-title">修改昵称</h2>
   <form data-member-nickname-form>
-    <input class="mem-input" name="nickname" maxlength="24" value="${esc(m.nickname)}" placeholder="${tr(en, '昵称（中英文均可）')}" aria-label="${en ? 'Display name' : '昵称'}"${dis}>
+    <input class="mem-input" name="nickname" maxlength="24" value="${esc(m.nickname)}" placeholder="昵称（中英文均可）" aria-label="昵称"${dis}>
     <p class="mem-swap">${esc(rule.text)}</p>
-    <button class="mem-btn" type="submit"${dis}>${tr(en, '保存昵称')}</button>
+    <button class="mem-btn" type="submit"${dis}>保存昵称</button>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>
 </section>
 <section class="mem-card">
-  <h2 class="mem-form-title">${tr(en, 'QQ 头像')}</h2>
+  <h2 class="mem-form-title">QQ 头像</h2>
   <form data-member-qq-form>
-    <input class="mem-input" name="qq" inputmode="numeric" maxlength="11" value="${esc(m.qq || '')}" placeholder="${tr(en, '输入你的 QQ 号')}" aria-label="${en ? 'QQ ID' : 'QQ 号'}">
+    <input class="mem-input" name="qq" inputmode="numeric" maxlength="11" value="${esc(m.qq || '')}" placeholder="输入你的 QQ 号" aria-label="QQ 号">
     <p class="mem-swap">${
       m.qq
         ? m.avatarUrl
-          ? tr(en, '已绑定，头像会显示在评论区与排行榜')
-          : tr(en, '已绑定但头像还没抓到，点下方按钮重试')
-        : tr(en, '绑定后评论区与排行榜显示 QQ 头像；QQ 号仅用于抓取头像，不会公开展示')
+          ? '已绑定，头像会显示在评论区与排行榜'
+          : '已绑定但头像还没抓到，点下方按钮重试'
+        : '绑定后评论区与排行榜显示 QQ 头像；QQ 号仅用于抓取头像，不会公开展示'
     }</p>
-    <button class="mem-btn" type="submit">${m.qq && !m.avatarUrl ? tr(en, '重试头像') : tr(en, '保存')}</button>
+    <button class="mem-btn" type="submit">${m.qq && !m.avatarUrl ? '重试头像' : '保存'}</button>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>
 </section>
 <section class="mem-card">
-  <h2 class="mem-form-title">${tr(en, '修改密码')}</h2>
+  <h2 class="mem-form-title">修改密码</h2>
   <form data-member-password-form>
-    <input class="mem-input" type="password" name="current" maxlength="72" placeholder="${tr(en, '当前密码')}" autocomplete="current-password" required aria-label="${tr(en, '当前密码')}">
-    <input class="mem-input" type="password" name="next" maxlength="72" placeholder="${tr(en, '新密码（至少 8 位）')}" autocomplete="new-password" required aria-label="${tr(en, '新密码（至少 8 位）')}">
-    <p class="mem-swap">${tr(en, '本站不提供密码找回，请务必记好新密码；修改成功后其他设备将退出登录')}</p>
-    <button class="mem-btn" type="submit">${tr(en, '确认修改')}</button>
+    <input class="mem-input" type="password" name="current" maxlength="72" placeholder="当前密码" autocomplete="current-password" required aria-label="当前密码">
+    <input class="mem-input" type="password" name="next" maxlength="72" placeholder="新密码（至少 8 位）" autocomplete="new-password" required aria-label="新密码（至少 8 位）">
+    <p class="mem-swap">本站不提供密码找回，请务必记好新密码；修改成功后其他设备将退出登录</p>
+    <button class="mem-btn" type="submit">确认修改</button>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>
-</section>${m.activity ? `\n${memberActivityHtml(m.activity, en)}` : ''}`
+</section>${m.activity ? `\n${memberActivityHtml(m.activity)}` : ''}`
 }
 
 /** 会员登录 / 注册双表单（未登录态）：提交与切换交互在 site.js；蜜罐字段照评论表单口径（name=link）。
  *  注册可填昵称（选填，中英文均可，不占用 30 天修改窗口），密码无找回的提醒放在提交键旁。
  *  o.settings（会员 3.0 预备）：带 settings 时渲染会员公告、按 memberRegOpen 收起注册表单——
  *  主题侧把 MemberData 原样传入即可，不传保持历史行为 */
-export function memberAuthHtml(en = false, o?: { settings?: SettingsMap }): string {
+export function memberAuthHtml( o?: { settings?: SettingsMap }): string {
   const s = o?.settings
   const notice = s?.memberNotice?.trim() ? `<section class="mem-card mem-notice" style="border-left:3px solid rgba(128,128,128,.35);">${esc(s.memberNotice.trim())}</section>` : ''
   const regOpen = !s || s.memberRegOpen !== '0'
   // 注册表单**总是渲染**：关闭开放注册时它变成「凭邀请码注册」的入口——
   // 做邀请制的站不该为了发码而把注册重新放开，也不该让持码的人找不到入口
   const registerForm = `<form class="mem-card mem-form" data-member-form="register">
-    <h2 class="mem-form-title">${tr(en, '注册会员')}</h2>
-    ${regOpen ? '' : `<p class="mem-swap" style="margin-top:0;">${tr(en, '本站为邀请制：填写邀请码即可注册')}</p>`}
-    <input class="mem-input" name="username" maxlength="24" placeholder="${tr(en, '用户名（2-24 位字母、数字、_ 或 -）')}" autocomplete="username" required aria-label="${tr(en, '用户名')}">
-    <input class="mem-input" name="nickname" maxlength="24" placeholder="${tr(en, '昵称（选填，中英文均可）')}" aria-label="${tr(en, '昵称（选填，中英文均可）')}">
-    <input class="mem-input" type="password" name="password" maxlength="72" placeholder="${en ? 'Password (min 8 characters)' : '密码（至少 8 位）'}" autocomplete="new-password" required aria-label="${tr(en, '密码')}">
-    <input class="mem-input" type="email" name="email" maxlength="100" placeholder="${tr(en, '邮箱（必填，用于识别会员身份）')}" autocomplete="email" required aria-label="${tr(en, '邮箱（必填）')}">
-    <input class="mem-input" type="email" name="emailConfirm" maxlength="100" placeholder="${tr(en, '再次输入邮箱')}" autocomplete="off" spellcheck="false" required aria-label="${tr(en, '再次输入邮箱')}">
-    <input class="mem-input" name="inviteCode" maxlength="12" placeholder="${en ? 'Invite code (optional)' : '邀请码（选填，填了可直接获得对应档位）'}" autocomplete="off" spellcheck="false" style="text-transform:uppercase;" aria-label="${en ? 'Invite code' : '邀请码'}">
+    <h2 class="mem-form-title">注册会员</h2>
+    ${regOpen ? '' : `<p class="mem-swap" style="margin-top:0;">本站为邀请制：填写邀请码即可注册</p>`}
+    <input class="mem-input" name="username" maxlength="24" placeholder="用户名（2-24 位字母、数字、_ 或 -）" autocomplete="username" required aria-label="用户名">
+    <input class="mem-input" name="nickname" maxlength="24" placeholder="昵称（选填，中英文均可）" aria-label="昵称（选填，中英文均可）">
+    <input class="mem-input" type="password" name="password" maxlength="72" placeholder="密码（至少 8 位）" autocomplete="new-password" required aria-label="密码">
+    <input class="mem-input" type="email" name="email" maxlength="100" placeholder="邮箱（必填，用于识别会员身份）" autocomplete="email" required aria-label="邮箱（必填）">
+    <input class="mem-input" type="email" name="emailConfirm" maxlength="100" placeholder="再次输入邮箱" autocomplete="off" spellcheck="false" required aria-label="再次输入邮箱">
+    <input class="mem-input" name="inviteCode" maxlength="12" placeholder="邀请码（选填，填了可直接获得对应档位）" autocomplete="off" spellcheck="false" style="text-transform:uppercase;" aria-label="邀请码">
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="mem-btn" type="submit">${tr(en, '注册并登录')}</button>
-    <p class="mem-swap">${tr(en, '密码一旦遗失无法找回，请务必记好')}</p>
-    <p class="mem-swap">${tr(en, '已有账号？')}<button type="button" class="mem-swap-btn" data-member-swap="login">${tr(en, '去登录')}</button></p>
+    <button class="mem-btn" type="submit">注册并登录</button>
+    <p class="mem-swap">密码一旦遗失无法找回，请务必记好</p>
+    <p class="mem-swap">已有账号？<button type="button" class="mem-swap-btn" data-member-swap="login">去登录</button></p>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>`
   return `<section class="mem-auth">
   ${notice}
   <form class="mem-card mem-form" data-member-form="login">
-    <h2 class="mem-form-title">${tr(en, '登录')}</h2>
-    <input class="mem-input" name="username" maxlength="24" placeholder="${tr(en, '用户名')}" autocomplete="username" required aria-label="${tr(en, '用户名')}">
-    <input class="mem-input" type="password" name="password" maxlength="72" placeholder="${tr(en, '密码')}" autocomplete="current-password" required aria-label="${tr(en, '密码')}">
+    <h2 class="mem-form-title">登录</h2>
+    <input class="mem-input" name="username" maxlength="24" placeholder="用户名" autocomplete="username" required aria-label="用户名">
+    <input class="mem-input" type="password" name="password" maxlength="72" placeholder="密码" autocomplete="current-password" required aria-label="密码">
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="mem-btn" type="submit">${tr(en, '登录')}</button>
-    <p class="mem-swap">${regOpen ? `${tr(en, '还没有账号？')}<button type="button" class="mem-swap-btn" data-member-swap="register">${tr(en, '注册一个')}</button>` : `${tr(en, '本站为邀请制')}<button type="button" class="mem-swap-btn" data-member-swap="register">${tr(en, '凭邀请码注册')}</button>`}</p>
+    <button class="mem-btn" type="submit">登录</button>
+    <p class="mem-swap">${regOpen ? `还没有账号？<button type="button" class="mem-swap-btn" data-member-swap="register">注册一个</button>` : `本站为邀请制<button type="button" class="mem-swap-btn" data-member-swap="register">凭邀请码注册</button>`}</p>
     <p class="mem-tip" data-member-tip aria-live="polite"></p>
   </form>
   ${registerForm}
@@ -1441,34 +1391,26 @@ export function memberAuthHtml(en = false, o?: { settings?: SettingsMap }): stri
 /** 付费墙遮挡卡：locked 文章在试读段之后的升级提示（正文已被服务端截断，浏览器拿不到全文）。
  *  CTA 统一指向 /member。档位名解析：o.settings 在场（主题把 PostData 原样传入）时按自定义档位
  *  定义（settings.memberTiers）取展示名，'member' 伪档 = 任意登录会员；缺省回落历史三档文案 */
-export function paywallHtml(minTier: string | undefined | null, en = false, o?: { settings?: SettingsMap }): string {
+export function paywallHtml(minTier: string | undefined | null,  o?: { settings?: SettingsMap }): string {
   let tierName: string
   const key = (minTier || '').trim()
   if (o?.settings) {
-    if (key === 'member') tierName = en ? 'Member' : '会员'
-    else tierName = tierByKey(parseMemberTiers(o.settings.memberTiers), key)?.name ?? tierLabel(key, en)
+    if (key === 'member') tierName = ('会员')
+    else tierName = tierByKey(parseMemberTiers(o.settings.memberTiers), key)?.name ?? tierLabel(key)
   } else {
-    tierName = en
-      ? key === 'top'
-        ? 'Top member'
-        : key === 'member'
-          ? 'Member'
-          : 'Coffee member'
-      : key === 'top'
+    tierName = (key === 'top'
         ? TIER_LABELS.top
         : key === 'member'
           ? '会员'
-          : TIER_LABELS.coffee
+          : TIER_LABELS.coffee)
   }
-  return `<section class="paywall" aria-label="${en ? 'Members-only content' : '会员专属内容'}">
+  return `<section class="paywall" aria-label="会员专属内容">
   <svg class="paywall-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="15.5" r="1.3"/></svg>
-  <h2 class="paywall-title">${en ? `${esc(tierName)}-only content` : `${esc(tierName)}专属内容`}</h2>
+  <h2 class="paywall-title">${`${esc(tierName)}专属内容`}</h2>
   <p class="paywall-text">${
-    en
-      ? `The rest of this post is for ${esc(tierName)}s only. Already a member? Log in to continue — not one yet? Join to unlock.`
-      : `本文剩余部分仅限${esc(tierName)}阅读。已是会员？登录后继续；还不是会员？加入即可解锁。`
+    `本文剩余部分仅限${esc(tierName)}阅读。已是会员？登录后继续；还不是会员？加入即可解锁。`
   }</p>
-  <a class="paywall-cta" href="/member">${en ? 'Log in / Join' : '登录 / 加入会员'}</a>
+  <a class="paywall-cta" href="/member">登录 / 加入会员</a>
 </section>`
 }
 
@@ -1484,39 +1426,38 @@ export interface OnThisDayItemView {
 }
 
 /** 年份标签：1 = 去年，2+ = N 年前 */
-function otdYearLabel(yearsAgo: number, en: boolean): string {
-  if (en) return yearsAgo <= 1 ? 'Last year' : `${yearsAgo} ${plural(yearsAgo, 'year', 'years')} ago`
+function otdYearLabel(yearsAgo: number): string {
   return yearsAgo <= 1 ? '去年' : `${yearsAgo} 年前`
 }
 
 /** 卡片直出条数，其余进「展开」折叠区——当天历史再多也不挤丢，只多占一行摘要 */
 const OTD_VISIBLE = 4
 
-function otdRow(it: OnThisDayItemView, en: boolean): string {
+function otdRow(it: OnThisDayItemView): string {
   return `<a class="otd-item" href="${esc(it.href)}">
-  <span class="otd-year">${cstDate(it.ts).getUTCFullYear()}<i>${otdYearLabel(it.yearsAgo, en)}</i></span>
+  <span class="otd-year">${cstDate(it.ts).getUTCFullYear()}<i>${otdYearLabel(it.yearsAgo)}</i></span>
   <span class="otd-text">${esc(it.text)}</span>
-  <span class="otd-kind">${it.kind === 'post' ? tr(en, '文章') : en ? 'Note' : '微博'}</span>
+  <span class="otd-kind">${it.kind === 'post' ? '文章' : '微博'}</span>
 </a>`
 }
 
-export function onThisDayCard(items: OnThisDayItemView[] | null | undefined, en = false): string {
+export function onThisDayCard(items: OnThisDayItemView[] | null | undefined): string {
   if (!items?.length) return ''
   const rest = items.slice(OTD_VISIBLE)
   // 原生 <details> 折叠：无 JS 可用（CSP 禁内联脚本），开关文案由 CSS 按 open 态切换
   const more = rest.length
     ? `<details class="otd-more">
-  <summary><span class="otd-fold-more">${en ? `Show ${rest.length} more ▾` : `展开其余 ${rest.length} 条 ▾`}</span><span class="otd-fold-less">${en ? 'Collapse ▴' : '收起 ▴'}</span></summary>
-  ${rest.map((it) => otdRow(it, en)).join('\n')}
+  <summary><span class="otd-fold-more">${`展开其余 ${rest.length} 条 ▾`}</span><span class="otd-fold-less">收起 ▴</span></summary>
+  ${rest.map((it) => otdRow(it)).join('\n')}
 </details>`
     : ''
-  return `<section class="otd-card" aria-label="${tr(en, '历史上的今天')}">
+  return `<section class="otd-card" aria-label="历史上的今天">
   <header class="otd-head">
     <svg class="otd-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-    <span class="otd-title">${tr(en, '历史上的今天')}</span>
-    <span class="otd-sub">${tr(en, '时间经过的地方，总会留下点什么')}</span>
+    <span class="otd-title">历史上的今天</span>
+    <span class="otd-sub">时间经过的地方，总会留下点什么</span>
   </header>
-  ${items.slice(0, OTD_VISIBLE).map((it) => otdRow(it, en)).join('\n')}
+  ${items.slice(0, OTD_VISIBLE).map((it) => otdRow(it)).join('\n')}
   ${more}
 </section>`
 }
@@ -1525,20 +1466,19 @@ export function onThisDayCard(items: OnThisDayItemView[] | null | undefined, en 
  *  按钮顺序是契约：site.js 用 `querySelector('.wb-composer-add')` 取唯一的媒体按钮（管计数与上传进度），
  *  它必须排在 JS 后插的表情按钮之前；媒体入口只有这一个（图片与视频同一个选择器，视频另走视频通道），
  *  视频预览容器 `.wb-composer-video` 由 site.js 填充。tests/weibo-admin.test.ts 有守卫。 */
-export function weiboComposer(o: { adminName: string; en?: boolean }): string {
-  const en = !!o.en
+export function weiboComposer(o: { adminName: string;  }): string {
   return `<form class="wb-composer" data-wb-composer>
-  <p class="wb-composer-as">${en ? 'Posting as' : '以作者'} <b>${esc(o.adminName)}</b>${en ? '' : ' 的身份发布'}</p>
-  <textarea class="wb-composer-textarea" name="content" maxlength="5000" rows="3" placeholder="${tr(en, '有什么新鲜事？写 #话题 即可归类')}"></textarea>
+  <p class="wb-composer-as">以作者 <b>${esc(o.adminName)}</b> 的身份发布</p>
+  <textarea class="wb-composer-textarea" name="content" maxlength="5000" rows="3" placeholder="有什么新鲜事？写 #话题 即可归类"></textarea>
   <div class="wb-composer-tiles" hidden></div>
   <div class="wb-composer-video" hidden></div>
   <div class="wb-composer-foot">
-    <button class="wb-composer-add" type="button" title="${tr(en, '图片 / 视频，一条微博最多 1 个视频')}">${tr(en, '加图（0/9）')}</button>
+    <button class="wb-composer-add" type="button" title="图片 / 视频，一条微博最多 1 个视频">加图（0/9）</button>
     <span class="wb-composer-count" data-count>0 / 5000</span>
     <span class="wb-composer-tip" data-tip aria-live="polite"></span>
     <span class="wb-composer-actions">
-      <button class="wb-composer-draft" type="button">${tr(en, '存草稿')}</button>
-      <button class="wb-composer-publish" type="button">${tr(en, '发布')}</button>
+      <button class="wb-composer-draft" type="button">存草稿</button>
+      <button class="wb-composer-publish" type="button">发布</button>
     </span>
   </div>
 </form>`
@@ -1548,11 +1488,11 @@ export function weiboComposer(o: { adminName: string; en?: boolean }): string {
  *  按话题筛选时翻页与跳转都要带上 topic。
  *  跳转表单 action 固定指向 /weibo：纯微博模式下本页渲染在 '/'，而翻页链接本就仍指 /weibo
  *  （同一内容，见 pages.ts renderWeibo 注释），保持一致。 */
-export function weiboPager(page: number, totalPages: number, topic?: string, en = false): string {
+export function weiboPager(page: number, totalPages: number, topic?: string): string {
   if (totalPages <= 1) return ''
   const href = (p: number) => `/weibo?page=${p}${topic ? `&topic=${encodeURIComponent(topic)}` : ''}`
-  const prevLabel = en ? '← Newer' : '← 新一条'
-  const nextLabel = en ? 'Older →' : '更早的 →'
+  const prevLabel = '← 新一条'
+  const nextLabel = '更早的 →'
   const prev =
     page > 1
       ? `<a class="wb-pager-btn" href="${href(page - 1)}">${prevLabel}</a>`
@@ -1565,11 +1505,7 @@ export function weiboPager(page: number, totalPages: number, topic?: string, en 
   // 结构 / class 与文章列表 pagerHtml 的 .pager-jump 完全相同——七主题已共用一套样式，无需新增 CSS
   const jump = `<form class="pager-jump" action="/weibo" method="get">${
     topic ? `<input type="hidden" name="topic" value="${esc(topic)}">` : ''
-  }<span class="pager-jump-text">${en ? 'Page' : '跳至'}</span><input class="pager-input" type="number" name="page" min="1" max="${totalPages}" value="${page}" aria-label="${tr(en, '页码')}">${
-    en
-      ? `<span class="pager-jump-text">of ${totalPages}</span><button class="pager-go" type="submit">Go</button>`
-      : `<span class="pager-jump-text">页</span><span class="pager-jump-text">/ 共 ${totalPages} 页</span><button class="pager-go" type="submit">跳转</button>`
-  }</form>`
+  }<span class="pager-jump-text">跳至</span><input class="pager-input" type="number" name="page" min="1" max="${totalPages}" value="${page}" aria-label="页码"><span class="pager-jump-text">页</span><span class="pager-jump-text">/ 共 ${totalPages} 页</span><button class="pager-go" type="submit">跳转</button></form>`
   return `<nav class="wb-pager">${prev}<span class="wb-pager-info">${page} / ${totalPages}</span>${next}</nav>${jump}`
 }
 
@@ -1580,7 +1516,7 @@ export interface PagerContext {
   base: string
 }
 
-export function pagerHtml(c: PagerContext, en = false): string {
+export function pagerHtml(c: PagerContext): string {
   if (c.totalPages <= 1) return ''
   const link = (p: number, label: string, cls: string, disabled = false) =>
     disabled
@@ -1598,15 +1534,13 @@ export function pagerHtml(c: PagerContext, en = false): string {
     .map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`)
     .join('')
   const jump = `<form class="pager-jump" action="${esc(c.base.split('?')[0] || '/')}" method="get">${hidden}<span class="pager-jump-text">${
-    en ? `Page` : '跳至'
-  }</span><input class="pager-input" type="number" name="page" min="1" max="${c.totalPages}" value="${c.page}" aria-label="${tr(en, '页码')}">${
-    en
-      ? `<span class="pager-jump-text">of ${c.totalPages}</span><button class="pager-go" type="submit">Go</button>`
-      : `<span class="pager-jump-text">页</span><span class="pager-jump-text">/ 共 ${c.totalPages} 页</span><button class="pager-go" type="submit">跳转</button>`
+    '跳至'
+  }</span><input class="pager-input" type="number" name="page" min="1" max="${c.totalPages}" value="${c.page}" aria-label="页码">${
+    `<span class="pager-jump-text">页</span><span class="pager-jump-text">/ 共 ${c.totalPages} 页</span><button class="pager-go" type="submit">跳转</button>`
   }</form>`
-  return `<nav class="pager">${link(c.page - 1, tr(en, '← 上一页'), 'pager-prev', c.page <= 1)}${nums}${link(
+  return `<nav class="pager">${link(c.page - 1, ('← 上一页'), 'pager-prev', c.page <= 1)}${nums}${link(
     c.page + 1,
-    tr(en, '下一页 →'),
+    ('下一页 →'),
     'pager-next',
     c.page >= c.totalPages
   )}</nav>${jump}`
@@ -1619,11 +1553,11 @@ export function pagerHtml(c: PagerContext, en = false): string {
  */
 /** 评论区会员徽标（commentsHtml 内部件）：档位定义在场时按生效档位渲染——非基础档出带色认证
  *  徽标（会员 3.0 预备，过期即时降级），基础档回落「会员」普通徽标；缺省定义保持历史文案 */
-function memberCommentBadge(c: CommentRow, tiers: MemberTierDef[] | undefined, en: boolean): string {
-  if (!tiers) return `<span class="cmt-badge">${en ? 'Member' : '会员'}</span>`
+function memberCommentBadge(c: CommentRow, tiers: MemberTierDef[] | undefined): string {
+  if (!tiers) return `<span class="cmt-badge">会员</span>`
   const eff = effectiveTier(tiers, c.member_tier, c.member_tier_expires_at ?? null)
-  if (eff.isBase) return `<span class="cmt-badge">${en ? 'Member' : '会员'}</span>`
-  return tierBadgeHtml(eff.name, eff.color, 'cmt-badge', en)
+  if (eff.isBase) return `<span class="cmt-badge">会员</span>`
+  return tierBadgeHtml(eff.name, eff.color, 'cmt-badge')
 }
 
 export function commentsHtml(o: {
@@ -1653,10 +1587,7 @@ export function commentsHtml(o: {
   /** 当前读者的圈层等级（src/commentgate.ts：0 = 游客）：只影响遮罩占位块的第二行提示
    *  （游客→登录会员后可见 / 低档会员→升级档位后可见）。遮罩本身由服务端 applyCommentGate 决定 */
   gateViewerRank?: number
-  /** 英文测试版：文案走词典/英文语序，中文路径不传即原样 */
-  en?: boolean
 }): string {
-  const en = !!o.en
   const tops = o.comments.filter((c) => !c.parent_id)
   const children = new Map<number, CommentRow[]>()
   for (const c of o.comments) {
@@ -1676,27 +1607,27 @@ export function commentsHtml(o: {
     // member_tier，契约 DEVPLAN 附录 A）带会员徽标——档位定义在场时按生效档位出认证徽标（会员 3.0 预备），
     // showBadge 关闭时整体不渲染。楼层号只标顶层评论（盖楼的是一楼一层，楼中楼不占号）
     const badge = c.is_admin
-      ? `<span class="cmt-badge">${tr(en, o.guestbook ? '作者' : '楼主')}</span>`
+      ? `<span class="cmt-badge">${o.guestbook ? '作者' : '楼主'}</span>`
       : c.member_tier && o.showBadge !== false
-        ? memberCommentBadge(c, o.tiers, en)
+        ? memberCommentBadge(c, o.tiers)
         : ''
     // 操作键：登录管理员有回复 + 删除；登录会员有回复（会员 3.0 起可回复楼中楼，游客没有按钮）
     // 只对登录身份渲染（访客 HTML 里不存在）。前台删评论走后台 /api/admin/comments/:id（会话鉴权）
-    const replyBtn = `<button class="cmt-reply-btn" type="button" data-reply="${c.id}" data-name="${esc(c.nickname)}">${tr(en, '回复')}</button>`
+    const replyBtn = `<button class="cmt-reply-btn" type="button" data-reply="${c.id}" data-name="${esc(c.nickname)}">回复</button>`
     const adminBtns = o.isAdmin
       ? `${replyBtn}
-    <button class="cmt-del-btn" type="button" data-cmt-del="${c.id}" title="${tr(en, '删除这条评论（其下回复一并删除，不可恢复）')}">${tr(en, '删除')}</button>`
+    <button class="cmt-del-btn" type="button" data-cmt-del="${c.id}" title="删除这条评论（其下回复一并删除，不可恢复）">删除</button>`
       : o.memberName
         ? replyBtn
         : ''
     const kids = children.get(c.id) || []
     // IP 属地：与楼号同款小灰字（复用内联样式，七主题零改动）；开关关闭或无快照（旧评论/自托管）不渲染
-    const region = o.showRegion ? ipRegionLabel(c.ip_region || '', en) : ''
+    const region = o.showRegion ? ipRegionLabel(c.ip_region || '') : ''
     // 操作键位单列成参数：遮罩项一律不给任何键（回复键会把「正文拿不到」变成「能往私密楼里打字」）
     const head = (btns: string): string => `<div class="cmt-head">
     ${commentAvatarHtml(c, o.adminAvatar)}
     <span class="cmt-name">${esc(c.nickname)}${badge}</span>
-    <span class="cmt-time">${en ? fmtDateTimeEn(c.created_at) : fmtDateTime(c.created_at)}</span>
+    <span class="cmt-time">${fmtDateTime(c.created_at)}</span>
     ${region ? `<span class="cmt-region" style="font-size:11px;opacity:0.45">${esc(region)}</span>` : ''}
     ${floor ? `<span class="cmt-floor" style="font-size:11px;opacity:0.45;font-variant-numeric:tabular-nums">#${floor}</span>` : ''}
     ${btns}
@@ -1705,10 +1636,10 @@ export function commentsHtml(o: {
     // 只画占位块（同付费墙 teaserHtml 口径：浏览器里根本没有原文）。昵称 / 档位徽标 / 时间照常露，
     // 读者知道「圈子里有谁在聊」
     if (c.gated) {
-      const g = commentGateText(c.gate_tier_name || '', o.gateViewerRank || 0, en)
+      const g = commentGateText(c.gate_tier_name || '', o.gateViewerRank || 0)
       const more = c.gate_hidden
         ? `<div class="cmt-gate-more" style="font-size:12px;opacity:0.55;margin-top:6px">${esc(
-            commentGateMoreText(c.gate_tier_name || '', c.gate_hidden, en)
+            commentGateMoreText(c.gate_tier_name || '', c.gate_hidden)
           )}</div>`
         : ''
       return `<li class="cmt-item cmt-item-gated" id="cmt-${c.id}">
@@ -1733,42 +1664,42 @@ export function commentsHtml(o: {
   <input type="hidden" name="parentId" value="">
   ${
     o.adminName
-      ? adminIdentity(o.adminName, en)
+      ? adminIdentity(o.adminName)
       : o.memberName
-        ? memberIdentity(o.memberName, en)
+        ? memberIdentity(o.memberName)
         : `<div class="cmt-form-row">
-    <input class="cmt-input" name="nickname" maxlength="24" placeholder="${tr(en, '昵称')}" required>
+    <input class="cmt-input" name="nickname" maxlength="24" placeholder="昵称" required>
     <input class="cmt-input cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
   </div>
   <div class="cmt-form-row">
-    <input class="cmt-input" name="qq" inputmode="numeric" maxlength="11" placeholder="${tr(en, 'QQ 号（选填，展示头像）')}" autocomplete="off" title="${tr(en, '仅用于抓取头像，不会公开展示')}">
+    <input class="cmt-input" name="qq" inputmode="numeric" maxlength="11" placeholder="QQ 号（选填，展示头像）" autocomplete="off" title="仅用于抓取头像，不会公开展示">
   </div>`
   }
   <textarea class="cmt-textarea" name="content" maxlength="1000" rows="3" placeholder="${
-    o.guestbook ? tr(en, '想对作者说点什么…') : tr(en, '写下你的想法…')
+    o.guestbook ? '想对作者说点什么…' : '写下你的想法…'
   }" required></textarea>
   <div class="cmt-form-foot">
-    <span class="cmt-tip">${esc(`${o.tip || tr(en, '留言即刻展示，请友善交流')}${o.showRegion ? ` · ${tr(en, '发布后将显示 IP 属地')}` : ''}`)}</span>
-    <button class="cmt-submit" type="submit">${tr(en, '发送')}</button>
+    <span class="cmt-tip">${esc(`${o.tip || '留言即刻展示，请友善交流'}${o.showRegion ? ` · 发布后将显示 IP 属地` : ''}`)}</span>
+    <button class="cmt-submit" type="submit">发送</button>
   </div>
 `
   const form = o.allowComments
     ? o.guestbook
       ? `<form id="guestbook-form" class="cmt-form${o.adminName ? ' is-admin' : ''}" data-guestbook="1">${formInner}</form>`
       : `<form id="comment-form" class="cmt-form${o.adminName ? ' is-admin' : ''}" data-slug="${esc(o.slug)}">${formInner}</form>`
-    : `<p class="cmt-closed">${tr(en, '作者已关闭留言。')}</p>`
+    : `<p class="cmt-closed">作者已关闭留言。</p>`
 
   return `<section class="cmt-section${o.guestbook ? ' gb-section' : ''}" id="${o.guestbook ? 'guestbook' : 'comments'}">
-  <h2 class="cmt-title">${esc(o.title || tr(en, o.guestbook ? '留言板' : '留言'))} <span class="cmt-count">${o.count}</span></h2>
-  ${o.comments.length ? `<ul class="cmt-list">${list}</ul>` : `<p class="cmt-empty">${o.guestbook ? tr(en, '还没有人留言，来坐个沙发，说点什么吧～') : tr(en, '还没有留言，来抢沙发～')}</p>`}
+  <h2 class="cmt-title">${esc(o.title || (o.guestbook ? '留言板' : '留言'))} <span class="cmt-count">${o.count}</span></h2>
+  ${o.comments.length ? `<ul class="cmt-list">${list}</ul>` : `<p class="cmt-empty">${o.guestbook ? '还没有人留言，来坐个沙发，说点什么吧～' : '还没有留言，来抢沙发～'}</p>`}
   ${form}
 </section>`
 }
 
-export function likesBtn(slug: string, likes: number, en = false): string {
+export function likesBtn(slug: string, likes: number): string {
   return `<button class="like-btn" data-slug="${esc(slug)}" data-likes="${likes}" type="button">
   ${heartSvg(18)}
-  <span class="like-label">${tr(en, '赞')}</span>
+  <span class="like-label">赞</span>
   <b class="like-count" data-count>${likes}</b>
 </button>`
 }
@@ -1778,12 +1709,12 @@ export function likesBtn(slug: string, likes: number, en = false): string {
  * QR 矩阵位串（src/qrcode.ts packMatrix 产物，空串表示链接超长未生成码）。
  * 交互在 site.js：点击按需加载 /share-card.js 弹出分享面板（复制链接/系统分享/卡片图）。
  */
-export function shareBtn(url: string, qr: string, en = false): string {
+export function shareBtn(url: string, qr: string): string {
   return `<button class="share-btn" type="button" data-share-url="${esc(url)}"${
     qr ? ` data-share-qr="${esc(qr)}"` : ''
-  } aria-label="${tr(en, '分享本文')}">
+  } aria-label="分享本文">
   <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 14V3.5m0 0L8.5 7m3.5-3.5L15.5 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M7.5 10.5H7a3 3 0 0 0-3 3V18a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-4.5a3 3 0 0 0-3-3h-.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-  <span class="share-label">${tr(en, '分享')}</span>
+  <span class="share-label">分享</span>
 </button>`
 }
 
@@ -1833,14 +1764,14 @@ export function listPageUrl(o: ListPageContext): string {
 }
 
 /** 排序筛选条：一排 chips，当前排序高亮；点「随机」永远洗新一组 */
-export function homeSortBar(o: ListPageContext, en = false): string {
+export function homeSortBar(o: ListPageContext): string {
   const chips = HOME_SORTS.map(
     (s) =>
       `<a class="fs-chip${s.key === (o.sort || 'latest') ? ' is-active' : ''}" href="${esc(
         listPageUrl({ ...o, sort: s.key, seed: undefined })
-      )}">${tr(en, s.label)}</a>`
+      )}">${s.label}</a>`
   ).join('')
-  return `<nav class="fs-bar" aria-label="${tr(en, '文章排序')}"><span class="fs-label">${tr(en, '排序')}</span>${chips}</nav>`
+  return `<nav class="fs-bar" aria-label="文章排序"><span class="fs-label">排序</span>${chips}</nav>`
 }
 
 /** 翻页链接前缀（形如 "/?tag=x&sort=random&seed=5&"），随机时带 seed 稳住顺序 */
@@ -1854,9 +1785,8 @@ export function homeListBase(o: ListPageContext): string {
   return head + (qs ? qs + '&' : '')
 }
 
-/** 浏览量缩写：中文「1.2w」（万），英文测试版换「12k」口语（1.2 万 → 12k） */
-export function fmtViews(n: number, en = false): string {
-  if (en) return n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k' : String(n)
+/** 浏览量缩写：超过 1 万记作「1.2w」（万） */
+export function fmtViews(n: number): string {
   return n >= 10000 ? (n / 10000).toFixed(1).replace(/\.0$/, '') + 'w' : String(n)
 }
 

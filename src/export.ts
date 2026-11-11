@@ -13,7 +13,7 @@ import { htmlToMd } from './html-md'
 import { siteBase } from './render'
 import { extractOgImage, sanitizeHtml } from './sanitize'
 import type { Env, PageRow, PostRow, SessionUser, WeiboRow } from './types'
-import { cstDate, fmtDate, isDemo } from './utils'
+import { cstDate, fmtDate } from './utils'
 import { cdata, rfc822, xmlEsc } from './xml'
 import { ZipWriter } from './zip'
 
@@ -114,9 +114,7 @@ function attachmentHeaders(filename: string, contentType: string): Headers {
 }
 
 exportRoutes.get('/markdown', async (c) => {
-  // 演示站守卫（AGENTS 演示站防线；2026-10-12 审计 B11 当时只落了 backup 侧，导出侧 2026-10-15 补齐）：
-  // 体验者凭据公示，整包导出内容 + 图片的口子不能开
-  if (isDemo(c.env)) return Response.json({ error: '演示站不开放导出' }, { status: 404 })
+  // 整包导出含全部内容 + 图片，连点会在同一 isolate 堆叠多个任务：全局窗口内只放两次
   const db = c.env.DB
   const [postsRes, catRes, weiboRes] = await Promise.all([
     // 回收站里的已删行不进导出包（导出是用户产物；备份仍是全表含回收站）
@@ -264,8 +262,6 @@ exportRoutes.get('/markdown', async (c) => {
 })
 
 exportRoutes.get('/wxr', async (c) => {
-  // 同 /markdown：演示站不开放导出
-  if (isDemo(c.env)) return Response.json({ error: '演示站不开放导出' }, { status: 404 })
   const db = c.env.DB
   const settings = await getSettings(db)
   const [postsRes, catRes] = await Promise.all([

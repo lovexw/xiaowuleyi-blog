@@ -28,12 +28,11 @@ curl -fsSL https://get.docker.com | sh
 
 ```json
 {
-  "blog1.你的域名.com": { "demo": false }
+  "blog1.你的域名.com": {}
 }
 ```
 
-> ⚠ `demo: true` 的租户会自动播种公示账号（demo / demo1234）的演示内容，
-> 公开服务器上要么删掉、要么明确当展示站用。
+> 租户默认是空库：访问该域名进 `/admin/` 创建管理员后即可开写。
 
 ## 3. 起服务
 

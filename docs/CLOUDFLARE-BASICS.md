@@ -5,7 +5,7 @@
 > 站上仍在用 Cloudflare 的部分只剩 DNS 与 CDN 回源（橙云），这部分见 DEPLOY-ORACLE.md「域名接入」节。
 
 > 围绕这套博客实际用到的 Cloudflare 功能，讲清楚「是什么、在控制台哪里看、日常怎么操作」。
-> 与其它文档的分工：部署的完整步骤看 [部署教程](DEPLOY.md)，日常使用看 [使用手册](GUIDE.md)，演示站看 [演示站指南](DEMO.md)——本文只讲 Cloudflare 平台本身，不重复部署教学。
+> 与其它文档的分工：部署的完整步骤看 [部署教程](DEPLOY.md)，日常使用看 [使用手册](GUIDE.md)——本文只讲 Cloudflare 平台本身，不重复部署教学。
 > 文中资源名以在线示例（blog.xiaowuleyi.com：Worker `xwblog`、数据库 `xwblog-db`、图床桶 `xwblog-images`，与仓库内 wrangler.jsonc 一致）为参照；部署自己的实例时换成你自己的资源名即可。
 
 ## 目录
@@ -32,7 +32,7 @@
 
 | 产品 | 一句话解释 | 本项目的资源 | 控制台位置（大致） |
 |---|---|---|---|
-| **Workers** | 跑后端代码的运行时，整个博客的程序本体 | Worker `xwblog`（演示站另有 `xwblog-demo`） | Workers & Pages → xwblog |
+| **Workers** | 跑后端代码的运行时，整个博客的程序本体 | Worker `xwblog` | Workers & Pages → xwblog |
 | **D1** | 云端 SQLite 数据库，存文章/评论/设置/会员 | 库 `xwblog-db` | Storage & Databases → D1 |
 | **R2** | 对象存储（文件柜），图床 + 数据库备份 | 桶 `xwblog-images` | Storage & Databases → R2 |
 | **Cron Triggers** | 定时任务（闹钟），挂在 Worker 上 | 2 条 cron（见第 6 节） | Worker 的 Settings → Trigger Events |
@@ -116,7 +116,6 @@ Workers 是 Cloudflare 的**边缘计算运行时**：你把一段 TS/JS 代码�
 |---|---|---|
 | GitHub 自动部署 | 向已接入 **Workers Builds** 的仓库 push → Cloudflare 自动拉取、构建、部署 | 日常发布主路：一键部署的副本仓库默认就是这条 |
 | 本地手动部署 | `npm run deploy`（即 `wrangler deploy`） | 想立刻把本地某个状态发上线时用 |
-| 演示站部署 | `npm run deploy:demo`（`wrangler deploy -c wrangler.demo.jsonc`） | 部署 `xwblog-demo`，与生产资源完全隔离（当前演示站实际自托管在甲骨文，此路保留） |
 
 仓库自带的 GitHub Actions 部署工作流在**没有配置部署密钥**时，push 只会跑测试并跳过部署——黄字警告属正常现象，部署已由 Cloudflare 侧接管；想改用 Actions 部署见 [部署教程](DEPLOY.md) 第 7 节。
 
@@ -222,7 +221,7 @@ Cron Trigger 就是「到点叫醒 Worker」。表达式 5 段，含义：`分 �
 | `* * * * *` | 每分钟 | 每分钟 | 扫描「定时发布」的文章，到点就转成已发布（`scheduler.ts`） |
 | `30 16 * * *` | 每天 16:30 | 每天 **00:30** | 夜间备份：D1 全库 → R2 `backups/`，滚动 30 份 |
 
-（演示站配置里还有一条 `23 */2 * * *` = 每 2 小时清库重灌种子数据，那是 demo 站自己的。）
+
 
 ### 6.2 查看、修改、调试
 
@@ -251,14 +250,14 @@ DNS 记录前有个云朵图标：**点亮的橙云 = 流量经过 Cloudflare �
 
 ### 7.3 自定义域名绑定（博客入口的由来）
 
-博客入口 `blog.xiaowuleyi.com` 是通过 **Custom Domain** 绑到 Worker 上的：控制台 → Workers & Pages → xwblog → Settings → **Domains & Routes** → Add Custom Domain。添加后 Cloudflare 自动完成三件事：建好 DNS 记录、签发 HTTPS 证书、把该域名的流量路由到 Worker。代码层面等价的写法是 wrangler.jsonc 里的 `routes`（`wrangler.demo.jsonc` 里有一条被注释的例子可参考），两种方式都行。
+博客入口 `blog.xiaowuleyi.com` 是通过 **Custom Domain** 绑到 Worker 上的：控制台 → Workers & Pages → xwblog → Settings → **Domains & Routes** → Add Custom Domain。添加后 Cloudflare 自动完成三件事：建好 DNS 记录、签发 HTTPS 证书、把该域名的流量路由到 Worker。代码层面等价的写法是 wrangler.jsonc 里的 `routes`，两种方式都行。
 
 配合 `workers_dev: false`，现在**唯一入口**就是 `blog.xiaowuleyi.com`，`xwblog.<子域>.workers.dev` 的平行入口已关闭（2026-10-12 审计口径）。
 
 ### 7.4 别混的两个域名
 
 - `blog.xiaowuleyi.com` —— 本博客，跑在 Cloudflare Worker 上
-- `demo.bloghao.com` / `bloghao.com` —— 演示站与官网，**自托管在甲骨文服务器**（Caddy 直出），只是 DNS 记录仍由 CF 管理；它们不经过本 Worker，排查问题别往 Worker 身上找
+- `bloghao.com` —— 官网，与主站代码同源但独立部署，DNS 记录仍由 CF 管理；它不经过本 Worker，排查问题别往 Worker 身上找
 
 ## 8. Turnstile——注册人机验证
 
@@ -286,7 +285,7 @@ Turnstile 是 Cloudflare 免费的人机验证组件（验证码的现代替代�
 
 Workers 代码可以通过两种方式拿到「代码之外的配置」：
 
-- **vars（明文变量）**：写在 wrangler.jsonc 的 `"vars"` 里，随代码部署。本项目唯一用例：演示站配置里的 `"vars": { "DEMO_MODE": "1" }`——生产配置没有任何 vars。
+- **vars（明文变量）**：写在 wrangler.jsonc 的 `"vars"` 里，随代码部署。本项目当前没有用到任何 vars（敏感值走 `wrangler secret`）。
 - **secrets（加密变量）**：`npx wrangler secret put 名字` 或控制台里设置，加密存储、设置后不可查看。适合 API Token 这类敏感值。
 
 **本项目实际口径**：业务密钥（开放 API 令牌、Telegram Bot Token、Turnstile 私钥、Buffer 令牌等）**不走 wrangler secrets，而是存后台「设置」**（D1 settings 表）——好处是随时在后台改、不用重新部署，且后台显示时全部打码。wrangler secrets 目前只在 GitHub Actions 部署链路里用到（部署工作流持有一枚有 Workers 部署权限的 API Token；没配密钥的仓库 push 只跑测试）。
@@ -302,11 +301,9 @@ npx wrangler whoami                # 确认当前账号
 
 # —— 本地开发 ——
 npm run dev                        # 本地起服务（wrangler dev），D1/R2 走本地模拟库，改代码即生效
-npm run dev:demo                   # 演示站本地预览（自动建表+播种）
 
 # —— 部署与回滚 ——
 npm run deploy                     # 部署生产 Worker（wrangler deploy）
-npm run deploy:demo                # 部署演示站配置
 # 回滚走控制台 Deployments → Rollback，或 npx wrangler rollback
 
 # —— 日志 ——

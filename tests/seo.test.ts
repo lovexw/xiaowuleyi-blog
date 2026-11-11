@@ -165,7 +165,7 @@ test('P1-4：robots 路由的 Sitemap 基座必须走 siteBase（settings.siteUr
   assert.ok(m[0].includes('siteBase(settings'), 'robots 路由必须传 siteBase（别名域名/错误 Host/漏传 XFP 不再带偏 Sitemap 行）')
 })
 
-test('robots.txt 组装：内置段含微博分页禁令，追加段附在内置段后，演示站固定 Disallow', () => {
+test('robots.txt 组装：内置段含微博分页禁令，追加段附在内置段后', () => {
   const builtin = ROBOTS_BASELINE
   assert.equal(buildRobotsTxt(S, 'https://blog.example.com'), builtin)
   assert.equal(buildRobotsTxt({ ...S, robotsExtra: '   ' }, 'https://blog.example.com'), builtin)
@@ -173,9 +173,7 @@ test('robots.txt 组装：内置段含微博分页禁令，追加段附在内置
     buildRobotsTxt({ ...S, robotsExtra: 'Disallow: /drafts/\n' }, 'https://blog.example.com'),
     builtin + '\nDisallow: /drafts/\n'
   )
-  // 演示站：整站 Disallow，追加段不参与（种子数据与闭站状态不该进索引）
-  assert.equal(buildRobotsTxt({ ...S, robotsExtra: 'Allow: /x' }, 'https://demo.example.com', true), 'User-agent: *\nDisallow: /\n')
-  // 全站 noindex 开关（settings.siteNoindex）：同演示站整站 Disallow，追加段不参与；
+  // 全站 noindex 开关（settings.siteNoindex）：整站 Disallow，追加段不参与；
   // 关闭（默认 '0'/缺省）时与历史输出逐字节一致
   assert.equal(
     buildRobotsTxt({ ...S, siteNoindex: '1', robotsExtra: 'Allow: /x' }, 'https://blog.example.com'),
@@ -231,8 +229,7 @@ test('AI 抓取策略 deny：训练 + 检索合并成一个 Disallow 组，声�
   for (const ua of [...AI_TRAIN_AGENTS, ...AI_SEEK_AGENTS]) assert.ok(out.includes(`User-agent: ${ua}`), `拒绝档缺 ${ua}`)
   const headIdx = out.indexOf('# 站长的 AI 抓取策略')
   assert.ok(!out.slice(headIdx).includes('Allow: /'), '拒绝档不得在 AI 段放行任何 UA')
-  // 演示站 / 全站 noindex：整站 Disallow，AI 段不参与（守卫不因策略档位松动）
-  assert.equal(buildRobotsTxt({ ...S, aiPolicy: 'seek' }, 'https://demo.example.com', true), 'User-agent: *\nDisallow: /\n')
+  // 全站 noindex：整站 Disallow，AI 段不参与（守卫不因策略档位松动）
   assert.equal(
     buildRobotsTxt({ ...S, aiPolicy: 'seek', siteNoindex: '1' }, 'https://blog.example.com'),
     'User-agent: *\nDisallow: /\n'

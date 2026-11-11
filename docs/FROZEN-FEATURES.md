@@ -3,8 +3,8 @@
 > **冻结 = 代码留着、入口关掉、不再当欠账。** 与「删除」的区别只有一条：删了要从 git 历史里捞回来，
 > 留着只在「碰巧改到这里」时才有成本。所以判断标准不是「这功能好不好」，而是「它现在还占不占注意力」。
 >
-> 别和 [MAINTENANCE.md](./MAINTENANCE.md) 的 §2 混淆：那里冻结的是**部署形态**（Workers / 演示站 /
-> 官网），这里冻结的是**站内功能**（会员 / 排行榜 / 广场同步…）。两者互不影响。
+> 别和 [MAINTENANCE.md](./MAINTENANCE.md) 的 §2 混淆：那里冻结的是**部署形态**（Workers / 官网），
+> 这里冻结的是**站内功能**（会员 / 排行榜 / 广场同步…）。两者互不影响。
 >
 > 首次冻结：2026-11-10。依据是线上真实用量（主站 7 天访问日志 + 两站库实查），不是主观判断。
 > 拍板记录与理由见 [ROADMAP.md](./ROADMAP.md) 第四节。
@@ -21,8 +21,8 @@
 | 跨站会员继承（partner 授权） | 关 | `partnerPushSecret` / `partnerPushUrl` 留空 → `POST /partner/grant` 直接 404（不暴露「功能存在但没开」） | `src/partner.ts` | 两端配共享密钥与对方地址 |
 | 广场同步 | 停用 | `settings.serverPluginsDisabled` 含 `plaza-sync` | `src/hooks.ts` | 后台「插件」页开启 |
 | 书影音卡片（豆瓣） | 停用 | `settings.pluginsDisabled` 含 `douban-media`（默认值就是它） | 编辑器插件包 | 后台「插件」页开启 |
-| 英文版 | 关 | `settings.edition='zh'` | `src/i18n.ts` | 后台切 `en` |
-| 演示站内容包 | 未启用 | 租户 `tenants.json` 的 `demo` 标记 | `src/demo*.ts` | 新租户开 `demo` |
+| 英文版 | **已删除**（2026-11-11） | — | 无（`src/i18n.ts` 已移除） | 不打算恢复；要英文站请另起独立站点 |
+| 演示站 | **已删除**（2026-11-11） | — | 无（`src/demo*.ts`、`wrangler.demo.jsonc`、多租户 `--demo` 已全数移除） | 不打算恢复 |
 
 ## 二 · 冻结之后的三条规矩
 

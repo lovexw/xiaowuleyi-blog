@@ -25,7 +25,7 @@ export const TIER_KEY_RE = /^[a-z][a-z0-9_-]{0,23}$/
 export interface MemberTierDef {
   /** 稳定标识：建好后不改（posts.min_tier 与 members.tier 都引用它），展示名可随时改 */
   key: string
-  /** 展示名（1-12 字，站长自定义；英文版原样透传，同站长自填内容口径） */
+  /** 展示名（1-12 字，站长自定义；同站长自填内容口径原样透传） */
   name: string
   /** 认证徽标色 #rgb / #rrggbb，'' = 用主题默认色 */
   color: string

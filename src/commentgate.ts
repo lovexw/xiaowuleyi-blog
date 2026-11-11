@@ -175,17 +175,11 @@ export function applyCommentGate<T extends GateTierComment>(rows: T[], ctx: Gate
 }
 
 /**
- * 占位块文案（SSR 与 site.js 同一套口径，中文文案在这里单一来源；英文版按语序重写）。
+ * 占位块文案（SSR 与 site.js 同一套口径，文案在这里单一来源）。
  * viewerRank 只影响第二行提示：游客让他登录，低档会员让他升级。
  */
-export function commentGateText(tierName: string, viewerRank: number, en = false): { title: string; hint: string } {
-  const who = tierName || (en ? 'member' : '会员')
-  if (en) {
-    return {
-      title: `Only ${who} members and above can read this comment`,
-      hint: viewerRank > 0 ? 'Upgrade your tier to read it' : 'Sign in as a member to read it',
-    }
-  }
+export function commentGateText(tierName: string, viewerRank: number): { title: string; hint: string } {
+  const who = tierName || '会员'
   return {
     title: `这条评论仅对${who}及以上可见`,
     hint: viewerRank > 0 ? '升级档位后可见' : '登录会员后可见',
@@ -193,9 +187,8 @@ export function commentGateText(tierName: string, viewerRank: number, en = false
 }
 
 /** 折叠回复提示（占位块下方的灰字） */
-export function commentGateMoreText(tierName: string, count: number, en = false): string {
-  const who = tierName || (en ? 'member' : '会员')
-  if (en) return `${count} more ${count === 1 ? 'reply' : 'replies'}, also ${who} members and above only`
+export function commentGateMoreText(tierName: string, count: number): string {
+  const who = tierName || '会员'
   return `另有 ${count} 条回复，同样仅对${who}及以上可见`
 }
 

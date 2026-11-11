@@ -220,7 +220,7 @@ export function createR2S3(cfg: R2S3Config) {
           'list-type': '2',
           prefix: full(opts?.prefix ?? ''),
           'max-keys': String(limit),
-          // cursor round-trip（demo.ts wipeBucket 分页删光）：S3 ListObjectsV2 的续页令牌
+          // cursor round-trip（批量删图翻页）：S3 ListObjectsV2 的续页令牌
           ...(opts?.cursor ? { 'continuation-token': opts.cursor } : {}),
         },
       })

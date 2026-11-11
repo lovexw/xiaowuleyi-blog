@@ -258,7 +258,7 @@ export function createR2Disk(root: string) {
       // 走记忆化索引（见 cachedKeys）：filter 另开数组，缓存里的快照不会被裁剪
       const all = cachedKeys(root)
       const keys = prefix ? all.filter((k) => k.startsWith(prefix)) : all
-      // cursor round-trip（demo.ts wipeBucket 分页删光、体检翻页）：磁盘实现没有并发写，
+      // cursor round-trip（批量删图/体检翻页）：磁盘实现没有并发写，
       // 下标直接当游标；索引缓存保证一轮翻页期间这份列表不会中途变短
       const start = Number(opts?.cursor) || 0
       const page = keys.slice(start, start + limit)

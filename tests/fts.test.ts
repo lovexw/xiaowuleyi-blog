@@ -8,7 +8,7 @@ import { ftsMatchExpr, searchPosts, searchWeibo } from '../src/fts.ts'
 import { ensureSchema } from '../src/db.ts'
 
 // ── FTS5 全文搜索（src/fts.ts，ROADMAP B4）──
-// 用 node:sqlite 执行真实的 schema.sql 建库（docker-poc 与演示站共用这份文件，
+// 用 node:sqlite 执行真实的 schema.sql 建库（docker-poc 与测试共用这份文件，
 // 顺带守住它对普通 SQLite 的可执行性），两条升级路径各测一遍：
 // A 增量：ensureSchema 建好触发器后写入 → 触发器同步索引；
 // B 存量升级：先有数据后跑 ensureSchema → ftsSeeded 记账位驱动 rebuild 全量补索引。
