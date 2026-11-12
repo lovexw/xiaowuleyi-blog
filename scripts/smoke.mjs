@@ -928,6 +928,9 @@ try {
   const MEMBER_NAME = 'smokemember'
   const MEMBER_PASS = 'smoke-member-12345'
   const MEMBER_NICK = '冒烟昵称'
+  // 注册必填邮箱（跨站会员继承只认邮箱，2026-11 起）：漏了它注册回 400「请填写邮箱」，
+  // 冒烟会把它误当成「用户名已占用」改走登录，整条会员链从这一步全红
+  const MEMBER_EMAIL = 'smokemember@example.com'
   const mJson = (res) => res.json().catch(() => null)
 
   // 上一轮残留的昵称与冷却窗口先夹具化（幂等，行不存在时无操作）：链路内昵称口径断言依赖它
@@ -964,7 +967,7 @@ try {
   let mCookie = ''
   const mReg = await raw('POST', '/api/member/register', {
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS, nickname: MEMBER_NICK, link: '' }),
+    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS, nickname: MEMBER_NICK, email: MEMBER_EMAIL, link: '' }),
   })
   mCookie = (mReg.headers.get('set-cookie') || '').split(';')[0]
   if (mReg.status === 400) {

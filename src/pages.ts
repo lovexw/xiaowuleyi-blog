@@ -480,10 +480,15 @@ async function renderList(
   if (opts.mode === 'search' && sq) {
     zeroHit = r.total + (wbSearch?.total || 0) + (pgSearch?.total || 0) + tagHits.length === 0
     if (zeroHit) {
-      const recent = await listPosts(c.env.DB, { status: 'published', page: 1, limit: 5, afterTs: postCutoff })
+      // 多取几条再过滤：加密文不进兜底（搜索面整体不碰加密内容，与 listPosts 的 q 分支、
+      // fts.* 同口径），别借着「最近发布」把密码文的标题塞回搜索页
+      const recent = await listPosts(c.env.DB, { status: 'published', page: 1, limit: 12, afterTs: postCutoff })
       searchFallback = searchFallbackHtml({
         tags: tags.map((t) => t.name),
-        posts: recent.items.map((p) => ({ slug: p.slug, title: p.title })),
+        posts: recent.items
+          .filter((p) => !p.password_hash)
+          .slice(0, 5)
+          .map((p) => ({ slug: p.slug, title: p.title })),
       })
     }
   }
