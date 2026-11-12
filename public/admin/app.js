@@ -4449,7 +4449,7 @@ async function viewSettings() {
     </div>
 
     <div class="panel" style="padding:20px;" data-adv="1">
-      <div class="form-section"><h3>WordPress 导入</h3><div class="sec-desc">从 WordPress 迁移过来：上传后台「工具 → 导出」得到的 WXR 文件，文章 / 独立页面 / 评论 / 分类与标签一并进来，<b>保留原发布状态与发布时间</b>；带访问密码的文章继续上锁，定时中的文章保持定时。导入完成后自动分批把 WP 站内图片转存进你的图床并改写正文引用（源站防盗链导致转存失败的图保留原链）。slug 冲突自动加序号；<b>重复导入会产生重复内容</b>；导入不触发发布通知。</div>
+      <div class="form-section"><h3>WordPress 导入</h3><div class="sec-desc">从 WordPress 迁移过来：上传后台「工具 → 导出」得到的 WXR 文件，文章 / 独立页面 / 评论 / 分类与标签一并进来，<b>保留原发布状态与发布时间</b>；带访问密码的文章继续上锁（统一归到「会员密码可见」，用你在「访问密码」里设的会员密码，原密码不再沿用），定时中的文章保持定时。导入完成后自动分批把 WP 站内图片转存进你的图床并改写正文引用（源站防盗链导致转存失败的图保留原链）。slug 冲突自动加序号；<b>重复导入会产生重复内容</b>；导入不触发发布通知。</div>
         <div class="fav-row">
           <button class="btn" id="btn-wxr-import" type="button">选择 WXR 文件并导入</button>
           <span class="sec-desc" id="wxr-status">单文件 ≤ 20MB；文章 ≤ 500 篇 / 带密码文 ≤ 20 篇 / 图片 ≤ 300 张，更大的博客请在 WordPress「按作者 / 日期」分卷导出</span>
