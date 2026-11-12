@@ -1046,6 +1046,43 @@ export function weiboSearchResults(o: {
 </section>`
 }
 
+/* ---------------- 搜索页的「补充结果」：独立页面与标签 ----------------
+ * 文章列表之外的两组浅结果，整体一段预渲染 HTML（themes 只需透传 d.searchExtras）。
+ * 刻意复用既有 class：页面行用 .search-meta（八主题都有），标签用 .fs-bar/.fs-chip
+ * （排序条那套 chip 样式），不新增任何一个 CSS 类，八套主题自动同款。
+ */
+
+/** 补充结果：命中的独立页面（标题链到 /page/:slug）+ 命中的标签（chip 链到 /tag/:name）。
+ *  两组都没命中时返回空串，主题侧 `d.searchExtras || ''` 不渲染。 */
+export function searchExtrasHtml(o: {
+  pages?: { slug: string; title: string }[] | null
+  pagesTotal?: number
+  tags?: { name: string; count: number }[] | null
+  tagsTotal?: number
+  q?: string
+}): string {
+  const parts: string[] = []
+  if (o.pages && o.pages.length) {
+    const links = o.pages
+      .map((p) => `<a href="/page/${encodeURIComponent(p.slug)}">${markHtml(p.title, o.q)}</a>`)
+      .join(' · ')
+    // 超过显示条数时点明还有几条，不让人以为「页面就这些」
+    const more = o.pagesTotal && o.pagesTotal > o.pages.length ? `（共 ${o.pagesTotal} 个页面命中）` : ''
+    parts.push(`<p class="search-meta">相关页面${more}：${links}</p>`)
+  }
+  if (o.tags && o.tags.length) {
+    const chips = o.tags
+      .map(
+        (t) =>
+          `<a class="fs-chip" href="${tagLink(t.name)}" title="${esc(t.name)}（${t.count} 篇）">${markHtml(t.name, o.q)}</a>`
+      )
+      .join('')
+    const more = o.tagsTotal && o.tagsTotal > o.tags.length ? `<span class="fs-label">共 ${o.tagsTotal} 个</span>` : ''
+    parts.push(`<nav class="fs-bar" aria-label="相关标签"><span class="fs-label">标签</span>${chips}${more}</nav>`)
+  }
+  return parts.join('\n')
+}
+
 /* ---------------- 会员 / 排行榜（共享构建器） ----------------
  * 结构全主题共用（语义化 .mem-* / .rk-* class），视觉由主题 CSS 塑形。
  * 数据由会员服务端产出（members 表 / points，见 DEVPLAN-2026-10-07 附录 A 契约）；

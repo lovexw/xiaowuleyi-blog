@@ -169,6 +169,7 @@ export function home(d: HomeData): string {
     totalPages: d.totalPages,
     base: homeListBase({ sort: d.sort, seed: d.seed, tag: d.tag, categorySlug: d.categorySlug, q: d.q }),
   })}
+  ${d.searchExtras || ''}
   ${d.searchWeibo ? weiboSearchResults({ settings: s, items: d.searchWeibo.items, total: d.searchWeibo.total, avatarHtml: avatar(s) }) : ''}
   ${side ? `</div><aside class="wx-side">${side}</aside></div>` : ''}
   ${foot(s, footLinksFor(s).home)}

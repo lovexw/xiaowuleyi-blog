@@ -99,6 +99,34 @@ export async function searchPosts(db: D1Database, q: string, opts: PostSearchOpt
   }
 }
 
+export interface PageHit {
+  slug: string
+  title: string
+}
+
+export interface PageSearchResult {
+  items: PageHit[]
+  total: number
+}
+
+/** /search 页的独立页面搜索（/page/:slug 那套自建页）：**刻意不用 FTS**。
+ *  页面数量是个位数到十几条（项目页 / 书单 / 隐私政策这类），LIKE 全表扫也就读十来行，
+ *  走 FTS 要再加一张虚表 + 三个触发器 + 重建记账位，机器比内容还重。词长短都不用管。
+ *  只搜已发布、未进回收站的页面；加密/档位概念页面系统没有。 */
+export async function searchPages(db: D1Database, q: string, limit = 6): Promise<PageSearchResult> {
+  const n = Math.min(20, Math.max(1, Math.floor(limit)))
+  const pat = likePattern(q)
+  const where = "pg.deleted_at IS NULL AND pg.status = 'published' AND (pg.title LIKE ? ESCAPE '\\' OR pg.content LIKE ? ESCAPE '\\')"
+  const [itemsRes, countRes] = await Promise.all([
+    db
+      .prepare(`SELECT pg.slug, pg.title FROM pages pg WHERE ${where} ORDER BY pg.sort ASC, pg.id ASC LIMIT ?`)
+      .bind(pat, pat, n)
+      .all<PageHit>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM pages pg WHERE ${where}`).bind(pat, pat).first<{ n: number }>(),
+  ])
+  return { items: itemsRes.results ?? [], total: countRes?.n ?? 0 }
+}
+
 export interface WeiboSearchResult {
   items: WeiboRow[]
   total: number

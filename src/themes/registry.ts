@@ -74,6 +74,11 @@ export interface HomeData {
    * weiboSearchResults({ settings, ...searchWeibo, avatarHtml }) 渲染；没有命中时为 null
    */
   searchWeibo?: { items: WeiboItemView[]; total: number } | null
+  /**
+   * 搜索页补充结果（独立页面 + 标签，仅 /search 带关键词时传入）：pages 层预渲染好的 HTML，
+   * 主题侧只需透传 `${d.searchExtras || ''}`（复用 .search-meta / .fs-chip 既有样式，零新增 CSS）
+   */
+  searchExtras?: string
   /** 历史上的今天（仅首页第一页且未筛选时传入）：往年今日的文章与微博，空数组/缺省不渲染 */
   onThisDay?: OnThisDayItemView[] | null
 }

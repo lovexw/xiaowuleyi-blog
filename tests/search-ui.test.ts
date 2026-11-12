@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { homeListBase, homeSortBar, markHtml, searchSnippet, searchTerms, textHasTerm } from '../src/render.ts'
+import { homeListBase, homeSortBar, markHtml, searchExtrasHtml, searchSnippet, searchTerms, textHasTerm } from '../src/render.ts'
 
 // ── 搜索页的展示层（src/render.ts）：关键词高亮、正文命中片段、搜索排序条 ──
 // 分页与排序本身在 src/fts.ts（tests/fts.test.ts 守着），这里只管「结果怎么显示」。
@@ -89,4 +89,35 @@ test('homeListBase：搜索页翻页链接带 q 与 sort，不串到首页', () 
   assert.equal(homeListBase({ q: '部署', sort: 'time' }), '/search?q=%E9%83%A8%E7%BD%B2&sort=time&')
   assert.equal(homeListBase({ q: '部署' }), '/search?q=%E9%83%A8%E7%BD%B2&')
   assert.equal(homeListBase({ sort: 'latest' }), '/?')
+})
+
+test('searchExtrasHtml：页面命中出链接（标题高亮），标签命中出 chip（复用既有 class）', () => {
+  const html = searchExtrasHtml({
+    pages: [
+      { slug: 'projects', title: '我的项目清单' },
+      { slug: 'books', title: '在读项目书单' },
+    ],
+    pagesTotal: 5,
+    tags: [
+      { name: '项目复盘', count: 3 },
+      { name: '小项目', count: 1 },
+    ],
+    tagsTotal: 9,
+    q: '项目',
+  })
+  assert.ok(
+    html.includes('<a href="/page/projects">我的<mark class="srch-hl">项目</mark>清单</a>'),
+    '页面标题高亮且链到 /page/:slug'
+  )
+  assert.ok(html.includes('（共 5 个页面命中）'), '命中数多于显示数时点明')
+  assert.ok(html.includes('class="fs-bar" aria-label="相关标签"'), '标签条复用排序条的 fs-bar 样式')
+  assert.ok(html.includes('<a class="fs-chip" href="/tag/%E9%A1%B9%E7%9B%AE%E5%A4%8D%E7%9B%98"'), 'chip 链到 /tag/:name')
+  assert.ok(html.includes('共 9 个'), '标签总数多于显示数时点明')
+  assert.ok(!html.includes('<script'), '输出里不该有脚本')
+})
+
+test('searchExtrasHtml：两组都没命中就是空串（主题侧不渲染）', () => {
+  assert.equal(searchExtrasHtml({ pages: [], tags: [], q: 'x1x' }), '')
+  assert.equal(searchExtrasHtml({ q: 'x1x' }), '')
+  assert.equal(searchExtrasHtml({ pages: null, tags: null }), '')
 })

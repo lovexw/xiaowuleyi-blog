@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
-import { ftsMatchExpr, searchPosts, searchWeibo } from '../src/fts.ts'
+import { ftsMatchExpr, searchPages, searchPosts, searchWeibo } from '../src/fts.ts'
 import { ensureSchema } from '../src/db.ts'
 
 // ── FTS5 全文搜索（src/fts.ts，ROADMAP B4）──
@@ -222,6 +222,37 @@ test('searchPosts：afterTs 可见窗口把窗口外文章挡在搜索之外', a
   const windowed = await searchPosts(d1, '窗口测试', { perPage: 10, afterTs: 1_500 })
   assert.deepEqual(windowed.items.map((p) => p.slug), ['recent'], '窗口外文章不参与搜索（命中本身即泄露）')
   assert.equal(windowed.total, 1)
+})
+
+test('searchPages：只搜已发布、未回收的独立页面，标题与正文都算命中', async () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(SCHEMA_SQL)
+  const d1 = d1FromSqlite(db)
+  await ensureSchema(d1)
+  const ins = (title: string, slug: string, content: string, status: string, sort: number) =>
+    db
+      .prepare('INSERT INTO pages (title, slug, content, status, sort, created_at, updated_at) VALUES (?,?,?,?,?,1,1)')
+      .run(title, slug, content, status, sort)
+  ins('项目清单', 'projects', '这里放做过的开源项目', 'published', 10)
+  ins('隐私政策', 'privacy', '项目相关的数据处理说明', 'published', 20)
+  ins('草稿页', 'draft-page', '项目还没写完', 'draft', 30)
+  db.exec(
+    "INSERT INTO pages (title, slug, content, status, sort, created_at, updated_at, deleted_at) VALUES ('回收页','trash-page','项目已删','published',40,1,1,99)"
+  )
+
+  const r = await searchPages(d1, '项目')
+  assert.deepEqual(r.items.map((p) => p.slug), ['projects', 'privacy'], '按 sort 升序；草稿与回收站不出现')
+  assert.equal(r.total, 2)
+
+  const byTitle = await searchPages(d1, '隐私政策')
+  assert.deepEqual(byTitle.items.map((p) => p.slug), ['privacy'], '标题命中')
+
+  const none = await searchPages(d1, '压根没有的词组')
+  assert.deepEqual([none.items.length, none.total], [0, 0])
+
+  const capped = await searchPages(d1, '项目', 1)
+  assert.equal(capped.items.length, 1, 'limit 收口')
+  assert.equal(capped.total, 2, 'total 仍是全量命中数')
 })
 
 test('searchWeibo：FTS 命中已发布微博，草稿与回收站不出现；短词走 LIKE', async () => {

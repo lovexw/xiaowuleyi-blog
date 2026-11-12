@@ -114,6 +114,7 @@ export function home(d: HomeData): string {
     ${items || `<p class="nw-empty">${d.emptyText || '还没有文章。'}</p>`}
   </main>
   ${pagerHtml({ page: d.page, totalPages: d.totalPages, base: homeListBase({ sort: d.sort, seed: d.seed, tag: d.tag, categorySlug: d.categorySlug, q: d.q }) })}
+  ${d.searchExtras || ''}
   ${d.searchWeibo ? weiboSearchResults({ settings: s, items: d.searchWeibo.items, total: d.searchWeibo.total, avatarHtml: avatar(s) }) : ''}
   ${foot(s, (FOOT_LINKS.home))}
 </div>`

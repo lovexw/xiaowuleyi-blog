@@ -39,7 +39,7 @@ import {
   type PostSort,
   type RankMemberRow,
 } from './db'
-import { searchPosts, searchWeibo } from './fts'
+import { searchPages, searchPosts, searchWeibo } from './fts'
 import { htmlToMd } from './html-md'
 import {
   articleJsonLd,
@@ -56,6 +56,7 @@ import {
   rankListHtml,
   responsiveContentImages,
   SEARCH_HL_CSS,
+  searchExtrasHtml,
   searchSnippet,
   siteBase,
   siteMode,
@@ -326,6 +327,8 @@ async function renderList(
     memberSession,
     // 搜索页微博结果（ROADMAP B4）：微博此前不参与搜索，这里顺带纳入（短词兜底在 fts.ts 内部）
     wbSearch,
+    // 搜索页的独立页面结果
+    pgSearch,
   ] = await Promise.all([
     opts.mode === 'search' && q
       ? searchPosts(c.env.DB, q, { page: pageNum, perPage, sort: searchSort, afterTs: postCutoff })
@@ -361,6 +364,8 @@ async function renderList(
     earlyMember ? Promise.resolve(earlyMember) : membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
     // 搜索页微博结果（ROADMAP B4）：长词走 weibo_fts、短词 LIKE 扫微博表，都在 fts.ts 内部定（吃微博可见窗口）
     opts.mode === 'search' && q ? searchWeibo(c.env.DB, q, 20, weiboCutoff) : Promise.resolve(null),
+    // 搜索页的独立页面结果（/page/:slug 那套自建页）：页面数量少，走 LIKE 全扫（fts.ts 里说明过不建虚表）
+    opts.mode === 'search' && q ? searchPages(c.env.DB, q, 6) : Promise.resolve(null),
   ])
   if (opts.mode === 'category' && !category) return renderNotFound(c)
   // 页码跳转可能输入越界，回到最后一页重新取一次（FTS 路径已在 fts.ts 内部夹好，这里只管 LIKE 路径）
@@ -460,6 +465,20 @@ async function renderList(
     }
   }
 
+  // 搜索页补充结果（独立页面 + 标签）：标签直接从导航标签里挑名字命中的，零额外查询
+  // ——navTags 每个列表页本来就要取；页面命中来自 fts.searchPages 的 LIKE 查询
+  let searchExtras = ''
+  if (opts.mode === 'search' && q) {
+    const tagHits = tags.filter((t) => textHasTerm(t.name, q))
+    searchExtras = searchExtrasHtml({
+      pages: pgSearch?.items,
+      pagesTotal: pgSearch?.total,
+      tags: tagHits.slice(0, 8),
+      tagsTotal: tagHits.length,
+      q,
+    })
+  }
+
   let notice = ''
   let emptyText = ''
   let title = ''
@@ -531,6 +550,8 @@ async function renderList(
       !(weiboFeed && weiboFeed.items.length),
     // 搜索页微博结果（ROADMAP B4）：仅 /search 带关键词且有命中时非空
     searchWeibo: searchWeiboView,
+    // 搜索页补充结果（独立页面 + 标签）：预渲染 HTML，主题侧透传
+    searchExtras,
     // 纯博客模式：历史上的今天只保留文章条目（微博模块已隐藏）
     onThisDay: mode === 'blog' && otd ? otd.filter((i) => i.kind === 'post') : otd,
   })
