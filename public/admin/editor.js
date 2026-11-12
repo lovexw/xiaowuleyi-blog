@@ -33,23 +33,21 @@ async function api(path, opts = {}) {
   return data
 }
 
-/* ---------- 自定义会员档位（会员 3.0 预备） ----------
- * 「谁能看」选项按 settings.memberTiers 渲染：编辑器打开时拉一次（失败回落历史三档），
- * 拉到后重填下拉并保留当前选择。基础档（普通会员）不单独出选项——与「仅登录会员」同级 */
-let edTierDefs = [
-  { key: 'normal', name: '普通会员', permanent: true },
-  { key: 'coffee', name: '咖啡会员', permanent: false },
-  { key: 'top', name: '付费会员', permanent: false },
-]
+/* ---------- 文章可见性：两档站级口令（src/protect.ts） ----------
+ * 每篇文章三选一：公开 / 固定密码 / 会员密码。密码本身不在文章上设，
+ * 由「设置 → 访问密码」统一维护两把——这样换密码就是一次性撤销所有人的访问权 */
+
+/** 两档访问口令的配置状态（GET /admin/gate-state，只回布尔）：未配置的档位在「谁能看」
+ *  下拉里直接标出来——否则站长选了「会员密码可见」才发现没人能读，只能等读者来报错。
+ *  默认 true：状态没拉回来之前不误拦发布，拉到后再按真实值提示 */
+let edGateState = { fixed: true, member: true }
 
 function tierOptionsHtml(minTier) {
   const sel = minTier || 'all'
+  const mark = (lv) => (edGateState[lv] ? '' : '（还没设密码）')
   return `<option value="all"${sel === 'all' ? ' selected' : ''}>所有人可见</option>
-  <option value="member"${sel === 'member' ? ' selected' : ''}>仅登录会员</option>` +
-    edTierDefs
-      .filter((t) => t.key !== 'normal')
-      .map((t) => `<option value="${esc(t.key)}"${sel === t.key ? ' selected' : ''}>${esc(t.name)}及以上</option>`)
-      .join('')
+  <option value="fixed"${sel === 'fixed' ? ' selected' : ''}>固定密码可见${mark('fixed')}</option>
+  <option value="member"${sel === 'member' ? ' selected' : ''}>会员密码可见${mark('member')}</option>`
 }
 
 /* 动态 file input 必须先挂到 DOM 再 click：iOS Safari 对游离节点的选图器能打开、
@@ -586,7 +584,6 @@ export async function mountEditor(root, postId, opts = {}) {
     publish_at: null,
     og_image: '',
     minTier: 'all',
-    hasPassword: false,
     ai_generated: 0,
   }
   if (postId) {
@@ -690,18 +687,7 @@ export async function mountEditor(root, postId, opts = {}) {
 
       <div class="drawer-title">谁能看</div>
       <select class="input" id="ed-min-tier">${tierOptionsHtml(post.minTier)}</select>
-      <div style="font-size:12px;color:var(--sub);margin-top:6px;">设为会员可见后，游客与低档位会员只能读到试读部分（正文在服务端截断，不整篇下发）。档位名称在后台「设置 → 会员 → 会员档位」维护</div>
-
-      <div class="drawer-title">访问密码</div>
-      <div class="switch-row">
-        <div><div class="switch-label">加密访问</div><div class="switch-sub">访客需输入密码才能阅读全文</div></div>
-        <label class="switch"><input type="checkbox" id="ed-locked" ${post.hasPassword ? 'checked' : ''}><span class="track"></span></label>
-      </div>
-      <div id="ed-lock-picker" style="display:none;">
-        <input class="input" type="password" id="ed-password" maxlength="64" autocomplete="new-password"
-          placeholder="${post.hasPassword ? '已设置密码：留空保持不变' : '输入这篇文章的访问密码'}">
-        <div style="font-size:12px;color:var(--sub);margin-top:6px;">${post.hasPassword ? '直接输入新密码即更换；取消勾选并保存即解除加密' : '取消勾选并保存即解除加密；密码只在服务端做单向哈希，不回显'}。与「谁能看」并用时密码墙优先，解锁后再按档位判定</div>
-      </div>
+      <div style="font-size:12px;color:var(--sub);margin-top:6px;">选「固定密码」或「会员密码」后，读者要输对密码才能读全文（正文在服务端就不下发）；两把密码在「设置 → 站点 → 访问密码」里维护。输会员密码的人也能读固定密码文章</div>
 
       <div class="drawer-title">链接 Slug</div>
       <input class="input" id="ed-slug" value="${esc(post.slug)}" placeholder="留空则根据标题自动生成">
@@ -951,15 +937,6 @@ export async function mountEditor(root, postId, opts = {}) {
     // 查找高亮不进存库内容：序列化前剥掉 mark——只剥 DOM 不清 findHits，
     // 自动保存（collect 的主调用方）不能毁掉用户正在进行的查找/替换状态
     if (!mdMode) stripFindMarks()
-    // 访问密码只在「有话可说」时才带上 password 键（服务端缺键即保留）：
-    // 勾选且填了 = 设置/更换；取消勾选且原来加密 = 空串解除；
-    // 勾选但没填 = 保持现状（新建文另由 publish() 拦下要求必填），自动保存永远不会误清密码
-    let passwordPatch = {}
-    if (!lockSwitch.checked) {
-      if (post.hasPassword) passwordPatch = { password: '' }
-    } else if (passwordInput.value) {
-      passwordPatch = { password: passwordInput.value }
-    }
     return {
       title: titleEl.value.trim(),
       content: stripEmojiImgs(editor.innerHTML),
@@ -973,7 +950,6 @@ export async function mountEditor(root, postId, opts = {}) {
       slug: document.getElementById('ed-slug').value.trim(),
       status: post.status,
       publishAt: post.publish_at,
-      ...passwordPatch,
       ...extra,
     }
   }
@@ -1063,11 +1039,10 @@ export async function mountEditor(root, postId, opts = {}) {
       titleEl.focus()
       return toast('发布前先取个标题吧', true)
     }
-    // 新文章开了加密但还没填密码：拦下来要求必填（老文章留空 = 保持原密码，不拦）
-    if (lockSwitch.checked && !passwordInput.value && !post.hasPassword) {
-      lockPicker.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      passwordInput.focus()
-      return toast('开了加密访问就要填一个访问密码', true)
+    // 选了需要密码的档位但站长还没配对应口令：当场提醒，别等读者打不开才发现
+    const tierSel = document.getElementById('ed-min-tier').value
+    if (tierSel !== 'all' && !edGateState[tierSel]) {
+      return toast(`「${tierSel === 'fixed' ? '固定密码' : '会员密码'}」还没设置，去「设置 → 访问密码」配一把再发布`, true)
     }
     if (mdMode) {
       // Markdown → HTML 转换失败要明确告知（弱网/接口 500 时不能「点了没反应」）
@@ -1375,8 +1350,8 @@ export async function mountEditor(root, postId, opts = {}) {
         } else {
           postList.innerHTML = d.items
             .map(
-              (p) => `<div class="lk-post-item${selectedPost && selectedPost.id === p.id ? ' is-active' : ''}" data-id="${p.id}" data-slug="${esc(p.slug)}" data-title="${esc(p.title)}" data-cover="${esc(p.cover)}" data-summary="${esc(p.summary)}" data-pw="${p.hasPassword ? 1 : 0}" data-tier="${esc(p.minTier)}">
-              <div class="lk-post-title">${esc(p.title)}${p.hasPassword ? ' 🔒' : ''}${p.minTier && p.minTier !== 'all' ? ' · 会员' : ''}</div>
+              (p) => `<div class="lk-post-item${selectedPost && selectedPost.id === p.id ? ' is-active' : ''}" data-id="${p.id}" data-slug="${esc(p.slug)}" data-title="${esc(p.title)}" data-cover="${esc(p.cover)}" data-summary="${esc(p.summary)}" data-tier="${esc(p.minTier)}">
+              <div class="lk-post-title">${esc(p.title)}${p.minTier && p.minTier !== 'all' ? ' 🔒' : ''}</div>
               ${p.cover ? `<img class="lk-post-cover" src="${esc(p.cover)}" alt="" loading="lazy">` : ''}
             </div>`
             )
@@ -1913,19 +1888,6 @@ export async function mountEditor(root, postId, opts = {}) {
   ;['ed-summary', 'ed-slug'].forEach((id) => document.getElementById(id).addEventListener('input', markDirty))
   document.getElementById('ed-min-tier').addEventListener('change', markDirty)
   document.getElementById('ed-pinned').addEventListener('change', markDirty)
-
-  /* ---------- 访问密码（src/protect.ts） ---------- */
-  const lockSwitch = document.getElementById('ed-locked')
-  const lockPicker = document.getElementById('ed-lock-picker')
-  const passwordInput = document.getElementById('ed-password')
-  const syncLockPicker = () => { lockPicker.style.display = lockSwitch.checked ? '' : 'none' }
-  lockSwitch.addEventListener('change', () => {
-    syncLockPicker()
-    if (lockSwitch.checked) passwordInput.focus()
-    markDirty()
-  })
-  passwordInput.addEventListener('input', markDirty)
-  syncLockPicker()
 
   /* ---------- 定时发布 ---------- */
   const scheduleSwitch = document.getElementById('ed-scheduled')
@@ -2662,12 +2624,11 @@ export async function mountEditor(root, postId, opts = {}) {
     .catch(() => {})
   catSelect.addEventListener('change', markDirty)
 
-  /* ---------- 谁能看：自定义档位（会员 3.0 预备，拉到后重填并保留当前选择；change 监听在既有绑定处） ---------- */
+  /* ---------- 谁能看：先问服务端两档口令配没配（未配置的档位在下拉里标出来） ---------- */
   const tierSelect = document.getElementById('ed-min-tier')
-  api('/admin/member-tiers')
+  api('/admin/gate-state')
     .then((d) => {
-      if (!d.tiers || !d.tiers.length) return
-      edTierDefs = d.tiers
+      edGateState = { fixed: !!d.fixed, member: !!d.member }
       const cur = tierSelect.value
       tierSelect.innerHTML = tierOptionsHtml(cur)
     })

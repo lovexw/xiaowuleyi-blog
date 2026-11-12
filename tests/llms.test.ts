@@ -77,18 +77,19 @@ test('llms-full.txt：正文是库存 HTML，经 htmlToMd 转换出干净 Markdo
   assert.ok(out.includes('---'), '条目以分隔线收尾')
 })
 
-test('llms-full.txt：会员锁文只出摘要 + 引导，正文一个字不出（契约 A2 防泄漏）', () => {
-  const out = buildLlmsFullTxt(S, [post({ min_tier: 'gold' })], SITE)
-  assert.ok(out.includes('第一篇文章的摘要'), '摘要照常出（作者公开的导读面）')
-  assert.ok(!out.includes('smoke-llms-body-marker'), '正文不出')
-  assert.ok(out.includes('会员专属'))
+test('llms-full.txt：需要口令的文章只出摘要，正文一个字不出（防泄漏）', () => {
+  for (const minTier of ['member', 'fixed', 'gold']) {
+    const out = buildLlmsFullTxt(S, [post({ min_tier: minTier })], SITE)
+    assert.ok(out.includes('第一篇文章的摘要'), `摘要照常出（作者公开的导读面）：${minTier}`)
+    assert.ok(!out.includes('smoke-llms-body-marker'), `正文不出：${minTier}`)
+    assert.ok(out.includes('访问密码'), `要说明是口令锁文：${minTier}`)
+  }
 })
 
-test('llms-full.txt：密码文只出作者摘要 + 加密说明（与 RSS description 同口径）', () => {
-  const out = buildLlmsFullTxt(S, [post({ password_hash: 'salt:hash' })], SITE)
-  assert.ok(out.includes('第一篇文章的摘要'))
-  assert.ok(!out.includes('smoke-llms-body-marker'))
-  assert.ok(out.includes('访问密码'))
+test('llms-full.txt：公开文章照常出全文（口令门槛只挡锁文）', () => {
+  const out = buildLlmsFullTxt(S, [post({ min_tier: 'all' })], SITE)
+  assert.ok(out.includes('smoke-llms-body-marker'))
+  assert.ok(!out.includes('访问密码'))
 })
 
 test('llms 桩：AI 策略 deny 档文案指向策略', () => {

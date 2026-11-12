@@ -12,7 +12,7 @@ import { goPageHtml, isTrustedOutHost } from './outlink'
 import { htmlEtagMiddleware } from './html-etag'
 import { imageCacheMatch, imageCachePut, pageCacheMiddleware } from './pagecache'
 import { renderAbout, renderArchive, renderCategory, renderGuestbook, renderHome, renderLinks, renderMember, renderNotFound, renderPage, renderPost, renderRank, renderSearch, renderWeibo } from './pages'
-import { mergeUnlockCookie, PP_COOKIE, PP_TTL_MS, verifyPostPassword } from './protect'
+import { canEverUnlock, gateHashesOf, GATE_COOKIE, GATE_TTL_MS, mergeGateCookie, normalizeAccess, verifyGatePassword, type GateLevel } from './protect'
 import { installedManifest, pluginFileKey, readInstalled } from './pluginpkg'
 import { buildJsonFeed, buildRss, buildSitemap } from './rss'
 import { siteBase } from './render'
@@ -134,7 +134,7 @@ app.get('/random', async (c) => {
   if (cutoff && !visibleRangeAppliesToMembers(settings) && settings.membersEnabled === '1' && (await getMemberUser(c.env.DB, c.req.raw))) cutoff = 0
   const vis = cutoff ? 'AND COALESCE(published_at, created_at) >= ?' : ''
   const row = await c.env.DB.prepare(
-    `SELECT slug FROM posts WHERE status = 'published' AND deleted_at IS NULL ${vis} AND (password_hash IS NULL OR password_hash = '') ORDER BY RANDOM() LIMIT 1`
+    `SELECT slug FROM posts WHERE status = 'published' AND deleted_at IS NULL ${vis} AND min_tier = 'all' ORDER BY RANDOM() LIMIT 1`
   )
     .bind(...(cutoff ? [cutoff] : []))
     .first<{
@@ -172,9 +172,10 @@ app.get('/go', async (c) => {
 })
 
 /* ---------------- 文章解锁（表单 POST + 303 回跳，无 JS 依赖；表单由 src/protect.ts 渲染） ----------------
- * 组合语义（与 A 序列付费墙对齐）：密码墙优先——解锁 Cookie 通过前不进会员档判定；
- * 成功：签 HMAC 解锁 Cookie（key = 该文 password_hash，改密即全端失效）后 303 回文章页；
- * 失败：303 带 ?pwerr= 回文章页由表单展示错误；目标不存在/未加密一律静默回跳，不透露存在性 */
+ * 两档站级口令：member 档只认会员密码；fixed 档先试固定密码、再试会员密码（高档覆盖低档）。
+ * 成功：签 `level.exp.hmac` 解锁 Cookie（key = 该档 password hash，改密即全端失效）后 303 回文章页；
+ * 失败：303 带 ?pwerr= 回文章页由表单展示错误；目标不存在/无需口令一律静默回跳，不透露存在性。
+ * 限流按 IP 而不是按文章：口令是全站共享的，按文章分开计等于给爆破者换一篇就是新额度 */
 app.post('/post/:slug/unlock', async (c) => {
   // 与 api.ts 同源校验同口径：浏览器跨站表单 POST 必带 Origin，不一致直接拒绝（防 CSRF）
   const origin = c.req.header('Origin')
@@ -182,16 +183,28 @@ app.post('/post/:slug/unlock', async (c) => {
   const slug = (c.req.param('slug') || '').slice(0, 100)
   const back = `/post/${encodeURIComponent(slug)}`
   const row = await getPostBySlug(c.env.DB, slug)
-  if (!row || row.status !== 'published' || !row.password_hash) return c.redirect(back, 303)
-  // 按文章 + IP 限流：PBKDF2 校验是慢操作，防爆破（10 次 / 10 分钟，与登录同量级）
-  if (!rateLimit(c.env, `unlock:${clientIp(c.req.raw)}:${row.id}`, 10, 10 * 60_000)) {
+  const access = normalizeAccess(row?.min_tier)
+  if (!row || row.status !== 'published' || access === 'all') return c.redirect(back, 303)
+  const settings = await getSettings(c.env.DB)
+  const hashes = gateHashesOf(settings)
+  if (!canEverUnlock(access, hashes)) return c.redirect(`${back}?pwerr=unset`, 303)
+  // PBKDF2 是慢操作，10 次 / 10 分钟（与登录同量级）
+  if (!rateLimit(c.env, `gate:${clientIp(c.req.raw)}`, 10, 10 * 60_000)) {
     return c.redirect(`${back}?pwerr=slow`, 303)
   }
   const body = await c.req.parseBody().catch(() => null)
   const password = body && typeof body === 'object' ? String((body as Record<string, unknown>)['password'] ?? '').slice(0, 64) : ''
-  if (!(await verifyPostPassword(row.password_hash, password))) return c.redirect(`${back}?pwerr=1`, 303)
-  const token = await mergeUnlockCookie(getCookie(c.req.raw, PP_COOKIE), row.id, row.password_hash, Date.now())
-  c.header('Set-Cookie', `${PP_COOKIE}=${token}; Path=/; HttpOnly;${isSecureRequest(c.req.raw) ? ' Secure;' : ''} SameSite=Lax; Max-Age=${PP_TTL_MS / 1000}`)
+  const tries: GateLevel[] = access === 'member' ? ['member'] : (['fixed', 'member'] as const).filter((lv) => !!hashes[lv])
+  let level: GateLevel | null = null
+  for (const lv of tries) {
+    if (await verifyGatePassword(hashes[lv], password)) {
+      level = lv
+      break
+    }
+  }
+  if (!level) return c.redirect(`${back}?pwerr=1`, 303)
+  const token = await mergeGateCookie(getCookie(c.req.raw, GATE_COOKIE), level, hashes, Date.now())
+  c.header('Set-Cookie', `${GATE_COOKIE}=${token}; Path=/; HttpOnly;${isSecureRequest(c.req.raw) ? ' Secure;' : ''} SameSite=Lax; Max-Age=${GATE_TTL_MS / 1000}`)
   return c.redirect(back, 303)
 })
 

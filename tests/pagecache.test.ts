@@ -12,7 +12,7 @@ import { pageCacheKeyFor, purgePageCache } from '../src/pagecache.ts'
 
 const SESSION = 'bloghao_session'
 const MEMBER = 'xw_member_session'
-const PP = 'bloghao_pp'
+const GATE = 'bloghao_gate'
 
 function keyOf(over: Partial<Parameters<typeof pageCacheKeyFor>[0]> = {}) {
   return pageCacheKeyFor({
@@ -95,7 +95,7 @@ test('pageCacheKeyFor：任一登录/解锁 Cookie 在场绝不缓存（越权�
   assert.equal(keyOf({ cookie: `${SESSION}=abc` }), null, '管理员会话在，页面里有管理按钮')
   assert.equal(keyOf({ cookie: `foo=1; ${SESSION}=abc` }), null, '多 Cookie 混合同样拦')
   assert.equal(keyOf({ cookie: `${MEMBER}=xyz` }), null, '会员会话在，页面里有会员表单')
-  assert.equal(keyOf({ cookie: `${PP}=tok` }), null, '文章解锁令牌在，正文可能已解锁')
+  assert.equal(keyOf({ cookie: `${GATE}=member.1.tok` }), null, '文章解锁令牌在，正文可能已解锁')
 })
 
 test('pageCacheKeyFor：灰度 / 非 GET 一律不缓存', () => {

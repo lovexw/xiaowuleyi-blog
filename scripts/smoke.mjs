@@ -1090,14 +1090,14 @@ try {
   results.push(['外链中间页：非法目标回首页', goBadOk])
   console.log(`  ${goBadOk ? '✓' : '✗'} 外链中间页：非法目标回首页（${goBad.status}）`)
 
-  // 付费墙（契约 A2）：会员专属文——游客只见试读段与遮挡卡，会员可读全文，RSS 不出全文。
-  // 密文必须落在 200 字试读预算之外：开头标记 + 200 字垫充，密文在第二个段落（预算外）
+  // 会员体系兼容（membersEnabled='1'，2026-11 起会员已冻结但这层没拆）：member 档文章对
+  // 未配口令的站来说，登录会员照旧可读；游客看到的是口令表单而不是试读段。
   const PW_SECRET = 'smoke-paywall-secret-tail-99077'
   const pwCreate = await raw('POST', '/api/admin/posts', {
     headers: { 'Content-Type': 'application/json', Cookie: cookie },
     body: JSON.stringify({
-      title: '冒烟：会员专属文章',
-      content: '<p>smoke-paywall-head' + '试'.repeat(200) + `</p><p>${PW_SECRET}</p>`,
+      title: '冒烟：会员档文章',
+      content: `<p>smoke-paywall-head</p><p>${PW_SECRET}</p>`,
       status: 'published',
       minTier: 'member',
     }),
@@ -1106,11 +1106,10 @@ try {
   const pwId = pwCreated?.post?.id
   const pwSlug = pwCreated?.post?.slug
   const pwOk = pwCreate.status === 200 && !!pwSlug
-  results.push(['付费墙：建会员专属文（minTier=member 落库）', pwOk])
-  console.log(`  ${pwOk ? '✓' : '✗'} 付费墙：建会员专属文（slug ${pwSlug}）`)
+  results.push(['会员兼容：建 member 档文章', pwOk])
+  console.log(`  ${pwOk ? '✓' : '✗'} 会员兼容：建 member 档文章（slug ${pwSlug}）`)
   if (pwSlug) {
-    await check('GET', `/post/${pwSlug}`, 200, 'smoke-paywall-head')
-    await check('GET', `/post/${pwSlug}`, 200, 'paywall')
+    await check('GET', `/post/${pwSlug}`, 200, '这篇文章需要密码')
     await check('GET', `/post/${pwSlug}`, 200, undefined, { notContains: PW_SECRET })
     await check('GET', `/post/${pwSlug}`, 200, PW_SECRET, { headers: { Cookie: mCookie } })
     await check('GET', `/post/${pwSlug}`, 200, PW_SECRET, { headers: { Cookie: cookie } }) // 管理员预览不受限
@@ -1271,75 +1270,111 @@ try {
   results.push(['会员链路：关闭开关复原', mOff.status === 200])
   console.log(`  ${mOff.status === 200 ? '✓' : '✗'} 会员链路：关闭开关复原`)
 
-  // ── 文章访问密码（src/protect.ts）：密码墙 → 防泄漏 → 解锁 → 解除 全链路 ──
-  console.log('\n▸ 文章访问密码链路')
-  const PP_SECRET = '加密正文密语 smoke-secret-body-99031'
-  const ppCreate = await raw('POST', '/api/admin/posts', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({
-      title: '冒烟：加密文章',
-      content: `<p>${PP_SECRET}</p>`,
-      summary: '作者导读 smoke-summary-99031',
-      status: 'published',
-      password: 'smoke-pass-9999',
-    }),
-  })
-  const ppCreated = await ppCreate.json().catch(() => null)
-  const ppId = ppCreated && ppCreated.post && ppCreated.post.id
-  const ppSlug = ppCreated && ppCreated.post && ppCreated.post.slug
-  results.push(['加密码：建加密文章', ppCreate.status === 200 && !!ppId])
-  console.log(`  ${ppCreate.status === 200 && !!ppId ? '✓' : '✗'} 加密码：建加密文章（id ${ppId}）`)
-  if (ppId) {
-    const ppCookie = { headers: { Cookie: cookie } }
-    const ppPath = `/post/${encodeURIComponent(ppSlug)}`
-    // 后台出参：hasPassword=true，password_hash 绝不出现
-    const ppRow = await raw('GET', `/api/admin/posts/${ppId}`, ppCookie)
-    const ppRowText = await ppRow.text()
-    const ppStripOk = ppRow.status === 200 && ppRowText.includes('"hasPassword":true') && !ppRowText.includes('password_hash')
-    results.push(['加密码：后台出参剥哈希', ppStripOk])
-    console.log(`  ${ppStripOk ? '✓' : '✗'} 加密码：后台出参剥哈希`)
-    // 访客视角：密码墙在，作者摘要照常出 meta，正文一个字都不出
-    await check('GET', ppPath, 200, '本文章已加密')
-    await check('GET', ppPath, 200, 'smoke-summary-99031')
-    await check('GET', ppPath, 200, undefined, { notContains: PP_SECRET })
-    // RSS 全文不出；关键词搜索整体不命中（防内容 LIKE 探测）
-    await check('GET', '/rss.xml', 200, '冒烟：加密文章')
-    await check('GET', '/rss.xml', 200, undefined, { notContains: PP_SECRET })
-    await check('GET', `/search?q=${encodeURIComponent('smoke-secret-body')}`, 200, undefined, { notContains: '冒烟：加密文章' })
-    // 解锁失败 → 303 带 pwerr；成功 → 303 + 解锁 Cookie
-    const unlock = (pwd) =>
-      fetch(`${BASE}/post/${encodeURIComponent(ppSlug)}/unlock`, {
+  // ── 文章访问口令（src/protect.ts）：两档站级密码 → 防泄漏 → 解锁 → 覆盖关系 → 改密失效 ──
+  console.log('\n▸ 文章访问口令链路（固定密码 / 会员密码）')
+  const GATE_SECRET = '锁住正文密语 smoke-secret-body-99031'
+  const GATE_SUMMARY = '作者导读 smoke-summary-99031'
+  const FIXED_PW = 'smoke-fixed-99031'
+  const MEMBER_PW = 'smoke-member-99031'
+  const MEMBER_PW2 = 'smoke-member-rotated-99032'
+  const gateSet = await putSettings({ gateFixedPassword: FIXED_PW, gateMemberPassword: MEMBER_PW })
+  results.push(['口令链路：设置两把口令', gateSet.status === 200])
+  console.log(`  ${gateSet.status === 200 ? '✓' : '✗'} 口令链路：设置两把口令（status ${gateSet.status}）`)
+  // 设置接口只回打码值：明文与 hash 都不该出现在响应里
+  const gateSettingsRes = await raw('GET', '/api/admin/settings', { headers: { Cookie: cookie } })
+  const gateSettingsText = await gateSettingsRes.text()
+  const gateMaskOk =
+    gateSettingsRes.status === 200 && !gateSettingsText.includes(FIXED_PW) && !gateSettingsText.includes(MEMBER_PW)
+  results.push(['口令链路：设置接口不回显口令', gateMaskOk])
+  console.log(`  ${gateMaskOk ? '✓' : '✗'} 口令链路：设置接口不回显口令`)
+
+  const mkLocked = async (title, minTier) => {
+    const r = await raw('POST', '/api/admin/posts', {
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ title, content: `<p>${GATE_SECRET}</p>`, summary: GATE_SUMMARY, status: 'published', minTier }),
+    })
+    const d = await r.json().catch(() => null)
+    return { ok: r.status === 200, id: d && d.post && d.post.id, slug: d && d.post && d.post.slug, minTier: d && d.post && d.post.minTier }
+  }
+  const fx = await mkLocked('冒烟：固定密码文章', 'fixed')
+  const mb = await mkLocked('冒烟：会员密码文章', 'member')
+  const mkOk = fx.ok && !!fx.id && fx.minTier === 'fixed' && mb.ok && !!mb.id && mb.minTier === 'member'
+  results.push(['口令链路：建两篇锁文（fixed / member 落库）', mkOk])
+  console.log(`  ${mkOk ? '✓' : '✗'} 口令链路：建两篇锁文（fixed=${fx.minTier} / member=${mb.minTier}）`)
+
+  if (fx.id && mb.id) {
+    const fxPath = `/post/${encodeURIComponent(fx.slug)}`
+    const mbPath = `/post/${encodeURIComponent(mb.slug)}`
+    // 访客：两篇各出对应口令表单，正文一个字不出；作者摘要照常出
+    await check('GET', fxPath, 200, '这篇文章需要密码')
+    await check('GET', mbPath, 200, '这篇文章需要密码')
+    await check('GET', mbPath, 200, '会员密码')
+    await check('GET', fxPath, 200, GATE_SUMMARY)
+    await check('GET', fxPath, 200, undefined, { notContains: GATE_SECRET })
+    await check('GET', mbPath, 200, undefined, { notContains: GATE_SECRET })
+    // 后台出参：不再有 hasPassword，可见性是归一后的 minTier；password_hash 绝不出现
+    const fxRow = await raw('GET', `/api/admin/posts/${fx.id}`, { headers: { Cookie: cookie } })
+    const fxRowText = await fxRow.text()
+    const fxStripOk = fxRow.status === 200 && fxRowText.includes('"minTier":"fixed"') && !fxRowText.includes('password_hash')
+    results.push(['口令链路：后台出参剥哈希、可见性为 minTier', fxStripOk])
+    console.log(`  ${fxStripOk ? '✓' : '✗'} 口令链路：后台出参剥哈希、可见性为 minTier`)
+    // 防泄漏：RSS 连试读段都不出；关键词搜索整体不命中
+    await check('GET', '/rss.xml', 200, '冒烟：固定密码文章')
+    await check('GET', '/rss.xml', 200, undefined, { notContains: GATE_SECRET })
+    await check('GET', `/search?q=${encodeURIComponent('smoke-secret-body')}`, 200, undefined, { notContains: '冒烟：固定密码文章' })
+
+    // 解锁端点：错误密码 303 带 pwerr=1；正确密码 303 + bloghao_gate Cookie
+    const unlock = (slug, pwd) =>
+      fetch(`${BASE}/post/${encodeURIComponent(slug)}/unlock`, {
         method: 'POST',
         redirect: 'manual',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `password=${encodeURIComponent(pwd)}`,
         signal: AbortSignal.timeout(15_000),
       })
-    const badRes = await unlock('wrong-guess')
+    const badRes = await unlock(fx.slug, 'wrong-guess')
     const badLoc = badRes.headers.get('location') || ''
     const badOk = badRes.status === 303 && badLoc.includes('pwerr=1')
-    results.push(['加密码：错误密码拒绝', badOk])
-    console.log(`  ${badOk ? '✓' : '✗'} 加密码：错误密码拒绝（${badRes.status} → ${badLoc}）`)
-    const okRes = await unlock('smoke-pass-9999')
-    const ppToken = (okRes.headers.get('set-cookie') || '').split(';')[0]
-    const okOk = okRes.status === 303 && !(okRes.headers.get('location') || '').includes('pwerr') && ppToken.startsWith('bloghao_pp=')
-    results.push(['加密码：正确密码签发解锁 Cookie', okOk])
-    console.log(`  ${okOk ? '✓' : '✗'} 加密码：正确密码签发解锁 Cookie（${okRes.status}）`)
-    // 带解锁 Cookie 正文可见；管理员会话直接放行
-    await check('GET', ppPath, 200, PP_SECRET, { headers: { Cookie: ppToken } })
-    await check('GET', ppPath, 200, PP_SECRET, ppCookie)
-    // 解除加密（PUT password 空串）→ 访客无需 Cookie 直接可读
-    await raw('PUT', `/api/admin/posts/${ppId}`, {
-      headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ password: '' }),
-    })
-    await check('GET', ppPath, 200, PP_SECRET)
-    // 清理：软删 + 彻底删除
-    const ppDel = await raw('DELETE', `/api/admin/posts/${ppId}`, ppCookie)
-    await raw('DELETE', `/api/admin/trash/post/${ppId}`, ppCookie)
-    results.push(['加密码：清理临时文章', ppDel.status === 200])
-    console.log(`  ${ppDel.status === 200 ? '✓' : '✗'} 加密码：清理临时文章`)
+    results.push(['口令链路：错误密码拒绝', badOk])
+    console.log(`  ${badOk ? '✓' : '✗'} 口令链路：错误密码拒绝（${badRes.status} → ${badLoc}）`)
+
+    const fxRes = await unlock(fx.slug, FIXED_PW)
+    const fxCookie = (fxRes.headers.get('set-cookie') || '').split(';')[0]
+    const fxOk = fxRes.status === 303 && !(fxRes.headers.get('location') || '').includes('pwerr') && fxCookie.startsWith('bloghao_gate=fixed.')
+    results.push(['口令链路：固定密码签发 fixed 令牌', fxOk])
+    console.log(`  ${fxOk ? '✓' : '✗'} 口令链路：固定密码签发 fixed 令牌（${fxRes.status}）`)
+
+    const mbRes = await unlock(mb.slug, MEMBER_PW)
+    const mbCookie = (mbRes.headers.get('set-cookie') || '').split(';')[0]
+    const mbOk = mbRes.status === 303 && mbCookie.startsWith('bloghao_gate=member.')
+    results.push(['口令链路：会员密码签发 member 令牌', mbOk])
+    console.log(`  ${mbOk ? '✓' : '✗'} 口令链路：会员密码签发 member 令牌（${mbRes.status}）`)
+
+    // 亮牌：固定令牌读固定文可以、读会员文不行；会员令牌两篇都能读（高档覆盖低档）
+    await check('GET', fxPath, 200, GATE_SECRET, { headers: { Cookie: fxCookie } })
+    await check('GET', mbPath, 200, undefined, { notContains: GATE_SECRET, headers: { Cookie: fxCookie } })
+    await check('GET', mbPath, 200, GATE_SECRET, { headers: { Cookie: mbCookie } })
+    await check('GET', fxPath, 200, GATE_SECRET, { headers: { Cookie: mbCookie } })
+    // 管理员登录不受口令限制
+    await check('GET', mbPath, 200, GATE_SECRET, { headers: { Cookie: cookie } })
+
+    // 换会员密码 → 旧 member 令牌立刻失效（必须重输），固定令牌不受影响
+    await putSettings({ gateMemberPassword: MEMBER_PW2 })
+    await check('GET', mbPath, 200, undefined, { notContains: GATE_SECRET, headers: { Cookie: mbCookie } })
+    await check('GET', fxPath, 200, GATE_SECRET, { headers: { Cookie: fxCookie } })
+    await check('GET', mbPath, 200, undefined, { notContains: GATE_SECRET })
+    results.push(['口令链路：换会员密码后旧解锁失效', true])
+    console.log('  ✓ 口令链路：换会员密码后旧解锁失效、固定令牌不受影响')
+
+    // 清理：软删 + 彻底删除 + 清空两把口令
+    const fxDel = await raw('DELETE', `/api/admin/posts/${fx.id}`, { headers: { Cookie: cookie } })
+    await raw('DELETE', `/api/admin/trash/post/${fx.id}`, { headers: { Cookie: cookie } })
+    await raw('DELETE', `/api/admin/posts/${mb.id}`, { headers: { Cookie: cookie } })
+    await raw('DELETE', `/api/admin/trash/post/${mb.id}`, { headers: { Cookie: cookie } })
+    results.push(['口令链路：清理临时文章', fxDel.status === 200])
+    console.log(`  ${fxDel.status === 200 ? '✓' : '✗'} 口令链路：清理临时文章`)
   }
+  await putSettings({ gateFixedPassword: '', gateMemberPassword: '' })
 
   // ── 站长 SEO 小件链路（B20 / B23 / B24）：设置 → 公开面验证 → 还原 ──
   // 服务端只认结构化输入（验证 meta 白名单 / 统计脚本白名单属性），断言公开面输出与 CSP 同步放宽
@@ -1606,10 +1641,10 @@ try {
       console.log(`  ${denyOk ? '✓' : '✗'} AI 面：aiPolicy=deny 时 llms 出桩 + .md 404`)
       await putSettings({ aiPolicy: 'allow' })
 
-      // 密码文：.md 一律 404（与不存在同响应，不透露存在性）
+      // 需要口令的文：.md 一律 404（与不存在同响应，不透露存在性）
       const pwCreate = await raw('POST', '/api/admin/posts', {
         headers: { 'Content-Type': 'application/json', Cookie: cookie },
-        body: JSON.stringify({ title: '冒烟：AI 镜像加密文', content: 'smoke-llms-pw-body', status: 'published', password: 'smoke-pass-4321' }),
+        body: JSON.stringify({ title: '冒烟：AI 镜像锁文', content: 'smoke-llms-pw-body', status: 'published', minTier: 'member' }),
       })
       const pwCreated = await pwCreate.json().catch(() => null)
       const pwId = pwCreated && pwCreated.post && pwCreated.post.id
@@ -1617,8 +1652,8 @@ try {
       if (pwId) {
         const pwMd = await raw('GET', `/post/${encodeURIComponent(pwSlug)}.md`)
         const pwOk = pwMd.status === 404 && !(await pwMd.text()).includes('smoke-llms-pw-body')
-        results.push(['AI 面：密码文 .md 404 不透露存在性', pwOk])
-        console.log(`  ${pwOk ? '✓' : '✗'} AI 面：密码文 .md 404 不透露存在性`)
+        results.push(['AI 面：锁文 .md 404 不透露存在性', pwOk])
+        console.log(`  ${pwOk ? '✓' : '✗'} AI 面：锁文 .md 404 不透露存在性`)
         await raw('DELETE', `/api/admin/posts/${pwId}`, { headers: { Cookie: cookie } })
         await raw('DELETE', `/api/admin/trash/post/${pwId}`, { headers: { Cookie: cookie } })
       }

@@ -73,8 +73,7 @@ import {
   type WeiboItemView,
 } from './render'
 import { extractOgImage, sanitizeHtml } from './sanitize'
-import { hasValidUnlock, isProtected, PP_COOKIE, PP_CSS, passwordFormHtml, protectedDescription } from './protect'
-import { normalizeMinTier } from './points'
+import { canEverUnlock, canRead, gateFormHtml, GATE_COOKIE, GATE_CSS, gateHashesOf, normalizeAccess, protectedDescription } from './protect'
 import { canReadTiers, effectiveTier, parseMemberTiers, upgradeTarget, type MemberTierDef } from './tiers'
 import { applyCommentGate, commentGateContext, commentGateText, threadRootTier, type GateContext } from './commentgate'
 import { renderPostContentHtml } from './hooks'
@@ -83,7 +82,7 @@ import type { MemberData, RankData } from './themes/registry'
 import type { Env, PostRow, SessionUser, SettingsMap } from './types'
 import { packMatrix, qrMatrix } from './qrcode'
 import { fanDay, fanLevel, fanLevelName } from './fanrank'
-import { clampInt, esc, excerpt, siteVisibleCutoff, teaserHtml, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { clampInt, esc, excerpt, siteVisibleCutoff, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
 import { analyticsOrigin, breadcrumbJsonLd, contentSignalValue, isSpeculativeRequest, readAiPolicy } from './seo'
 import { needsFontSrc } from './skinpack'
 
@@ -480,13 +479,13 @@ async function renderList(
   if (opts.mode === 'search' && sq) {
     zeroHit = r.total + (wbSearch?.total || 0) + (pgSearch?.total || 0) + tagHits.length === 0
     if (zeroHit) {
-      // 多取几条再过滤：加密文不进兜底（搜索面整体不碰加密内容，与 listPosts 的 q 分支、
-      // fts.* 同口径），别借着「最近发布」把密码文的标题塞回搜索页
+      // 多取几条再过滤：需要口令的文章不进兜底（搜索面整体不碰锁住的内容，与 listPosts 的 q 分支、
+      // fts.* 同口径），别借着「最近发布」把锁文的标题塞回搜索页
       const recent = await listPosts(c.env.DB, { status: 'published', page: 1, limit: 12, afterTs: postCutoff })
       searchFallback = searchFallbackHtml({
         tags: tags.map((t) => t.name),
         posts: recent.items
-          .filter((p) => !p.password_hash)
+          .filter((p) => normalizeAccess(p.min_tier) === 'all')
           .slice(0, 5)
           .map((p) => ({ slug: p.slug, title: p.title })),
       })
@@ -628,8 +627,8 @@ async function renderList(
  * 分流在 renderPost 顶部（cleanSlug 不允许点号，.md 后缀无歧义）。
  * 机器可读面恒为游客视角（与 RSS 同口径，不查会话）：响应只依赖 slug/settings/库，千人一面，
  * 自动吃到页面边缘缓存（CACHEABLE_PAGE_RE 的 /post/[^/]+ 覆盖 .md 后缀；404 不回填）。
- * 防泄漏：密码文与可见窗口外 404（同一句响应，不透露存在性，与关键词搜索「整体退出」同口径）；
- * 会员锁文只出摘要 + 引导（服务端截断是付费墙的安全边界，契约 A2）。阅读计数不适用于镜像 */
+ * 防泄漏：需要口令的文章（min_tier 非 all，不看会话、输过口令也不认）与可见窗口外一律 404——
+ * 同一句响应，不透露存在性，与关键词搜索「整体退出」同口径。阅读计数不适用于镜像 */
 export async function renderPostMarkdown(c: C, slug: string): Promise<Response> {
   const settings = await getSettings(c.env.DB)
   const row = await getPostBySlug(c.env.DB, slug)
@@ -642,7 +641,7 @@ export async function renderPostMarkdown(c: C, slug: string): Promise<Response> 
     settings.siteNoindex === '1' ||
     !row ||
     row.status !== 'published' ||
-    isProtected(row) ||
+    normalizeAccess(row.min_tier) !== 'all' ||
     (!!visibleCutoff && (row.published_at ?? row.created_at ?? 0) < visibleCutoff)
   c.header('Cache-Control', 'public, max-age=600')
   if (hidden || !row) {
@@ -651,10 +650,9 @@ export async function renderPostMarkdown(c: C, slug: string): Promise<Response> 
   }
   const canonical = `${siteBase(settings, new URL(c.req.url).origin)}/post/${encodeURIComponent(row.slug)}`
   const head = `# ${row.title.replace(/\s*\n+\s*/g, ' ').trim()}\n\n${row.summary ? `> ${row.summary.replace(/\s*\n+\s*/g, ' ').trim()}\n` : ''}`
-  const memberLocked = !!row.min_tier && row.min_tier !== 'all'
-  const body = memberLocked
-    ? `> 本文为会员专属内容，此处仅为摘录，登录会员后可阅读全文。\n\n原文：${canonical}\n`
-    : `${htmlToMd(sanitizeHtml(String(row.content ?? ''))).trim()}\n\n---\n\n原文：${canonical}\n`
+  // 口令锁文走不到这里（上面 hidden 直接 404），所以正文恒出全文——不再有「此处仅为摘录」分支。
+  // 宁可 404 也不出摘要占位：镜像面的定位是「把正文交给 AI」，半截 Markdown 只会让调用方以为拿全了
+  const body = `${htmlToMd(sanitizeHtml(String(row.content ?? ''))).trim()}\n\n---\n\n原文：${canonical}\n`
   c.header('Content-Type', 'text/markdown; charset=utf-8')
   return c.body(`${head}\n${body}`)
 }
@@ -745,28 +743,30 @@ export async function renderPost(c: C): Promise<Response> {
     )
   }
 
-  // 访问密码墙（src/protect.ts，与会员付费墙的组合语义已对齐契约）：密码墙优先——
-  // 未解锁时一切止步于表单（正文连服务端都不处理）；解锁 Cookie 通过或管理员登录后，再走会员档判定。
-  // 评论区对密码文照常开放（与会员锁文同口径）；?pwerr=1 / ?pwerr=slow 是解锁失败 303 回跳的错误态
+  // 访问口令墙（src/protect.ts）：文章标了 fixed/member 时，未持有效解锁 Cookie 的访客
+  // 只看到口令表单，正文连服务端都不处理。会员体系若仍开着（membersEnabled='1'），登录会员
+  // 照旧按档位放行——口令是在会员之上新加的一层，不拆老路。
+  // ?pwerr=1（密码不对）/ ?pwerr=slow（试太快）是解锁失败 303 回跳的错误态。
   const pwerr = url.searchParams.get('pwerr')
-  const lockedError = pwerr === 'slow' ? 'wrong' : pwerr ? 'slow' : undefined
-  const pwLocked = !user && isProtected(row) && !(await hasValidUnlock(getCookie(c.req.raw, PP_COOKIE), row.id, row.password_hash || '', Date.now()))
-  // 付费墙（契约 A2）：locked 时服务端把正文截成试读段再下发——浏览器拿不到的才真正拿不到。
-  // 管理员（作者本人预览）不受限；membersEnabled 关闭时无会员会话，锁文对所有人只出试读段。
-  // 自定义档位（会员 3.0 预备）：canReadTiers 按生效档位判（过期会员即时降级基础档）
+  const access = normalizeAccess(row.min_tier)
+  const gateHashes = gateHashesOf(settings)
   const tierDefs = parseMemberTiers(settings.memberTiers)
-  const minTier = normalizeMinTier(row.min_tier)
-  const locked = !pwLocked && !user && !canReadTiers(tierDefs, row.min_tier, member, Date.now())
+  const memberPasses =
+    membersEnabled(settings) && !!member && canReadTiers(tierDefs, access === 'fixed' ? 'member' : row.min_tier, member, Date.now())
+  const gateLocked = !user && !memberPasses && !(await canRead(getCookie(c.req.raw, GATE_COOKIE), access, gateHashes, Date.now()))
+  const gateError = gateLocked && access !== 'all' && !canEverUnlock(access, gateHashes) ? 'unset' : pwerr === 'slow' ? 'slow' : pwerr ? 'wrong' : undefined
+  // 口令墙替代了旧的会员试读段：锁住时整页只有表单，不再下发截断正文（locked 恒 false）
+  const locked = false
   // 会员浏览足迹（会员 3.0 预备）：与阅读计数同一套真实访问口径（复用上面的 countThisView），
-  // 密码墙未解锁不记（没看到正文不算「浏览过」）；同文同日只留一行，写侧幂等
-  if (member && !pwLocked && countThisView) {
+  // 口令墙未解锁不记（没看到正文不算「浏览过」）；同文同日只留一行，写侧幂等
+  if (member && !gateLocked && countThisView) {
     c.executionCtx.waitUntil(recordMemberVisit(c.env.DB, member.id, row.id, row.title, fanDay(), Date.now()))
   }
-  // 密码墙时正文一个字节都不出：连 sanitize 都不做，fullHtml 留空（teaser 分支不会被走到）。
+  // 口令墙时正文一个字节都不出：连 sanitize 都不做，fullHtml 留空（试读段分支已随会员付费墙退役）。
   // 渲染路径传 origin：非白名单外链包 /go 中间页（存库/RSS/导出不传，保持原始 URL）。
   // 服务端插件渲染过滤（src/hooks.ts postContentHtml，如关键词自动内链）挂在这之后——
   // 命中的关键词包成链接对锁文试读段同样生效（正文可见部分口径一致）
-  const fullHtml = pwLocked
+  const fullHtml = gateLocked
     ? ''
     : responsiveContentImages(
         renderPostContentHtml(
@@ -799,10 +799,13 @@ export async function renderPost(c: C): Promise<Response> {
 
   })
 
-  // 正文 HTML：密码墙出解锁表单，locked 只下发试读段；标题锚点由 render.ts headingAnchors 对
-  // 七主题统一注入 toc-N 生成 id（wechat 主题目录卡与 site.js 标题 ¶ 同源），密码墙正文零参与
-  const bodyHtml = pwLocked ? passwordFormHtml(row.slug, { error: lockedError }) : locked ? teaserHtml(fullHtml) : fullHtml
-  const anchored = pwLocked ? { html: bodyHtml, items: [] } : headingAnchors(bodyHtml)
+  // 正文 HTML：口令墙整页只出解锁表单；标题锚点由 render.ts headingAnchors 对
+  // 七主题统一注入 toc-N 生成 id（wechat 主题目录卡与 site.js 标题 ¶ 同源），口令墙正文零参与
+  const bodyHtml =
+    gateLocked && access !== 'all'
+      ? gateFormHtml(row.slug, { need: access, error: gateError })
+      : fullHtml
+  const anchored = gateLocked ? { html: bodyHtml, items: [] } : headingAnchors(bodyHtml)
 
   const html = theme.post({
     settings,
@@ -817,7 +820,7 @@ export async function renderPost(c: C): Promise<Response> {
       published_at: row.published_at,
       views: row.views,
       likes: row.likes,
-      minTier,
+      minTier: access,
       locked,
       // AI 生成标注（编辑器自愿申报）：<人工智能生成合成内容标识办法> 显式标识口径，meta 行输出
       aiGenerated: !!row.ai_generated,
@@ -836,11 +839,11 @@ export async function renderPost(c: C): Promise<Response> {
     share,
   })
   c.header('Cache-Control', 'no-cache')
-  // 分享卡图优先：编辑器生成的 OG 卡图 > 封面图；密码墙与会员锁文都不从正文提取——
-  // OG 标记可能位于试读段之后，锁文状态的社交卡图只出作者主动设置的封面（防泄漏清单同口径）
-  const ogImage = pwLocked || locked ? row.cover || undefined : extractOgImage(sanitizeHtml(row.content)) || row.cover || undefined
-  // 密码墙的描述走 protectedDescription：作者自填摘要照常公开，绝不把 excerpt(row.content) 泄进 meta / JSON-LD
-  const metaDescription = pwLocked ? protectedDescription(row.summary) : row.summary || excerpt(row.content, 120)
+  // 分享卡图优先：编辑器生成的 OG 卡图 > 封面图；口令墙不从正文提取——
+  // OG 标记可能位于被锁的正文里，锁定状态的社交卡图只出作者主动设置的封面（防泄漏清单同口径）
+  const ogImage = gateLocked ? row.cover || undefined : extractOgImage(sanitizeHtml(row.content)) || row.cover || undefined
+  // 口令墙的描述走 protectedDescription：作者自填摘要照常公开，绝不把 excerpt(row.content) 泄进 meta / JSON-LD
+  const metaDescription = gateLocked ? protectedDescription(row.summary) : row.summary || excerpt(row.content, 120)
   const base = siteBase(settings, url.origin)
   // 结构化数据（roadmap A3 / B23）：schema.org BlogPosting + 面包屑 BreadcrumbList，与 og:image /
   // canonical 同口径；草稿预览（noindex）不出。密码墙与会员锁文照常出标题级面包屑（标题本就公开）
@@ -858,9 +861,8 @@ export async function renderPost(c: C): Promise<Response> {
           updatedAt: row.updated_at,
           tags: parseTags(row),
           commentCount: commentTotal,
-          // 付费墙声明（Google 口径 isAccessibleForFree）：密码墙与会员锁文都算受限内容——
-          // 密码墙整页只有解锁表单，会员锁文正文截断处是 .paywall 升级卡
-          paywallSelector: pwLocked ? '.pp-box' : locked ? '.paywall' : undefined,
+          // 付费墙声明（Google 口径 isAccessibleForFree）：口令墙整页只有解锁表单
+          paywallSelector: gateLocked ? '.gp-box' : undefined,
         }),
         breadcrumbJsonLd([
           { name: '首页', url: `${base}/` },
@@ -871,7 +873,7 @@ export async function renderPost(c: C): Promise<Response> {
   return c.html(
     page(pageOpts(c, {
       settings,
-      css: theme.css + (pwLocked ? PP_CSS : ''),
+      css: theme.css + (gateLocked ? GATE_CSS : ''),
       title: row.title,
       description: metaDescription,
       ogImage,

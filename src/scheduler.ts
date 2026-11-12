@@ -17,7 +17,6 @@ interface DuePost {
   title: string
   summary: string
   publish_at: number
-  password_hash: string | null
   min_tier: string | null
 }
 
@@ -31,7 +30,7 @@ export async function runScheduledPublish(env: Env): Promise<ScheduleResult> {
   const result: ScheduleResult = { published: 0, errors: [] }
   try {
     const { results } = await env.DB.prepare(
-      `SELECT id, slug, title, summary, publish_at, password_hash, min_tier FROM posts
+      `SELECT id, slug, title, summary, publish_at, min_tier FROM posts
        WHERE status = 'scheduled' AND publish_at IS NOT NULL AND publish_at <= ? AND deleted_at IS NULL
        LIMIT 20`
     )
@@ -64,7 +63,7 @@ export async function runScheduledPublish(env: Env): Promise<ScheduleResult> {
         title: p.title,
         summary: p.summary,
         via: 'scheduler',
-        locked: !!p.password_hash || (!!p.min_tier && p.min_tier !== 'all'),
+        locked: (p.min_tier || 'all') !== 'all',
       })
     }
     // 汇总通知一条：发布了 0 篇不打扰；失败尽量报出来

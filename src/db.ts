@@ -23,6 +23,7 @@ export interface RankMemberRow {
   active_days?: number
 }
 import { clampInt, cstDate, excerpt, fmtDate, jsonItemLikePattern, likePattern, WEIBO_MAX_TOPICS } from './utils'
+import { normalizeAccess } from './protect'
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
   siteName: '博客号 BlogHao',
@@ -113,6 +114,12 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   siteClosed: '0',
   // 闭站页公告文案，空 = 使用内置默认文案
   siteClosedMessage: '',
+  // 两档站级访问口令（src/protect.ts，2026-11）：文章按 posts.min_tier 三选一
+  //（all 公开 / fixed 固定密码 / member 会员密码）。这里只存 `salt:hash`（PBKDF2），
+  // 明文只在设置页提交的那一次请求里存在；改密码 = 该档已发出的解锁 Cookie 全部自动失效
+  //（令牌 HMAC 的 key 就是这行 hash）。两键都在 SECRET_SETTINGS 里打码，后台只回显「已设置」
+  gateFixedPassword: '',
+  gateMemberPassword: '',
   // 全站 noindex（2026-10 SEO 审计）：所有公开页 <meta name="robots" content="noindex"> +
   // robots.txt 整站 Disallow——用于空白模板站 / 演示性镜像 / 临时预览实例不进搜索引擎索引；
   // 与闭站不同：页面照常可访问，只是不让收录。默认关闭（正常收录）
@@ -183,6 +190,10 @@ export const SECRET_SETTINGS = [
   'turnstileSecret',
   // 跨站会员继承的共享密钥（src/partner.ts）：能签出「某个会员是付费会员」的凭证，等同发卡权
   'partnerPushSecret',
+  // 两档访问口令的 hash（src/protect.ts）：hash 本身不可逆，但它就是解锁令牌的签名密钥，
+  // 泄漏等于泄漏发卡权——一律不出后台响应，只回显「已设置」
+  'gateFixedPassword',
+  'gateMemberPassword',
 ]
 
 // settings 读取的共享快照层（Cache API）：生产 Workers 上 caches.default 是 colo 级共享——
@@ -340,8 +351,10 @@ export async function listPosts(db: D1Database, opts: ListPostsOptions = {}): Pr
     // \% \_ 是字面转义，\ 本身必须先转义成 \\：声明了 ESCAPE '\' 后，搜「a\b」「尾随\」才不跑偏
     where.push("(title LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')")
     binds.push(likePattern(opts.q), likePattern(opts.q), likePattern(opts.q))
-    // 加密文章整体退出关键词搜索：content LIKE 命中本身就会泄露「正文含此词」，可被用来探测加密内容
-    where.push("(password_hash IS NULL OR password_hash = '')")
+    // 需要口令的文章整体退出关键词搜索：content LIKE 命中本身就会泄露「正文含此词」，
+    // 可被用来探测锁住的内容。两档口令（fixed/member）一视同仁——会员体系时代的
+    // coffee/top 等脏档位也在这个条件下被排除（它们同样是「不让所有人看」）
+    where.push("min_tier = 'all'")
   }
   if (opts.tag) {
     where.push("tags LIKE ? ESCAPE '\\'")
@@ -413,10 +426,12 @@ export async function getPostById(db: D1Database, id: number): Promise<PostRow |
   return db.prepare('SELECT * FROM posts WHERE id = ?').bind(id).first<PostRow>()
 }
 
-/** 后台文章出参：password_hash 永不出接口（明文不可逆，哈希也不该喂给前端），只给 hasPassword 布尔。
- *  放 db.ts 让 api.ts 与 collect.ts（采集草稿响应）共用同一出口，新出参一律过这里 */
+/** 后台文章出参：password_hash 是已退役的列，仍然剥掉——它里面的旧值可能是某篇文的访问口令哈希，
+ *  没有理由喂给前端。minTier 是归一后的三档（all/fixed/member），后台编辑器的「谁能看」直接读它
+ *  （原始 min_tier 列可能还是会员时代的脏值）。放 db.ts 让 api.ts 与 collect.ts（采集草稿响应）
+ *  共用同一出口，新出参一律过这里 */
 export function postAdminView(row: PostRow & { tagList?: string[]; categoryId?: number | null }) {
-  return { ...row, password_hash: undefined, hasPassword: !!row.password_hash }
+  return { ...row, password_hash: undefined, minTier: normalizeAccess(row.min_tier) }
 }
 
 /** slug 查重公共件：posts / pages 同一套「占用即加后缀」探测（categories 是重名即拒绝语义，不走这里）。
@@ -1643,6 +1658,24 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       ])
     } catch {
       /* 并发 isolate 已处理：不记账也无碍，下次冷启动重试 */
+    }
+  }
+  // 单篇访问密码退役 → 两档站级口令（2026-11，src/protect.ts）。这一步不能省：
+  // 读侧已不再看 posts.password_hash，存量「有 hash」的文章若不改档位，会静默变成全网公开。
+  // 一律转成 member（会员密码可见）——原文的语义就是「不是给所有人看的」，宁可锁紧。
+  // 会员体系时代的档位 key（coffee / top / 自定义档位）同样收成 member：它们都是「比公开更严」。
+  // 记账位防重复：迁移是幂等的，但每次冷启动扫两遍 posts 表不值得。
+  const gateMigrated = await db.prepare("SELECT value FROM settings WHERE key = 'gateMigrationV1'").first<{ value: string }>()
+  if (!gateMigrated) {
+    try {
+      await db.batch([
+        db.prepare("UPDATE posts SET min_tier = 'member' WHERE password_hash IS NOT NULL AND password_hash <> ''"),
+        db.prepare("UPDATE posts SET password_hash = '' WHERE password_hash IS NOT NULL AND password_hash <> ''"),
+        db.prepare("UPDATE posts SET min_tier = 'member' WHERE min_tier IS NOT NULL AND min_tier NOT IN ('all','fixed','member')"),
+        db.prepare("INSERT INTO settings (key, value) VALUES ('gateMigrationV1', '1') ON CONFLICT(key) DO UPDATE SET value = '1'"),
+      ])
+    } catch {
+      /* 并发 isolate 已迁移：不记账也无碍，下次冷启动重试 */
     }
   }
   // 页脚「站点足迹」统计冷启动播种：键缺失（新装/老站升级）时算一次，此后交给每晚 cron 刷新。

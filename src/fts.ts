@@ -71,7 +71,7 @@ export async function searchPosts(db: D1Database, q: string, opts: PostSearchOpt
   // 站点可见窗口（afterTs）同 listPosts 口径——窗口外文章不参与搜索，防「命中本身即泄露」
   const vis = afterTs > 0 ? 'AND COALESCE(p.published_at, p.created_at) >= ?' : ''
   const where =
-    `posts_fts MATCH ? AND p.deleted_at IS NULL AND p.status = 'published' AND (p.password_hash IS NULL OR p.password_hash = '') ${vis}`
+    `posts_fts MATCH ? AND p.deleted_at IS NULL AND p.status = 'published' AND p.min_tier = 'all' ${vis}`
   const binds = (args: unknown[]) => (afterTs > 0 ? [...args, afterTs] : args)
   try {
     // 先拿总数再取页：页码越界（手输 ?page=99）时回落到最后一页，别吐一个空列表配一个越界的页码器

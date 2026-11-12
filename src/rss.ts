@@ -2,40 +2,29 @@ import type { PostRow, SettingsMap } from './types'
 import { parseTags } from './db'
 import { siteMode } from './render'
 import { sanitizeHtml } from './sanitize'
-import { esc, fmtDate, isoDate, teaserHtml } from './utils'
+import { esc, fmtDate, isoDate } from './utils'
 import { cdata, rfc822, xmlEsc } from './xml'
-
-/** 会员锁文在 RSS / JSON Feed 里的尾注（防泄漏契约 A2：locked 只出试读段 + 引导） */
-function memberOnlySuffix(): string {
-  return '<p>—— 本文为会员专属内容，剩余部分请到站点登录会员后阅读。</p>'
-}
 
 export function buildRss(settings: SettingsMap, posts: PostRow[], siteUrl: string): string {
   const fullText = settings.rssFullText !== '0'
   const items = posts
     .map((p) => {
       // 全文走 content:encoded（标准做法：description 保持摘要轻量，订阅器优先读全文）。
-      // 会员专属文章（min_tier 非 all）订阅器等同游客视角：只出试读段 + 引导，防付费墙被 RSS 绕过（契约 A2 防泄漏清单）
-      // 访问密码文章（password_hash 非空）更严：试读段也不出，description 只用作者自填摘要（src/protect.ts 防泄漏清单）
-      const pwProtected = !!p.password_hash
-      const memberLocked = !!p.min_tier && p.min_tier !== 'all'
-      // 机器可读锁标志（bloghao 命名空间）：广场 hub 的 RSS pull 补漏据此跳过锁文/密码文，
-      // 与 push 路 firePostPublished 的 locked 口径同源——「加密文不上广场」两条路都守住
-      const locked = pwProtected || memberLocked
+      // 需要口令的文章（min_tier 非 all）订阅器等同游客视角：**连试读段都不出**，
+      // description 只用作者自填摘要——锁住的正文不能从 RSS 这条侧路漏出去。
+      // 机器可读锁标志（bloghao 命名空间）：广场 hub 的 RSS pull 补漏据此跳过锁文，
+      // 与 push 路 firePostPublished 的 locked 口径同源
+      const locked = (p.min_tier || 'all') !== 'all'
       const encoded =
-        fullText && p.content && !pwProtected
-          ? `\n      <content:encoded>${cdata(
-              memberLocked
-                ? teaserHtml(sanitizeHtml(p.content)) + memberOnlySuffix()
-                : sanitizeHtml(p.content)
-            )}</content:encoded>`
+        fullText && p.content && !locked
+          ? `\n      <content:encoded>${cdata(sanitizeHtml(p.content))}</content:encoded>`
           : ''
       return `    <item>
       <title>${xmlEsc(p.title)}</title>
       <link>${xmlEsc(siteUrl)}/post/${encodeURIComponent(p.slug)}</link>
       <guid isPermaLink="true">${xmlEsc(siteUrl)}/post/${encodeURIComponent(p.slug)}</guid>
       <pubDate>${rfc822(p.published_at)}</pubDate>
-      <description>${xmlEsc(p.summary)}</description>${encoded}${pwProtected || memberLocked ? '\n      <bloghao:locked>1</bloghao:locked>' : ''}
+      <description>${xmlEsc(p.summary)}</description>${encoded}${locked ? '\n      <bloghao:locked>1</bloghao:locked>' : ''}
     </item>`
     })
     .join('\n')
@@ -56,7 +45,7 @@ ${items}${lastBuild ? `\n    <lastBuildDate>${rfc822(lastBuild)}</lastBuildDate>
 }
 
 /** JSON Feed 1.1（/feed.json，C12）：机器可读订阅格式，防泄漏口径与 buildRss 同一份——
- *  密码文不出正文（只留作者自填摘要）、会员锁文只出试读段 + 引导、rssFullText 关闭时只出摘要。
+ *  需要口令的文章（min_tier 非 all）连试读段都不出、只留作者自填摘要，rssFullText 关闭时只出摘要。
  *  日期走 isoDate（北京时间 +08:00 口径，与 JSON-LD 同源）；字段名是 JSON Feed 规范键，
  *  输出经 JSON.stringify 序列化，无需 xmlEsc */
 export function buildJsonFeed(settings: SettingsMap, posts: PostRow[], siteUrl: string): string {
@@ -70,14 +59,10 @@ export function buildJsonFeed(settings: SettingsMap, posts: PostRow[], siteUrl: 
     language: 'zh-CN',
     authors: [{ name: settings.siteName, url: siteUrl }],
     items: posts.map((p) => {
-      const pwProtected = !!p.password_hash
-      const memberLocked = !!p.min_tier && p.min_tier !== 'all'
-      const contentHtml =
-        fullText && p.content && !pwProtected
-          ? memberLocked
-            ? teaserHtml(sanitizeHtml(p.content)) + memberOnlySuffix()
-            : sanitizeHtml(p.content)
-          : ''
+      // 需要口令的文章：正文整段不出（试读段也不给），只留作者自填摘要——
+      // 与 buildRss 同口径，别让 feed.json 成为绕过口令的侧门
+      const locked = (p.min_tier || 'all') !== 'all'
+      const contentHtml = fullText && p.content && !locked ? sanitizeHtml(p.content) : ''
       // 封面属作者主动公开的导读面（与标题/摘要同口径），相对路径补成绝对地址
       const cover = p.cover ? (p.cover.startsWith('/') ? siteUrl + p.cover : p.cover) : ''
       return {

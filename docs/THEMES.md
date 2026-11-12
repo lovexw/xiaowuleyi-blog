@@ -144,7 +144,7 @@ export const THEMES: Record<string, ThemeModule> = {
 | `archiveGroups(posts)` / `archiveListHtml(groups)` | 归档按年分组 / 归档列表（年份小节 + 日期外置链接列表），class `.ar-*` |
 | `memberCardHtml(v)` / `memberAuthHtml()` | 会员中心：已登录会员卡 / 登录注册双表单（`member()` 可选函数内用） |
 | `rankListHtml(entries, me?)` | 积分排行榜列表（/rank 页主体，含本人行高亮），class `.rk-*` |
-| `paywallHtml(tierName)` | 会员付费墙遮挡卡（`locked` 文章正文收尾处渲染；`locked` 由 pages 层判定） |
+| `paywallHtml(tierName)` | 会员付费墙遮挡卡（主题里照旧 `p.locked ? paywallHtml(...) : ''` 渲染）。注意：会员付费墙已冻结，`locked` 现在**恒为 false**，需要口令的文章由 pages 层换成口令表单（`.gp-box`），主题不用改 |
 
 ## 交互约定
 

@@ -76,10 +76,16 @@ function d1FromSqlite(db: DatabaseSync): D1Database {
   } as unknown as D1Database
 }
 
-function seedPost(db: DatabaseSync, slug: string, title: string, content: string, extra = '') {
-  db.exec(
-    `INSERT INTO posts (slug, title, content, status, created_at, updated_at${extra ? ', password_hash, deleted_at' : ''}) VALUES ('${slug}','${title}','${content}','published',1,1${extra ? `,${extra}` : ''})`
-  )
+function seedPost(
+  db: DatabaseSync,
+  slug: string,
+  title: string,
+  content: string,
+  o: { minTier?: string; deletedAt?: number } = {}
+) {
+  db.prepare(
+    "INSERT INTO posts (slug, title, content, status, min_tier, deleted_at, created_at, updated_at) VALUES (?, ?, ?, 'published', ?, ?, 1, 1)"
+  ).run(slug, title, content, o.minTier ?? 'all', o.deletedAt ?? null)
 }
 
 test('searchPosts：FTS 命中 + bm25 相关度排序 + 加密文/回收站排除（增量路径 A）', async (t) => {
@@ -90,15 +96,15 @@ test('searchPosts：FTS 命中 + bm25 相关度排序 + 加密文/回收站排�
 
   seedPost(db, 'p1', '部署教程入门', '这是部署教程正文，讲清楚第一步')
   seedPost(db, 'p2', '进阶篇', '部署教程重复出现，部署教程再提，部署教程三现')
-  seedPost(db, 'p3', '加密文', '部署教程也在加密文里', "'salt:hash', NULL")
-  seedPost(db, 'p4', '回收站文', '部署教程已删', "'', 99")
+  seedPost(db, 'p3', '会员密码文', '部署教程也在锁文里', { minTier: 'member' })
+  seedPost(db, 'p4', '回收站文', '部署教程已删', { deletedAt: 99 })
   db.exec("INSERT INTO posts (slug, title, content, status, created_at, updated_at) VALUES ('p5','草稿','部署教程草稿','draft',1,1)")
 
   const r = await searchPosts(d1, '部署教程', { perPage: 50 })
   assert.deepEqual(
     r.items.map((p) => p.slug),
     ['p2', 'p1'],
-    'bm25：命中次数多的排前；加密文(p3)/回收站(p4)/草稿(p5)整体退出关键词搜索'
+    'bm25：命中次数多的排前；需要口令的文(p3)/回收站(p4)/草稿(p5)整体退出关键词搜索'
   )
   assert.equal(r.total, 2)
 

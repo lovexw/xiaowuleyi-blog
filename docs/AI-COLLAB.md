@@ -43,10 +43,10 @@
 
 1. **推送即上线，测试是唯一的刹车**——`git push origin main` 后服务器 2 分钟内自动拉取重建，**服务器不看 CI 状态**（CI 报红照样会部署上去），所以 typecheck + test 全绿是推送前置条件；不推 `upstream`（官方仓冻结，站长明确说「发布」才走 RELEASING.md）；提交信息用中文前缀（`fix:` / `feat:` / `docs:` / `theme:`…）。**只改主线**，冻结形态见 `docs/MAINTENANCE.md`。
 2. **新功能先想「归宿三档」，默认不进内核**——① 客户端能做（site.js / 后台原生 JS）→ ② 插件形态（hooks 总线 / 编辑器插件）→ ③ 确需进内核才新增文件；运行时依赖只有 hono，**别加 npm 包**；**禁止引入打包步骤**，前台 site.js 保持 ES5。
-3. **新「公开面」必过防泄漏清单**——站里有会员付费墙、文章密码、锁文；新增 RSS / 接口 / 导出 / 主题字段时逐条问：**锁着的内容会不会从这里漏出去？**（摘要、content:encoded、JSON-LD 描述、OG 卡图是最常见的漏点）
+3. **新「公开面」必过防泄漏清单**——站里有**两档访问口令锁文**（`min_tier` 非 `all`）；新增 RSS / 接口 / 导出 / 主题字段时逐条问：**锁着的内容会不会从这里漏出去？**（摘要、content:encoded、JSON-LD 描述、OG 卡图是最常见的漏点。判定入口只有 `min_tier = 'all'` 一个条件，别自己另起口径）
 4. **查 posts / weibo / pages 三表必带 `deleted_at IS NULL`**——三表是软删（回收站），漏一个条件就是泄漏；改完自查 `grep -n "FROM posts\|FROM weibo\|FROM pages" src/`（故意不过滤的例外见 AGENTS.md）。
 5. **时间一律北京时间口径**——禁止 `new Date(ts).getHours()` 与裸 `toISOString()`（Worker 是 UTC，凌晨发布显示成前一天）；显示用 `cstDate/fmtDate*`，机器可读用 `isoDate`，SQL 聚合用 `strftime(..., ts/1000 + 28800, 'unixepoch')`，site.js 同口径。
-6. **密钥 / 令牌不进日志、不进 URL、不进出参**——敏感键进 `SECRET_SETTINGS` 双向打码；文章出参过 `postAdminView`（`password_hash` 永不出参）；长期令牌只认请求头。
+6. **密钥 / 令牌不进日志、不进 URL、不进出参**——敏感键进 `SECRET_SETTINGS` 双向打码；文章出参过 `postAdminView`（`password_hash` 已退役且永不出参，访问口令哈希在 `SECRET_SETTINGS` 里打码）；长期令牌只认请求头。
 7. **改 schema / 加 src 文件必须「两处同步 + 登记」**——加列 / 表：`schema.sql` 与 `db.ts` 的 `SCHEMA_COLUMNS` / `SCHEMA_TABLES` 两处同步（建表语句要自带全部列）；加 `src/` 文件：在 AGENTS.md「结构速查」登记一行。
 8. **写了 settings 就要失效缓存**——写完必须 `await invalidateSharedSettings(db)`（`saveSettings` 已内置），忘了 = 改完设置最多 60 秒读旧值。
 
@@ -54,9 +54,9 @@
 
 会员 3.0 预备版已上线（自定义档位 / 档位时效 / 认证徽标 / 会员活动中心），防线细节在 AGENTS.md「会员体系」节与 `src/tiers.ts` 头注；这里是**最容易搞乱的四条大白话**：
 
-1. **档位 key 建好后是「身份证号」，永远别改**——`posts.min_tier`（谁能看）和 `members.tier` 都用 key 关联；改**名字 / 颜色**随便（前台跟着变），改 key 会让存量文章对不上号。`'all'` 和 `'member'` 是付费墙伪档（公开 / 任意登录会员），**保留字不准占用**。
+1. **档位 key 建好后是「身份证号」，永远别改**——`posts.min_tier`（谁能看）和 `members.tier` 都用 key 关联；改**名字 / 颜色**随便（前台跟着变），改 key 会让存量文章对不上号。`posts.min_tier` 现在只认 `'all'` / `'fixed'` / `'member'` 三个保留字（2026-11 两档口令改造，脏值一律按 `member` 收口），会员档位 key 只用于 `members.tier`。
 2. **第一档 = 全体会员的兜底身份，必须永久**——它承载「过期会员 / 定义缺失档位」的回落身份，校验在 `cleanMemberTiers`（第一档非永久整体拒绝），后台编辑器也锁死了。**档位顺序即等级**：排前面的低、排后面的高。
-3. **档位时效没有 cron**——过期是读侧 `effectiveTier` 即时判定的。任何要展示 / 判定档位的地方（评论徽标、排行榜、会员卡、付费墙）都必须过 `effectiveTier` 拿**生效档位**，直接用 `members.tier` 原值 = 过期会员还能看付费文（真 bug）。`tier_expires_at` 时间戳只许在服务端用 + 本人视角展示，**任何公开出参（微博评论 JSON 等）出参前剥掉**。
+3. **档位时效没有 cron**——过期是读侧 `effectiveTier` 即时判定的。任何要展示 / 判定档位的地方（评论徽标、排行榜、会员卡）都必须过 `effectiveTier` 拿**生效档位**，直接用 `members.tier` 原值 = 过期会员还能看付费文（真 bug）。`tier_expires_at` 时间戳只许在服务端用 + 本人视角展示，**任何公开出参（微博评论 JSON 等）出参前剥掉**。
 4. **会员数据只认五张表**——members / member_sessions / member_points_log / member_visits / member_likes（会话不进备份与整站包，其余要登记）。**严禁写 users / sessions**（那是管理员）；「我的足迹 / 点赞 / 评论 / 回复」只服务会员本人（/member 页 SSR 直出），**不进任何公开出参**；足迹 90 天滚动清理挂在 index.ts 备份 cron。
 
 > 涉及会员的新功能先读 `src/tiers.ts`（全部纯函数，tests/tiers.test.ts + tests/member-tiers.test.ts 守着），别在别处手写档位判定 / 过期逻辑。
@@ -90,7 +90,7 @@
 | 改列表排序 | 只改 SQL | 排序表达式对齐部分索引（`schema.sql` + `db.ts SCHEMA_INDEXES` 两处同步） |
 | 删一条记录 | 直接 `DELETE` 行 | 三表是软删（回收站）；彻底删除只走 `/admin/trash/*` |
 | 加一种评论/留言形态 | 抄一整段流程 | 复用 `api.ts` 的 `publicComment` 公共核心，只写细路由 + opts |
-| 新增对外出口（RSS/接口/导出） | 直接输出全部字段 | 过防泄漏清单（付费墙 / 密码文 / 锁文） |
+| 新增对外出口（RSS/接口/导出） | 直接输出全部字段 | 过防泄漏清单（`min_tier` 非 `all` 的锁文一律只出作者摘要） |
 | 改主题 / 编辑器样式 | 只改一侧 | `.ed-editor`（编辑器）与 `.rich`（文章页）镜像同改 |
 | 给分站加「更新」按钮 | 做成自动拉代码 / 自动迁移 | 更新中心**只告知 + 记录选择**，升级是一次显式部署动作（docs/UPDATING.md） |
 | 批量替换文本（sed 全仓） | `git ls-files` 不加过滤直接 sed | 先按扩展名过滤（`*.md` `*.ts` `*.js`…）——sed 会把 PNG / SVG 等二进制改坏几字节，还会给全仓文件留「幻影改动」（status 显示 M、diff 为空），清理很费劲（2026-10-17 实踩） |

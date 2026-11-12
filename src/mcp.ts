@@ -32,6 +32,7 @@ import type { PostPublishedPayload, WeiboPublishedPayload } from './hooks'
 import { mdToHtml } from './markdown'
 import { siteBase } from './render'
 import { sanitizeHtml } from './sanitize'
+import { normalizeAccess } from './protect'
 import type { Env, PostRow } from './types'
 import { clampInt, cleanSlug, excerpt, slugify } from './utils'
 
@@ -146,8 +147,8 @@ async function runPublishPost(deps: McpDeps, args: Record<string, unknown>): Pro
   const now = Date.now()
   const res = await deps.db
     .prepare(
-      `INSERT INTO posts (slug, title, content, summary, cover, tags, status, pinned, author_id, published_at, publish_at, min_tier, password_hash, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO posts (slug, title, content, summary, cover, tags, status, pinned, author_id, published_at, publish_at, min_tier, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       slug,
@@ -163,7 +164,6 @@ async function runPublishPost(deps: McpDeps, args: Record<string, unknown>): Pro
       status === 'published' ? now : null,
       null, // publish_at：v1 不支持定时发布（时区易错），防 scheduled 空时间卡死
       'all',
-      '',
       now,
       now
     )
@@ -177,7 +177,7 @@ async function runPublishPost(deps: McpDeps, args: Record<string, unknown>): Pro
       title: row.title,
       summary: row.summary,
       via: 'mcp',
-      locked: !!row.password_hash || (!!row.min_tier && row.min_tier !== 'all'),
+      locked: (row.min_tier || 'all') !== 'all',
     })
   }
   return ok({ id: row.id, slug: row.slug, status: row.status, url: `${deps.siteUrl}/post/${row.slug}` })
@@ -205,7 +205,6 @@ async function runListPosts(deps: McpDeps, args: Record<string, unknown>): Promi
       summary: p.summary,
       tags: parseTags(p),
       minTier: p.min_tier,
-      hasPassword: !!p.password_hash,
       createdAt: p.created_at,
       publishedAt: p.published_at,
       url: `${deps.siteUrl}/post/${p.slug}`,
@@ -221,8 +220,8 @@ async function runGetPost(deps: McpDeps, args: Record<string, unknown>): Promise
   else if (slug) row = await getPostBySlug(deps.db, slug)
   else return fail('需要提供 id 或 slug 之一')
   if (!row) return fail('文章不存在')
-  // postAdminView 剥 password_hash，只给 hasPassword 布尔（口令字段永不出参的老规矩）
-  return ok({ ...postAdminView(row), tagList: parseTags(row), url: `${deps.siteUrl}/post/${row.slug}` })
+  // minTier 是归一后的三档（all/fixed/member）：出参与 list_posts 同名同口径，AI 调用方不用自己猜 min_tier 的脏值
+  return ok({ ...postAdminView(row), minTier: normalizeAccess(row.min_tier), tagList: parseTags(row), url: `${deps.siteUrl}/post/${row.slug}` })
 }
 
 async function runListComments(deps: McpDeps, args: Record<string, unknown>): Promise<ToolResult> {

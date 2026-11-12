@@ -251,12 +251,12 @@ test('publish_post：html 格式走净化器；空标题 / 空正文是 isError 
 
 /* ---------------- list_posts / get_post ---------------- */
 
-test('list_posts：状态过滤 + 关键词命中 + 加密文不出关键词搜索、带 hasPassword 标志', async () => {
+test('list_posts：状态过滤 + 关键词命中 + 需要口令的文不出关键词搜索、带 minTier 标志', async () => {
   const { db, deps } = await makeCtx()
-  db.exec(`INSERT INTO posts (slug, title, content, summary, status, password_hash, created_at, updated_at, deleted_at)
-           VALUES ('a','部署教程入门','正文A','摘要A','published','',1,1,NULL)`)
-  db.exec(`INSERT INTO posts (slug, title, content, summary, status, password_hash, created_at, updated_at, deleted_at)
-           VALUES ('b','加密的部署教程','正文B','摘要B','published','salt:hash',2,2,NULL)`)
+  db.exec(`INSERT INTO posts (slug, title, content, summary, status, min_tier, created_at, updated_at, deleted_at)
+           VALUES ('a','部署教程入门','正文A','摘要A','published','all',1,1,NULL)`)
+  db.exec(`INSERT INTO posts (slug, title, content, summary, status, min_tier, created_at, updated_at, deleted_at)
+           VALUES ('b','锁住的部署教程','正文B','摘要B','published','member',2,2,NULL)`)
   db.exec(`INSERT INTO posts (slug, title, content, status, created_at, updated_at, deleted_at)
            VALUES ('c','草稿C','正文C','draft',3,3,NULL)`)
   db.exec(`INSERT INTO posts (slug, title, content, status, created_at, updated_at, deleted_at)
@@ -268,21 +268,21 @@ test('list_posts：状态过滤 + 关键词命中 + 加密文不出关键词搜�
   assert.equal(all.total, 3, '回收站行不出（listPosts 过滤 deleted_at）')
   const pub = toolOut(await call({ status: 'published' }))
   assert.deepEqual(pub.items.map((i: any) => i.slug), ['b', 'a'], 'recency 倒序：created_at 新的在前')
-  assert.equal(pub.items.find((i: any) => i.slug === 'b').hasPassword, true)
+  assert.equal(pub.items.find((i: any) => i.slug === 'b').minTier, 'member')
   const q = toolOut(await call({ q: '部署教程' }))
-  assert.deepEqual(q.items.map((i: any) => i.slug), ['a'], '加密文整体退出关键词搜索（命中即泄露）')
+  assert.deepEqual(q.items.map((i: any) => i.slug), ['a'], '需要口令的文整体退出关键词搜索（命中即泄露）')
   for (const i of all.items) assert.equal(i.content, undefined, '列表不出正文')
 })
 
 test('get_post：id / slug 双路取全文，password_hash 永不出参', async () => {
   const { db, deps } = await makeCtx()
-  db.exec(`INSERT INTO posts (slug, title, content, summary, status, password_hash, created_at, updated_at, deleted_at)
-           VALUES ('gp','标题','<p>全文</p>','摘要','published','salt:hash',1,1,NULL)`)
+  db.exec(`INSERT INTO posts (slug, title, content, summary, status, min_tier, password_hash, created_at, updated_at, deleted_at)
+           VALUES ('gp','标题','<p>全文</p>','摘要','published','member','salt:hash',1,1,NULL)`)
   const call = (args: any) =>
     dispatchRpc(deps, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_post', arguments: args } }).then(resultOf)
   const bySlug = toolOut(await call({ slug: 'gp' }))
   assert.equal(bySlug.content, '<p>全文</p>')
-  assert.equal(bySlug.hasPassword, true)
+  assert.equal(bySlug.minTier, 'member')
   assert.ok(!('password_hash' in bySlug), '哈希字段不得出现在出参')
   const byId = toolOut(await call({ id: bySlug.id }))
   assert.equal(byId.slug, 'gp')

@@ -146,10 +146,10 @@ Body `{"delta": 1}` 或 `{"delta": -1}`，返回 `{"ok":true,"likes":7}`。计�
 外链中间页（机制见 `src/outlink.ts`）：白名单域名（`TRUSTED_OUT_DOMAINS`，子域名自动跟随）与本站同源地址 302 直跳；其余第三方 http(s) 地址渲染「即将离开本站」确认页（展示目标域名与完整链接、附免责声明，`noindex`，无 JS、不自动跳转，故不构成开放重定向）。目标缺失 / 非 http(s) / 超 2048 字符一律 302 回首页。正文外链在渲染层包装进来：文章 / 页面 / 关于我走 `sanitizeHtml(html, { origin })`，微博文本走 `weiboTextHtml`（客户端镜像在 site.js）——存库与 RSS / 导出保持原始 URL。
 
 ### GET /llms.txt · /llms-full.txt（机器可读面）
-AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age=600`，进页面边缘缓存数据白名单，恒为游客视角）：`/llms.txt` 是站点导读索引（站名 + 描述 + 最新 100 篇条目、独立页面与订阅清单）；`/llms-full.txt` 附最新 50 篇全文（库存净化 HTML 经 `htmlToMd` 转成干净 Markdown）。防泄漏与 RSS 同一份口径：会员锁文索引照常出条目、全文只出摘要与引导；访问密码文索引出作者摘要、正文整体退出；全站 noindex / AI 策略 deny 档出桩。
+AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age=600`，进页面边缘缓存数据白名单，恒为游客视角）：`/llms.txt` 是站点导读索引（站名 + 描述 + 最新 100 篇条目、独立页面与订阅清单）；`/llms-full.txt` 附最新 50 篇全文（库存净化 HTML 经 `htmlToMd` 转成干净 Markdown）。防泄漏与 RSS 同一份口径：需要口令的文章（`min_tier` 非 `all`）索引照常出条目、只出作者摘要，正文整体退出；全站 noindex / AI 策略 deny 档出桩。
 
 ### GET /post/:slug.md（单篇 Markdown 镜像）
-文章 Markdown 版本（`text/markdown`，同上防泄漏与缓存口径；`/llms-full.txt` 同款转换链路 `sanitizeHtml → htmlToMd`）。密码文 404（与不存在同响应）、AI 策略 deny 档 404、窗口外草稿软删不出现；文章页 head 带 `<link rel="alternate" type="text/markdown">` 自动声明。
+文章 Markdown 版本（`text/markdown`，同上防泄漏与缓存口径；`/llms-full.txt` 同款转换链路 `sanitizeHtml → htmlToMd`）。`min_tier` 非 `all` 的文章一律 404（与不存在同响应，无论是否输入过口令）、AI 策略 deny 档 404、窗口外草稿软删不出现；文章页 head 带 `<link rel="alternate" type="text/markdown">` 自动声明。
 
 ## 认证
 
@@ -211,7 +211,7 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
 | --- | --- | --- |
 | GET | `/api/admin/posts?status=all\|published\|scheduled\|draft&q=关键词&page=1&limit=20&range=all\|3d\|1m\|6m\|1y` | 列表（不含 content；元素附 `tagList`、`categoryName`）；`range` 是时间范围筛选（滚动窗口，按 `COALESCE(published_at, created_at)` 过滤），未传 / 未知值降级为「全部」，真实时间边界由服务端按白名单计算，客户端传不了时间戳 |
 | POST | `/api/admin/posts` | 新建 |
-| GET | `/api/admin/posts/lookup?q=关键词&page=1` | 站内文章选择器（编辑器「插入链接 → 站内文章」）：仅已发布，轻出参 `{items:[{id, slug, title, summary, cover, published_at, hasPassword, minTier}], total, page, totalPages}`，无正文无口令；**注册在 `/:id` 之前**（否则 lookup 被 id 参数吞掉） |
+| GET | `/api/admin/posts/lookup?q=关键词&page=1` | 站内文章选择器（编辑器「插入链接 → 站内文章」）：仅已发布，轻出参 `{items:[{id, slug, title, summary, cover, published_at, minTier}], total, page, totalPages}`，无正文无口令（`minTier` 给归一后的三档）；**注册在 `/:id` 之前**（否则 lookup 被 id 参数吞掉） |
 | GET | `/api/admin/posts/:id` | 详情（含 content、categoryId） |
 | PUT | `/api/admin/posts/:id` | 更新（autosave 用；已发布时间不会被草稿保存抹掉）。**改 slug 时旧值自动追加进 `old_slugs`**（去重、上限 20，B22）——前台旧地址此后 301 到新地址（仅现存已发布且可见窗口内命中，回收站 / 草稿 / 窗口外保持 404）。**缺键即保留**：Body 里没出现的字段（content/tags/categoryId/title 等）一律沿用旧值——列表页状态切换只发 `{status}` 不会误清正文；显式传空串/空数组/`null` 才是清空 |
 | POST | `/api/admin/posts/:id/pin` | Body `{pinned:true/false}` |
@@ -232,17 +232,16 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
   "publishAt": 1791121500000,
   "pinned": false,
   "slug": "留空自动生成，可自定义",
-  "minTier": "all | member | coffee | top",
-  "password": "访问密码，可空",
+  "minTier": "all | fixed | member",
   "aiGenerated": false
 }
 ```
 
-约束：title ≤ 150 字；content ≤ 1MB；tags ≤ 8 个、每个 ≤ 20 字；cover 必须以 `/` 或 `http(s)://` 开头；`categoryId` 为 null/空表示未分类，不存在分类 id 时被忽略；`password` ≤ 64 位；`minTier` 是会员可见档位（`all` 公开默认 / `member` 登录会员 / `coffee` 咖啡 / `top` 顶级，脏值归一为 `all`）；`aiGenerated` 是「AI 生成」自愿申报（`true` = 文章页日期行显示 AI 生成标识，对应《人工智能生成合成内容标识办法》显式标识口径，缺省不显示）。`status:"scheduled"` 时 `publishAt` 为毫秒时间戳（到点由每分钟 Cron 翻成 published 并把 `published_at` 设为该时刻，同时推 Telegram；转 published/draft 时 `publishAt` 自动清空）。
+约束：title ≤ 150 字；content ≤ 1MB；tags ≤ 8 个、每个 ≤ 20 字；cover 必须以 `/` 或 `http(s)://` 开头；`categoryId` 为 null/空表示未分类，不存在分类 id 时被忽略；`minTier` 是可见性三档（`all` 公开默认 / `fixed` 固定密码 / `member` 会员密码；会员体系时代的 `coffee`/`top` 等值一律归为 `member`）；`aiGenerated` 是「AI 生成」自愿申报（`true` = 文章页日期行显示 AI 生成标识，对应《人工智能生成合成内容标识办法》显式标识口径，缺省不显示）。`status:"scheduled"` 时 `publishAt` 为毫秒时间戳（到点由每分钟 Cron 翻成 published 并把 `published_at` 设为该时刻，同时推 Telegram；转 published/draft 时 `publishAt` 自动清空）。
 
 **部分更新（PUT）**：`minTier` / `aiGenerated` 与其余键同为「缺键即保留」语义——只发 `{status}` 的列表页状态切换不会误清档位与 AI 标注。
 
-**访问密码（文章加密码）**：`password` 缺键 = 保持现状（自动保存安全），非空 = 设置 / 更换（服务端 PBKDF2 单向哈希落库，明文与哈希都不回显），空串 = 解除加密。响应里只有 `hasPassword` 布尔，`password_hash` 永不出现。加密文章的前台行为（机制见 `src/protect.ts`）：文章页在密码验证通过前只渲染密码表单（正文、评论区、自动摘要、JSON-LD 描述一概不出，管理员登录除外）；解锁走表单 `POST /post/:slug/unlock`（`application/x-www-form-urlencoded`，Body `password=…`，非 JSON API）——成功 303 回文章页并签发 HttpOnly 解锁 Cookie `bloghao_pp`（HMAC key 即该文 password_hash，30 天有效、改密即失效），失败 303 回 `?pwerr=1`，限流触发 303 回 `?pwerr=slow`（每 IP 每文 10 次 / 10 分钟）。防泄漏口径：RSS 不出该文 `content:encoded` 全文；关键词搜索不命中加密文章；`/random` 不进加密文章。
+**访问口令（两档站级密码）**：`POST`/`PUT` 不再接受 `password` 字段（单篇密码已退役，传了也被忽略）。可见性由 `minTier` 决定，两把口令在设置里维护：`gateFixedPassword`（固定密码）与 `gateMemberPassword`（会员密码），PUT `/api/admin/settings` 传明文、服务端 PBKDF2 存 `salt:hash`，明文与 hash 都不回显（`SECRET_SETTINGS` 打码）；传空串 = 清除该档。两档是包含关系——**固定密码文章认固定或会员令牌，会员密码文章只认会员令牌**。文章页在口令验证通过前只渲染口令表单（正文、自动摘要、JSON-LD 描述、OG 正文卡图一概不出，管理员登录除外）；解锁走表单 `POST /post/:slug/unlock`（`application/x-www-form-urlencoded`，Body `password=…`，非 JSON API）——成功 303 回文章页并签发 HttpOnly Cookie `bloghao_gate`（令牌 `level.exp.hmac`，HMAC key 即该档当前 hash，30 天有效；**改密码即该档全部失效**），失败 303 回 `?pwerr=1`，限流触发 `?pwerr=slow`（每 IP 10 次 / 10 分钟——口令全站共享，按文章分开计等于给爆破者换一篇就新额度），该档未配口令时页面提示「站长还没有配置」。防泄漏口径：RSS / JSON Feed / llms-full 连试读段都不出；关键词搜索整体不命中（`min_tier = 'all'`）；`/random` 不进锁文；`/post/:slug.md` 404。后台编辑器要判断两档是否已配置，用 `GET /api/admin/gate-state`（只回 `{fixed:boolean, member:boolean}`）
 
 ### 微博（随手记）
 | 方法 | 路径 | 说明 |
@@ -492,9 +491,9 @@ Model Context Protocol 端点（**Streamable HTTP 无状态模式**）：JSON-RP
 
 | 工具 | 入参（粗体必填） | 行为 |
 | --- | --- | --- |
-| `publish_post` | **title**、**content**、format（`markdown` 默认 / `html`）、status（`draft` 默认 / `published`）、slug、summary、tags[]、cover | Markdown 先 `mdToHtml` 再 `sanitizeHtml` 入库（与后台编辑器 MD 模式同链路）；slug 自动查重加序号；出参 `{id, slug, status, url}`。发布即广播 `PostPublishedPayload`（`via:'mcp'`，`locked` 恒 false——工具面不收密码/档位）。定时发布 / 访问密码 / 会员档位不支持 |
-| `list_posts` | status（`all` 默认 / `published` / `draft` / `scheduled`）、q、page、limit（≤50） | 复用 `listPosts`（过滤回收站行）；出参不含正文，带 `hasPassword`；q 关键词搜索不命中加密文（同 listPosts q 分支） |
-| `get_post` | id 或 slug 二选一 | 出参过 `postAdminView`（`password_hash` 永不出参，只给 `hasPassword`），含正文存库 HTML |
+| `publish_post` | **title**、**content**、format（`markdown` 默认 / `html`）、status（`draft` 默认 / `published`）、slug、summary、tags[]、cover | Markdown 先 `mdToHtml` 再 `sanitizeHtml` 入库（与后台编辑器 MD 模式同链路）；slug 自动查重加序号；出参 `{id, slug, status, url}`。发布即广播 `PostPublishedPayload`（`via:'mcp'`，`locked` 恒 false——工具面不收密码/档位）。定时发布 / 可见性档位（固定·会员密码）不支持——工具面发出去的文章恒为「所有人可见」 |
+| `list_posts` | status（`all` 默认 / `published` / `draft` / `scheduled`）、q、page、limit（≤50） | 复用 `listPosts`（过滤回收站行）；出参不含正文，可见性用归一后的 `minTier` 三档；q 关键词搜索不命中需要口令的文章（同 listPosts q 分支） |
+| `get_post` | id 或 slug 二选一 | 出参过 `postAdminView`（`password_hash` 已退役且永不出参，可见性给归一后的 `minTier`），含正文存库 HTML |
 | `list_comments` | status（`pending` 默认 / `approved` / `all`）、type（`all` / `post` / `weibo` / `guestbook`）、limit（≤50） | 带 post_title / weibo_content / parent_nickname 上下文；出参只给审核需要的列，email / qq / ip / avatar 不出 |
 | `publish_weibo` | **content** 或 images[]（站内 `/images/…` 或 http(s)，≤9 张）、status（`published` 默认 / `draft`） | 与 `POST /api/external/weibo` 同口径（不含 base64 传图）；话题自动提取；发布即广播 `WeiboPublishedPayload`（`via:'external'`） |
 

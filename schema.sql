@@ -171,11 +171,11 @@ CREATE TABLE IF NOT EXISTS posts (
   pinned       INTEGER NOT NULL DEFAULT 0,
   views        INTEGER NOT NULL DEFAULT 0,
   likes        INTEGER NOT NULL DEFAULT 0,
-  min_tier     TEXT    NOT NULL DEFAULT 'all', -- 可见档位：all | member（登录会员）| coffee | top（契约见 docs/DEVPLAN-2026-10-07.md 附录 A）
+  min_tier     TEXT    NOT NULL DEFAULT 'all', -- 可见档位：all 公开 | fixed 固定密码 | member 会员密码（两档口令见 src/protect.ts）；会员体系时代的 coffee/top 等值由冷启动迁移收成 member
   author_id    INTEGER,
   published_at INTEGER,
   publish_at   INTEGER,                -- 定时发布时间：到点由 Cron 翻成 published（src/scheduler.ts）
-  password_hash TEXT   NOT NULL DEFAULT '', -- 访问密码（src/protect.ts）：salt:hash（PBKDF2），空 = 未加密；与 min_tier 并存，密码墙优先
+  password_hash TEXT   NOT NULL DEFAULT '', -- 已退役（2026-11）：单篇访问密码被两档站级口令取代，此列不再读写；冷启动迁移会把存量值转成 min_tier='member' 并清空。保留列是为了不做 SQLite 删列 + 老库 ALTER
   ai_generated INTEGER NOT NULL DEFAULT 0, -- AI 生成标注（编辑器「更多」自愿申报，勾选后文章页 meta 行显示标识；PUT 缺键即保留同 password 口径）
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,

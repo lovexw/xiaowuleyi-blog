@@ -74,23 +74,26 @@ test('RSS 全文 CDATA 正确处理 ]]>，摘要关闭全文', () => {
   assert.ok(!summaryOnly.includes('<content:encoded>'))
 })
 
-// ── 广场锁标志（bloghao 命名空间）：hub 的 RSS pull 据此跳过锁文/密码文，与 push 路 locked 同口径 ──
-test('RSS 锁标志：密码文/会员锁文条目带 <bloghao:locked>，公开文不带', () => {
+// ── 广场锁标志（bloghao 命名空间）：hub 的 RSS pull 据此跳过锁文，与 push 路 locked 同口径 ──
+test('RSS 锁标志：需要口令的条目带 <bloghao:locked> 且不出全文，公开文不带', () => {
   const posts = [
-    { slug: 'open', title: '公开文', content: '<p>正文</p>', summary: '摘要', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
-    { slug: 'pw', title: '密码文', content: '<p>正文</p>', summary: '', password_hash: 'salt:hash', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
-    { slug: 'tier', title: '会员文', content: '<p>正文</p>', summary: '试读', min_tier: 'coffee', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
+    { slug: 'open', title: '公开文', content: '<p>正文</p>', summary: '摘要', min_tier: 'all', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
+    { slug: 'fixed', title: '固定密码文', content: '<p>正文</p>', summary: '导读', min_tier: 'fixed', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
+    { slug: 'member', title: '会员密码文', content: '<p>正文</p>', summary: '试读', min_tier: 'member', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
+    // 会员体系时代的脏档位同样按锁文处理（迁移未跑到的库也不能漏）
+    { slug: 'dirty', title: '脏档位文', content: '<p>正文</p>', summary: '试读', min_tier: 'coffee', published_at: Date.UTC(2026, 0, 1), updated_at: 0 } as never,
   ]
   const xml = buildRss(settings, posts, 'https://x.com')
   assert.ok(xml.includes('xmlns:bloghao="https://bloghao.com/plaza-ns"'), xml)
   const itemOf = (title: string) => xml.slice(xml.indexOf(`<title>${title}`), xml.indexOf('</item>', xml.indexOf(`<title>${title}`)))
-  const pw = itemOf('密码文')
-  const tier = itemOf('会员文')
+  for (const title of ['固定密码文', '会员密码文', '脏档位文']) {
+    const item = itemOf(title)
+    assert.ok(item.includes('<bloghao:locked>1</bloghao:locked>'), title)
+    assert.ok(!item.includes('<content:encoded>'), `锁文连试读段都不出：${title}`)
+  }
   const open = itemOf('公开文')
-  assert.ok(pw.includes('<bloghao:locked>1</bloghao:locked>'), pw)
-  assert.ok(tier.includes('<bloghao:locked>1</bloghao:locked>'), tier)
   assert.ok(!open.includes('bloghao:locked'), open)
-  assert.ok(!pw.includes('<content:encoded>'), '密码文不出全文（既有防泄漏口径不回归）')
+  assert.ok(open.includes('<content:encoded>'), '公开文照常出全文')
 })
 
 // ── 回归（2026-10 安全复查）：XML 1.0 禁止的控制字符曾原样输出，一条脏数据打挂整份 feed ──
@@ -140,19 +143,21 @@ test('JSON Feed：1.1 结构、slug 编码、tags 解析、isoDate +08:00、相�
   assert.equal(out.items[0].image, 'https://x.com/images/cover.jpg')
 })
 
-test('JSON Feed 防泄漏：密码文不出正文只留摘要；会员锁文只出试读段 + 引导', () => {
+test('JSON Feed 防泄漏：需要口令的文不出正文（连试读段都不给），只留作者摘要', () => {
   const long = '<p>' + '字'.repeat(300) + '</p>'
-  const pw = JSON.parse(
-    buildJsonFeed(settings, [{ slug: 'a', title: 'T', content: long, summary: '自填摘要', password_hash: 'salt:hash', published_at: 1, updated_at: 1 } as never], 'https://x.com')
-  )
-  assert.equal(pw.items[0].content_html, undefined, '密码文连试读段都不出（比 RSS 口径更严）')
-  assert.equal(pw.items[0].summary, '自填摘要')
+  for (const minTier of ['fixed', 'member', 'coffee']) {
+    const out = JSON.parse(
+      buildJsonFeed(settings, [{ slug: 'a', title: 'T', content: long, summary: '自填摘要', min_tier: minTier, published_at: 1, updated_at: 1 } as never], 'https://x.com')
+    )
+    assert.equal(out.items[0].content_html, undefined, `锁文一个字节正文都不出：${minTier}`)
+    assert.equal(out.items[0].summary, '自填摘要')
+  }
 
-  const locked = JSON.parse(
-    buildJsonFeed(settings, [{ slug: 'b', title: 'T', content: long, summary: '', min_tier: 'coffee', published_at: 1, updated_at: 1 } as never], 'https://x.com')
+  // 对照：公开文照常出全文
+  const open = JSON.parse(
+    buildJsonFeed(settings, [{ slug: 'b', title: 'T', content: long, summary: '', min_tier: 'all', published_at: 1, updated_at: 1 } as never], 'https://x.com')
   )
-  assert.ok(locked.items[0].content_html.includes('会员专属'), '锁文只出试读段 + 引导')
-  assert.ok(locked.items[0].content_html.length < long.length, '正文被服务端截断')
+  assert.ok(open.items[0].content_html.includes('字'))
 })
 
 test('JSON Feed：全文关闭只出摘要；无封面不出 image 键', () => {

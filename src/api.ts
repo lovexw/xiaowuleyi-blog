@@ -101,7 +101,7 @@ import {
   upsertInstalled,
 } from './pluginpkg'
 import { EMOJI_BASE, WECHAT_EMOJI } from './emoji'
-import { awardCommentPoints, awardPoints, bumpActiveDay, normalizeMinTier, spendPoints } from './points'
+import { awardCommentPoints, awardPoints, bumpActiveDay, spendPoints } from './points'
 import { fanDay, fanLevel, nextStreak } from './fanrank'
 import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, upgradeTarget, type MemberTierDef } from './tiers'
 import { genInviteCode, inviteStatus, normalizeInviteCode, normalizeMaxUses } from './invite'
@@ -144,7 +144,7 @@ import { suggestSearch } from './fts'
 import { sanitizeHtml } from './sanitize'
 import { cleanupUnreferenced, backfillHashes, mergeAllDuplicates, mergeDuplicate, runAudit } from './audit'
 import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mediaDeleteKeys, saveUpload, sniffImageExt, sniffUploadExt, sniffVideoCodec, transferImage } from './store'
-import { hashPostPassword } from './protect'
+import { gateHashesOf, hashGatePassword, normalizeAccess } from './protect'
 import { generateTotpSecret, totpProvisioningUri, verifyTotp } from './totp'
 import { qrMatrix } from './qrcode'
 import { notifyAdminText } from './external'
@@ -1219,7 +1219,6 @@ async function readPostPayload(c: { req: { json: () => Promise<unknown> } }) {
     pinned: 'pinned' in b,
     categoryId: 'categoryId' in b,
     minTier: 'minTier' in b,
-    password: 'password' in b,
     aiGenerated: 'aiGenerated' in b,
   }
   const tags = Array.isArray(b.tags)
@@ -1245,11 +1244,10 @@ async function readPostPayload(c: { req: { json: () => Promise<unknown> } }) {
     slug: cleanSlug(String(b.slug ?? '')),
     categoryId,
     publishAt,
-    // 可见档位（契约 DEVPLAN 附录 A A7）：脏值归一为 all
-    minTier: normalizeMinTier(typeof b.minTier === 'string' ? b.minTier : null),
-    // 访问密码（src/protect.ts）：仅在键存在时参与写入；空串 = 解除加密，缺键 = 保持现状。
-    // 明文只在本次请求内存在，落库前即转 PBKDF2，响应里永远只有 hasPassword 布尔
-    password: String(b.password ?? '').slice(0, 64),
+    // 可见档位（两档口令，src/protect.ts）：all / fixed / member 三值。
+    // 会员体系时代的档位 key（coffee/top/自定义）经 normalizeAccess 一律收成 member——
+    // 那些档位的语义是「比公开更严」，收敛时宁可锁紧也不误放成全网可见
+    minTier: normalizeAccess(typeof b.minTier === 'string' ? b.minTier : null),
     // AI 生成标注（编辑器「更多」自愿申报）：缺键 = 保持现状（列表页状态切换的 {status} 载荷不会误清）
     aiGenerated: b.aiGenerated ? 1 : 0,
     has,
@@ -1366,21 +1364,19 @@ api.post('/admin/posts', async (c) => {
   const base = p.slug || slugify(title)
   const slug = await uniqueSlug(c.env.DB, base)
   const now = Date.now()
-  // 访问密码：随创建一并写入（空 = 不加密）
-  const passwordHash = p.password ? await hashPostPassword(p.password) : ''
   // 自动摘要取净化后的正文（与 PUT 更新同口径：粘贴内容里的标签/实体不进导读面）
   const clean = sanitizeHtml(p.content)
   const res = await c.env.DB.prepare(
-    `INSERT INTO posts (slug, title, content, summary, cover, tags, status, pinned, author_id, published_at, publish_at, min_tier, password_hash, ai_generated, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO posts (slug, title, content, summary, cover, tags, status, pinned, author_id, published_at, publish_at, min_tier, ai_generated, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   )
     .bind(
       slug,
       title,
       clean,
-      // 密码文的自动摘要留空：summary 列是对外导读面（RSS description / meta / 公开列表），
-      // 不能拿加密正文截前 80 字泄出去；作者手填的摘要照常保留（作者主动公开的导读）
-      p.summary || (passwordHash ? '' : excerpt(clean, 80)),
+      // 需要口令的文章自动摘要留空：summary 列是对外导读面（RSS description / meta / 公开列表），
+      // 不能拿锁住的正文截前 80 字泄出去；作者手填的摘要照常保留（作者主动公开的导读）
+      p.summary || (p.minTier !== 'all' ? '' : excerpt(clean, 80)),
       p.cover,
       JSON.stringify(p.tags),
       p.status,
@@ -1389,7 +1385,6 @@ api.post('/admin/posts', async (c) => {
       p.status === 'published' ? now : null,
       p.status === 'scheduled' ? (p.publishAt ?? null) : null,
       p.minTier,
-      passwordHash,
       p.aiGenerated,
       now,
       now
@@ -1408,8 +1403,8 @@ api.post('/admin/posts', async (c) => {
         title: row.title,
         summary: row.summary,
         via: 'admin',
-        // 加密/会员锁文标志：广场同步插件据此跳过（防泄漏清单同口径）
-        locked: !!row.password_hash || (!!row.min_tier && row.min_tier !== 'all'),
+        // 口令锁文标志：广场同步插件据此跳过（防泄漏清单同口径）
+        locked: normalizeAccess(row.min_tier) !== 'all',
       })
     )
   }
@@ -1431,8 +1426,7 @@ api.get('/admin/posts/lookup', async (c) => {
       summary: (p.summary || '').slice(0, 80),
       cover: p.cover || '',
       published_at: p.published_at,
-      hasPassword: !!p.password_hash,
-      minTier: normalizeMinTier(p.min_tier),
+      minTier: normalizeAccess(p.min_tier),
     })),
     total: r.total,
     page: r.page,
@@ -1465,19 +1459,20 @@ api.put('/admin/posts/:id', async (c) => {
   const oldSlugs = slugChanged ? appendOldSlug(existing.old_slugs, existing.slug, slug) : existing.old_slugs || '[]'
   const content = p.has.content ? sanitizeHtml(p.content) : existing.content
   // status 先解析（部分更新语义：缺键沿用库里状态），summary 兜底按解析后的状态算，别用 payload 默认值。
-  // 密码文的自动摘要同样留空（同 POST 创建口径）：summary 是公开导读面，加密正文不出前 80 字
+  // 需要口令的文章同样留空自动摘要（同 POST 创建口径）：summary 是公开导读面，锁住的正文不该从前 80 字漏出去
   const status = p.has.status ? p.status : existing.status
-  const willLock = p.has.password ? !!p.password : !!existing.password_hash
+  const minTier = p.has.minTier ? p.minTier : normalizeAccess(existing.min_tier)
+  // 需要口令的文章同样只出作者自填摘要：summary 是公开导读面，锁住的正文不该从前 80 字漏出去
+  const willLock = minTier !== 'all'
   let summary = p.has.summary ? p.summary || (willLock ? '' : status === 'published' ? excerpt(content, 80) : '') : existing.summary
-  // 密码文只出作者自填摘要（防泄漏清单）：编辑器恒回传 summary（预填旧自动摘要）会短路上面的
-  // 清空逻辑——发布后补设密码时，残留的自动摘要（=正文前 80 字）会继续从 RSS/meta/列表泄漏。
-  // 与旧正文 excerpt 比对（覆盖「改正文+加密码同请求」），命中即清；手填恰好撞上自动摘要也会
+  // 锁文只出作者自填摘要（防泄漏清单）：编辑器恒回传 summary（预填旧自动摘要）会短路上面的
+  // 清空逻辑——发布后补设档位时，残留的自动摘要（=正文前 80 字）会继续从 RSS/meta/列表泄漏。
+  // 与旧正文 excerpt 比对（覆盖「改正文+改档位同请求」），命中即清；手填恰好撞上自动摘要也会
   // 被（无法区分、误伤方向更安全）；不限定「本次新设」，存量泄漏行在下次保存时自愈
   if (willLock && summary && summary === excerpt(existing.content, 80)) summary = ''
   const cover = p.has.cover ? p.cover : existing.cover
   const tags = p.has.tags ? JSON.stringify(p.tags) : existing.tags
   const pinned = p.has.pinned ? p.pinned : existing.pinned
-  const minTier = p.has.minTier ? p.minTier : normalizeMinTier(existing.min_tier)
   // 草稿也保留已有 published_at：采集插件会把原文发布时间写入草稿，
   // 自动保存不能把它抹掉；发布时若草稿已有时间则沿用。
   // publish_at 只在 scheduled 状态下有意义：定时保存写入目标时间，
@@ -1486,12 +1481,10 @@ api.put('/admin/posts/:id', async (c) => {
   const publishAt = status === 'scheduled' ? (p.publishAt ?? existing.publish_at ?? null) : null
   // scheduled 但新旧都没有时间：拒绝而不是落 NULL 卡死在定时态（编辑器有校验，这里拦 API 直调）
   if (status === 'scheduled' && publishAt == null) return jsonError('定时发布必须填写发布时间')
-  // 访问密码：键存在才参与（空串解除、非空设置/更换），缺键保持原值——自动安全永远不误清
-  const passwordHash = p.has.password ? (p.password ? await hashPostPassword(p.password) : '') : existing.password_hash || ''
   // AI 生成标注：同缺键即保留口径（列表页只发 {status} 的 PUT 不得误清）
   const aiGenerated = p.has.aiGenerated ? p.aiGenerated : (existing.ai_generated ?? 0)
   await c.env.DB.prepare(
-    `UPDATE posts SET slug = ?, old_slugs = ?, title = ?, content = ?, summary = ?, cover = ?, tags = ?, status = ?, pinned = ?, published_at = ?, publish_at = ?, min_tier = ?, password_hash = ?, ai_generated = ?, updated_at = ? WHERE id = ?`
+    `UPDATE posts SET slug = ?, old_slugs = ?, title = ?, content = ?, summary = ?, cover = ?, tags = ?, status = ?, pinned = ?, published_at = ?, publish_at = ?, min_tier = ?, ai_generated = ?, updated_at = ? WHERE id = ?`
   )
     .bind(
       slug,
@@ -1506,7 +1499,6 @@ api.put('/admin/posts/:id', async (c) => {
       publishedAt,
       publishAt,
       minTier,
-      passwordHash,
       aiGenerated,
       Date.now(),
       id
@@ -1537,20 +1529,19 @@ api.put('/admin/posts/:id', async (c) => {
         title: row.title,
         summary: row.summary,
         via: 'admin',
-        // 加密/会员锁文标志：广场同步插件据此跳过（防泄漏清单同口径）
-        locked: !!row.password_hash || (!!row.min_tier && row.min_tier !== 'all'),
+        // 口令锁文标志：广场同步插件据此跳过（防泄漏清单同口径）
+        locked: normalizeAccess(row.min_tier) !== 'all',
       })
     )
   }
-  // 广场下架广播（条目生命周期闭环）：已发布文章转出发布态、或补设密码/升档锁文时，
+  // 广场下架广播（条目生命周期闭环）：已发布文章转出发布态、或升档锁文时，
   // 把条目从 hub 摘除（ref 用 existing.slug——hub 收录的是改 slug 前的旧引用）；
   // 解锁/恢复发布后 pull 会自愈补回
   if (
     existing.status === 'published' &&
     row &&
     (status !== 'published' ||
-      (!!passwordHash && !existing.password_hash) ||
-      (minTier !== 'all' && normalizeMinTier(existing.min_tier) === 'all'))
+      (minTier !== 'all' && normalizeAccess(existing.min_tier) === 'all'))
   ) {
     c.executionCtx.waitUntil(firePlazaRetract(c.env, [{ kind: 'post', ref: existing.slug }]))
   }
@@ -2616,6 +2607,13 @@ function seoDisplaySettings(s: Record<string, string>): Record<string, string> {
   return s
 }
 
+/** 两档访问口令的配置状态（编辑器「谁能看」用）：只回布尔，hash 永不出参。
+ *  编辑器拿它给未配置的档位标「读者打不开」，避免站长选了会员可见却发现没人能读 */
+api.get('/admin/gate-state', async (c) => {
+  const h = gateHashesOf(await getSettings(c.env.DB))
+  return c.json({ fixed: !!h.fixed, member: !!h.member })
+})
+
 api.get('/admin/settings', async (c) => {
   const settings = seoDisplaySettings(await getSettings(c.env.DB))
   for (const key of SECRET_SETTINGS) {
@@ -2646,6 +2644,15 @@ api.put('/admin/settings', async (c) => {
       // 新键保存后下方统一清空旧键（避免旧值继续回落）
       if (v !== '' && !Object.prototype.hasOwnProperty.call(LIST_RANGES, v)) return jsonError('可见范围档位不正确')
       patch[key] = v
+      continue
+    }
+    if (key === 'gateFixedPassword' || key === 'gateMemberPassword') {
+      // 两档站级访问口令（src/protect.ts）：只存 PBKDF2 `salt:hash`，明文不落库。
+      // '' = 清除该档——清除同时让该档已发出的解锁 Cookie 全部作废（HMAC key 就是这个 hash）。
+      // 4 位下限：这两把是全站共享的，短口令等于没锁；上限 64 与登录口令同口径
+      const pw = v.slice(0, 64)
+      if (pw && pw.length < 4) return jsonError('访问密码至少 4 位')
+      patch[key] = pw ? await hashGatePassword(pw) : ''
       continue
     }
     if (key === 'memberTiers') {
@@ -2991,7 +2998,7 @@ api.post('/admin/import/wxr', async (c) => {
   if (!m.posts.length && !m.pages.length) return jsonError('WXR 里没有可导入的文章或页面（全部被跳过或为空）')
   if (m.posts.length > MAX_IMPORT_POSTS) return jsonError(`文章 ${m.posts.length} 篇超过单次上限 ${MAX_IMPORT_POSTS}，请在 WordPress 按作者 / 日期分卷导出后分批导入`)
   if (m.pages.length > MAX_IMPORT_PAGES) return jsonError(`页面 ${m.pages.length} 个超过单次上限 ${MAX_IMPORT_PAGES}，请分卷导出`)
-  if (m.counts.protected > MAX_IMPORT_PASSWORDS) return jsonError(`带访问密码的文章 ${m.counts.protected} 篇超过单次上限 ${MAX_IMPORT_PASSWORDS}（密码哈希是慢操作），请先处理或分卷导入`)
+  if (m.counts.protected > MAX_IMPORT_PASSWORDS) return jsonError(`带访问密码的文章 ${m.counts.protected} 篇超过单次上限 ${MAX_IMPORT_PASSWORDS}，请先处理或分卷导入（这些文章导入后统一归到「会员密码可见」，一次太多不方便逐篇核对）`)
   if (m.images.length > MAX_IMPORT_IMAGES) return jsonError(`附件图片 ${m.images.length} 张超过单次上限 ${MAX_IMPORT_IMAGES}，请在媒体库精简后重新导出，或分卷导入`)
 
   const db = c.env.DB
@@ -3038,27 +3045,29 @@ api.post('/admin/import/wxr', async (c) => {
     await Promise.all(
       m.posts.slice(i, i + 10).map(async (p) => {
         const clean = sanitizeHtml(p.content)
-        const passwordHash = p.password ? await hashPostPassword(p.password) : ''
+        // WXR 的 <wp:post_password> 在单篇密码退役后并入「会员密码」档：
+        // 原作者设过密码的文章本就是「只给一部分人看」的语义，导进来不能静默公开
+        const access = p.password ? 'member' : 'all'
         const publishedAt = p.status === 'published' ? (p.publishedAt ?? now) : null
         if (p.status === 'published' && p.publishedAt == null) publishedNoTime++
         const res = await db
           .prepare(
-            `INSERT INTO posts (slug, title, content, summary, cover, tags, status, pinned, author_id, published_at, publish_at, min_tier, password_hash, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, 'all', ?, ?, ?)`
+            `INSERT INTO posts (slug, title, content, summary, cover, tags, status, pinned, author_id, published_at, publish_at, min_tier, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`
           )
           .bind(
             nextSlug(p.slug || p.title, p.wpId),
             p.title,
             clean,
-            // 摘要：WXR 手写摘要优先；密码文留空（summary 是对外导读面，同 api.ts 建文口径）
-            p.excerpt.trim() || (passwordHash ? '' : excerpt(clean, 80)),
+            // 摘要：WXR 手写摘要优先；锁文留空（summary 是对外导读面，同 api.ts 建文口径）
+            p.excerpt.trim() || (p.password ? '' : excerpt(clean, 80)),
             '', // 封面由图片转存阶段回填（_thumbnail_id → 附件映射）
             JSON.stringify(p.tags.filter((t) => t)),
             p.status,
             user.id,
             publishedAt,
             p.publishAt,
-            passwordHash,
+            access,
             publishedAt ?? now,
             now
           )

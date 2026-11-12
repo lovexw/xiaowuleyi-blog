@@ -2,7 +2,7 @@ import type { MiddlewareHandler } from 'hono'
 import { MEMBER_SESSION_COOKIE, SESSION_COOKIE } from './auth'
 import { getSettings, PAGE_CACHE_EPOCH_KEY, saveSettings } from './db'
 import { nodeMemoryCache } from './memory-cache'
-import { PP_COOKIE } from './protect'
+import { GATE_COOKIE } from './protect'
 import type { Env, SessionUser } from './types'
 
 /* ---------------- 页面边缘缓存（公开面 · 匿名访客 30 分钟副本） ----------------
@@ -159,7 +159,7 @@ export function pageCacheKeyFor(input: {
   if (
     cookie.includes(SESSION_COOKIE) ||
     cookie.includes(MEMBER_SESSION_COOKIE) ||
-    cookie.includes(PP_COOKIE)
+    cookie.includes(GATE_COOKIE)
   ) {
     return null
   }

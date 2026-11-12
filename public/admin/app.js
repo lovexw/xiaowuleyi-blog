@@ -1025,7 +1025,7 @@ async function viewPosts() {
         <div class="post-title"><a href="#/editor/${p.id}">${esc(p.title)}</a>
           ${chip}
           ${p.pinned ? '<span class="chip chip-warn">置顶</span>' : ''}
-          ${p.hasPassword ? '<span class="chip chip-gray">🔒 加密</span>' : ''}
+          ${p.minTier === 'fixed' ? '<span class="chip chip-gray">🔒 固定密码</span>' : p.minTier === 'member' ? '<span class="chip chip-gray">🔒 会员密码</span>' : ''}
         </div>
         <div class="post-meta">
           <span>${p.slug}</span><span>${p.views} 阅读</span><span>${p.likes} 赞</span>
@@ -4000,6 +4000,13 @@ async function viewPlugins() {
 }
 
 /* ---------------- 设置 ---------------- */
+/** 随机访问口令：12 位，字符集去掉 0/O/1/l/I 这类看错的（这两把可能要念给朋友或手抄） */
+function randomGatePassword(len = 12) {
+  const abc = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const buf = new Uint8Array(len)
+  crypto.getRandomValues(buf)
+  return Array.from(buf, (b) => abc[b % abc.length]).join('')
+}
 /* 设置页当前页签：页内记忆（不进 hash——hashchange 会触发 navigate 重挂视图，丢未保存输入） */
 let settingsTab = 'site'
 /* 设置页「常用 / 全部」：默认只露日常会动的那几组，高级组折起来（偏好存 localStorage） */
@@ -4194,6 +4201,30 @@ async function viewSettings() {
         </div>
         <label class="mode-row"><input type="radio" name="st-siteModeGroup" value="blog"><span class="mode-text"><b>纯博客</b><i>隐藏微博模块：导航去掉「微博」，首页不出随手记，/weibo 跳回首页</i></span></label>
         <label class="mode-row"><input type="radio" name="st-siteModeGroup" value="weibo"><span class="mode-text"><b>纯微博</b><i>打开首页就是微博时间线，导航隐藏归档/分类话题/随机等博客模块；文章数据保留，旧链接仍可访问</i></span></label>
+      </div>
+    </div>
+
+    <div class="panel" style="padding:20px;">
+      <div class="form-section"><h3>访问密码</h3>
+        <div class="sec-desc">文章可以标成「固定密码可见」或「会员密码可见」，读者输对密码才能读全文，解锁状态保留 30 天。改密码 = 已解锁的人全部失效，需要重新输入。两把都留空时，标了密码的文章谁都打不开（文章页会提示未配置）</div>
+        <div class="form-item">
+          <label>固定密码 ${s.gateFixedPassword ? '<span class="chip chip-green">已设置</span>' : '<span class="chip chip-gray">未设置</span>'}</label>
+          <div class="sec-desc">谁拿到都能用，适合公开给一群人的内容。改这一把只会让「固定密码可见」的文章重新要密码，不影响会员密码</div>
+          <div class="fav-row">
+            <input class="input" id="st-gateFixedPassword" type="password" autocomplete="new-password" maxlength="64" style="flex:1;min-width:0;" placeholder="${s.gateFixedPassword ? '已设置，留空保持不变' : '至少 4 位，留空 = 不启用'}">
+            <button class="btn btn-sm" type="button" data-gate-gen="fixed">随机生成</button>
+            ${s.gateFixedPassword ? '<button class="btn btn-sm btn-ghost" type="button" data-gate-clear="fixed">清除</button>' : ''}
+          </div>
+        </div>
+        <div class="form-item">
+          <label>会员密码 ${s.gateMemberPassword ? '<span class="chip chip-green">已设置</span>' : '<span class="chip chip-gray">未设置</span>'}</label>
+          <div class="sec-desc">只发给你想给的人；随时换一把就相当于「撤销所有已发出的访问权」。输会员密码的人也能读固定密码文章</div>
+          <div class="fav-row">
+            <input class="input" id="st-gateMemberPassword" type="password" autocomplete="new-password" maxlength="64" style="flex:1;min-width:0;" placeholder="${s.gateMemberPassword ? '已设置，留空保持不变' : '至少 4 位，留空 = 不启用'}">
+            <button class="btn btn-sm" type="button" data-gate-gen="member">随机生成</button>
+            ${s.gateMemberPassword ? '<button class="btn btn-sm btn-ghost" type="button" data-gate-clear="member">清除</button>' : ''}
+          </div>
+        </div>
       </div>
     </div>
 
@@ -4644,6 +4675,12 @@ async function viewSettings() {
       robotsExtra: g('st-robotsExtra').value,
       aiPolicy: (document.querySelector('input[name="st-aiPolicy"]:checked') || { value: 'allow' }).value,
     }
+    // 两档访问口令（src/protect.ts）：只有输入框真有内容才提交——留空 = 保持原值。
+    // 清除必须走专门的「清除」按钮，否则「编辑别的设置时顺手清空了输入框」会连读权限一起抹掉
+    const gateFixedPw = g('st-gateFixedPassword').value
+    const gateMemberPw = g('st-gateMemberPassword').value
+    if (gateFixedPw) body.gateFixedPassword = gateFixedPw
+    if (gateMemberPw) body.gateMemberPassword = gateMemberPw
     // 关站是全站 503 的大动作：开启瞬间必须明确确认（取消时不动按钮状态）
     if (body.siteClosed === '1' && !wasClosed) {
       if (!(await confirmBox('确定关闭站点吗？保存后所有访客和搜索引擎都只能看到闭站页，只有登录后台的你才能恢复访问。'))) return
@@ -4652,12 +4689,47 @@ async function viewSettings() {
     try {
       const d = await api('/admin/settings', { method: 'PUT', body })
       state.settings = d.settings
+      // 改了口令就重挂页面：输入框清空、「已设置」标记与「清除」按钮要立刻反映新状态
+      if (gateFixedPw || gateMemberPw) {
+        toast('设置已保存 ✅ 口令已更新，之前的解锁全部失效')
+        return navigate()
+      }
       toast(!wasClosed && body.siteClosed === '1' ? '站点已关闭：访客现在只能看到闭站页' : '设置已保存 ✅')
     } catch (e) {
       toast(e.message, true)
     } finally {
       btn.disabled = false
     }
+  })
+
+  /* ---- 两档访问口令：随机生成 / 清除（清除是独立动作，不与「保存全部」里留空混淆） ---- */
+  const gateInputOf = (lv) => document.getElementById(lv === 'fixed' ? 'st-gateFixedPassword' : 'st-gateMemberPassword')
+  document.querySelectorAll('[data-gate-gen]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pw = randomGatePassword()
+      const input = gateInputOf(btn.dataset.gateGen)
+      // 生成后转明文显示：口令要发给别人，藏着看不见等于没法复制
+      input.type = 'text'
+      input.value = pw
+      toast(`已生成：${pw} —— 点「保存全部」后才生效`)
+    })
+  })
+  document.querySelectorAll('[data-gate-clear]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const lv = btn.dataset.gateClear
+      const name = lv === 'fixed' ? '固定密码' : '会员密码'
+      if (!(await confirmBox(`清除${name}？清除后，标了「${name}」的文章会立刻对所有人重新上锁，直到你设置新密码。`))) return
+      btn.disabled = true
+      try {
+        const d = await api('/admin/settings', { method: 'PUT', body: { [lv === 'fixed' ? 'gateFixedPassword' : 'gateMemberPassword']: '' } })
+        state.settings = d.settings
+        toast(`${name}已清除`)
+        navigate()
+      } catch (e) {
+        toast(e.message, true)
+        btn.disabled = false
+      }
+    })
   })
 
   document.getElementById('btn-pw').addEventListener('click', async () => {

@@ -66,7 +66,7 @@ test('会员浏览足迹：一次请求只判一次 shouldCountView，去重键�
   // recordMemberVisit 因此从来没执行过。
   assert.equal([...src.matchAll(/shouldCountView\(/g)].length, 2)
   assert.ok(/const countThisView =/.test(src), '应当把判定结果存成变量')
-  assert.ok(/member && !pwLocked && countThisView/.test(src), '会员足迹要复用同一次判定')
+  assert.ok(/member && !gateLocked && countThisView/.test(src), '会员足迹要复用同一次判定')
   assert.ok(src.includes('${host}:${ip}:${postId}'), 'Node 多租户共进程，去重键不带 host 会跨站误伤')
 })
 

@@ -3,13 +3,11 @@
  * H1 站名 + blockquote 描述 + 分节链接清单；llms-full.txt 在同一结构下附全文。
  * 本模块是纯函数组（tests/llms.test.ts 直接导入，不依赖 Workers 运行时），路由在 index.ts。
  *
- * 防泄漏（与 RSS 同一份口径，AGENTS「回收站 / 软删除」「会员体系」防泄漏清单）：
+ * 防泄漏（与 RSS 同一份口径，AGENTS「文章访问口令」防泄漏清单）：
  *  - 传入的文章清单已由调用方过滤（listPosts status=published + 站点可见窗口 + deleted_at IS NULL）；
- *  - 会员锁文（min_tier ≠ all）：索引照常出现（标题/摘要属作者主动公开的导读面，与 RSS 出条目同口径），
- *    llms-full 只出摘要 + 引导——服务端截断是付费墙的安全边界；
- *  - 访问密码文（password_hash 非空）：索引照常出作者摘要（与 RSS description 同口径），
- *    llms-full 只出摘要 + 加密说明；其 /post/:slug.md 直接 404（比 RSS 更严，与关键词搜索
- *    「整体退出」同口径——pages.ts renderPostMarkdown）；
+ *  - 需要口令的文章（min_tier ≠ all，含 fixed 与 member 两档）：索引照常出现（标题/摘要属作者主动
+ *    公开的导读面，与 RSS 出条目同口径），llms-full 只出作者摘要 + 口令说明，正文一个字都不出；
+ *    其 /post/:slug.md 直接 404（与关键词搜索「整体退出」同口径——pages.ts renderPostMarkdown）；
  *  - 全站 noindex（settings.siteNoindex）/ AI 策略 deny 档（readAiPolicy）：index.ts 出桩
  *    （只有站名与说明，不列内容），与 robots.txt 整站 Disallow 同口径；deny 档时 .md 镜像同样
  *    404、文章页 head 不再声明 alternate——AI 面随策略整体关闭，别只关 llms 留 .md。
@@ -88,20 +86,13 @@ export function buildLlmsTxt(settings: SettingsMap, posts: PostRow[], pages: Llm
 
 /** /llms-full.txt —— 同一结构附全文：普通文出正文（库存净化 HTML 经 sanitizeHtml → htmlToMd 转
  *  Markdown，与导出 Markdown 包同款转换器——别按「库存即 Markdown」原样输出，标签会直接透出）；
- *  锁文/密码文只出摘要 + 引导（防泄漏） */
+ *  需要口令的文章只出摘要（防泄漏） */
 export function buildLlmsFullTxt(settings: SettingsMap, posts: PostRow[], siteUrl: string, topics: string[] = []): string {
   const items = posts.map((p) => {
-    const pwProtected = !!p.password_hash
-    const memberLocked = !!p.min_tier && p.min_tier !== 'all'
+    const locked = (p.min_tier || 'all') !== 'all'
     let body: string
-    if (pwProtected) {
-      body =
-        (p.summary ? oneLine(p.summary) + '\n\n' : '') +
-        ('> 本文设有访问密码，正文不对外提供。')
-    } else if (memberLocked) {
-      body =
-        (p.summary ? oneLine(p.summary) + '\n\n' : '') +
-        (`> 本文为会员专属内容，此处仅为摘录，登录会员后可阅读全文：${postUrl(siteUrl, p)}`)
+    if (locked) {
+      body = (p.summary ? oneLine(p.summary) + '\n\n' : '') + (`> 本文需要访问密码，正文不对外提供：${postUrl(siteUrl, p)}`)
     } else {
       body = htmlToMd(sanitizeHtml(String(p.content ?? ''))).trim()
     }

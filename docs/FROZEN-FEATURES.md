@@ -13,7 +13,7 @@
 
 | 功能 | 现状 | 关闭靠什么 | 代码在哪 | 解冻 |
 | --- | --- | --- | --- | --- |
-| 会员体系（注册 / 登录 / 积分 / 档位 / 会员专属文章） | 关 | `settings.membersEnabled='0'` | `src/pages.ts`（/member、/rank 404）、`src/api.ts`（`/member/*` 统一守卫）、`src/tiers.ts`、`src/points.ts` | 后台设置把该键改 `'1'`，无需发版 |
+| 会员体系（注册 / 登录 / 积分 / 档位） | 关 | `settings.membersEnabled='0'` | `src/pages.ts`（/member、/rank 404）、`src/api.ts`（`/member/*` 统一守卫）、`src/tiers.ts`、`src/points.ts` | 后台设置把该键改 `'1'`，无需发版 |
 | 排行榜 | 关 | `settings.rankEnabled='0'` | `src/render.ts` 排行构建器、`/rank` 页 | 同上改 `'1'` |
 | 评论圈层（高档会员评论只对同档可见） | 关 | `settings.commentGateTier=''` | `src/commentgate.ts` | 填档位 key（如 `coffee`） |
 | 铁粉签到 | 随会员关闭 | `/api/member/checkin` 落在 `/member/*` 守卫下 | `src/api.ts` | 开会员即恢复 |
@@ -23,6 +23,12 @@
 | 书影音卡片（豆瓣） | 停用 | `settings.pluginsDisabled` 含 `douban-media`（默认值就是它） | 编辑器插件包 | 后台「插件」页开启 |
 | 英文版 | **已删除**（2026-11-11） | — | 无（`src/i18n.ts` 已移除） | 不打算恢复；要英文站请另起独立站点 |
 | 演示站 | **已删除**（2026-11-11） | — | 无（`src/demo*.ts`、`wrangler.demo.jsonc`、多租户 `--demo` 已全数移除） | 不打算恢复 |
+
+> **2026-11-12 补记**：「会员专属文章」这一块**已经不在会员体系手里了**——文章可见性改由**两档站级访问口令**判定
+> （`posts.min_tier` = `all` / `fixed` / `member`，口令在「设置 → 站点 → 访问密码」）。
+> 会员档位不再是文章可见性的开关；要是有人把 `membersEnabled` 改回 `'1'`，登录会员照旧按档位放行，
+> 与口令叠在一起（会员读「固定密码可见」的文章也算通）。旧锁文的迁移见 AGENTS.md「文章访问口令」一节。
+
 
 ## 二 · 冻结之后的三条规矩
 

@@ -371,10 +371,12 @@ test('端到端：真库导入（文章/页面/评论树/分类关联/密码上�
   assert.ok(String(imported.content).includes('正文第一段'))
   assert.ok(String(imported.summary).includes('手写摘要'))
 
-  // 密码文：post_name 缺省 → cleanSlug(标题)='密码文'；password_hash 是 salt:hash 形态
-  const secret = db.prepare("SELECT password_hash, published_at FROM posts WHERE slug = '密码文'").all() as Record<string, unknown>[]
+  // 密码文：post_name 缺省 → cleanSlug(标题)='密码文'。WXR 的 <wp:post_password> 在单篇密码
+  // 退役后并入「会员密码」档（min_tier='member'），password_hash 不再写入
+  const secret = db.prepare("SELECT min_tier, password_hash, published_at FROM posts WHERE slug = '密码文'").all() as Record<string, unknown>[]
   assert.equal(secret.length, 1)
-  assert.match(String(secret[0].password_hash), /^[0-9a-f]{32}:[0-9a-f]{64}$/)
+  assert.equal(secret[0].min_tier, 'member')
+  assert.equal(secret[0].password_hash, '')
   assert.equal(secret[0].published_at, Date.parse('2023-06-01T09:00:00Z'))
 
   // 定时文：status=scheduled 且 publish_at 为未来时刻
