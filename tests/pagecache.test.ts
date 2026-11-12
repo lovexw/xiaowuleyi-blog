@@ -53,6 +53,13 @@ test('pageCacheKeyFor：受控 query 进键——weibo 分页/深链、标签页
   const s = keyOf({ url: 'https://x.test/search?q=%E5%8D%9A%E5%AE%A2' })
   assert.ok(s && s.includes('q='), '搜索页可缓存且键含 q')
   assert.ok(keyOf({ url: 'https://x.test/search?q=%E5%8D%9A%E5%AE%A2&sort=views' }), '搜索页 + 有效排序可缓存')
+  // 搜索页的 ?sort=time 是真会改结果的第二档（时间序）：必须与默认的相关度分成两个键，
+  // 否则时间序结果会被相关度的边缘副本顶掉（2026-11 搜索强化时踩过的坑）
+  assert.notEqual(
+    keyOf({ url: 'https://x.test/search?q=%E5%8D%9A%E5%AE%A2&sort=time' }),
+    keyOf({ url: 'https://x.test/search?q=%E5%8D%9A%E5%AE%A2' }),
+    '搜索页时间序与相关度必须是两个缓存键'
+  )
 })
 
 test('pageCacheKeyFor：键规范化镜像服务端 clamp/trim 语义（同渲染结果同键）', () => {

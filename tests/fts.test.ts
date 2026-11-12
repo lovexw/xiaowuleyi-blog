@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { DatabaseSync, type StatementSync } from 'node:sqlite'
-import { ftsMatchExpr, searchPages, searchPosts, searchWeibo } from '../src/fts.ts'
+import { ftsMatchExpr, searchPages, searchPosts, searchWeibo, suggestSearch } from '../src/fts.ts'
 import { ensureSchema } from '../src/db.ts'
 
 // ── FTS5 全文搜索（src/fts.ts，ROADMAP B4）──
@@ -253,6 +253,47 @@ test('searchPages：只搜已发布、未回收的独立页面，标题与正文
   const capped = await searchPages(d1, '项目', 1)
   assert.equal(capped.items.length, 1, 'limit 收口')
   assert.equal(capped.total, 2, 'total 仍是全量命中数')
+})
+
+test('suggestSearch：标签 → 文章 → 页面，标题级匹配且排除草稿/回收站/窗口外', async () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(SCHEMA_SQL)
+  const d1 = d1FromSqlite(db)
+  await ensureSchema(d1)
+  seedPostAt(db, 'dep-new', '部署教程（新）', '正文甲', 2_000)
+  seedPostAt(db, 'dep-old', '部署清单', '正文乙', 1_000)
+  db.exec("INSERT INTO posts (slug, title, content, status, created_at, updated_at) VALUES ('dep-draft','部署草稿','正文丙','draft',3,3)")
+  db.exec(
+    "INSERT INTO posts (slug, title, content, status, created_at, updated_at, deleted_at) VALUES ('dep-trash','部署回收','正文丁','published',4,4,99)"
+  )
+  // 正文提到「部署」但标题没有：联想只认标题，不该出现
+  seedPostAt(db, 'body-only', '闲聊', '今天把部署弄完了', 5_000)
+  db.prepare('INSERT INTO pages (title, slug, content, status, sort, created_at, updated_at) VALUES (?,?,?,?,?,1,1)').run(
+    '部署说明页',
+    'deploy-doc',
+    '',
+    'published',
+    10
+  )
+
+  const r = await suggestSearch(d1, '部署', { tags: [{ name: '部署', count: 3 }, { name: '生活', count: 1 }] })
+  assert.deepEqual(
+    r.map((i) => i.type),
+    ['tag', 'post', 'post', 'page'],
+    '标签最窄排最前，文章按发布时间倒序，页面最后'
+  )
+  assert.equal(r[0].href, '/tag/%E9%83%A8%E7%BD%B2')
+  assert.deepEqual(r.slice(1, 3).map((i) => i.text), ['部署教程（新）', '部署清单'], '新的在前')
+  assert.equal(r[3].href, '/page/deploy-doc')
+  assert.ok(!r.some((i) => i.text === '部署草稿' || i.text === '部署回收'), '草稿与回收站不进联想')
+  assert.ok(!r.some((i) => i.text === '闲聊'), '只匹配标题，正文命中不参与联想')
+
+  const windowed = await suggestSearch(d1, '部署', { afterTs: 1_500 })
+  assert.deepEqual(windowed.filter((i) => i.type === 'post').map((i) => i.text), ['部署教程（新）'], '窗口外文章不进联想')
+
+  assert.equal((await suggestSearch(d1, '部署', { limit: 2 })).length, 2, 'limit 收口')
+  assert.deepEqual(await suggestSearch(d1, '   '), [], '空关键词不发查询')
+  assert.deepEqual(await suggestSearch(d1, '') , [])
 })
 
 test('searchWeibo：FTS 命中已发布微博，草稿与回收站不出现；短词走 LIKE', async () => {

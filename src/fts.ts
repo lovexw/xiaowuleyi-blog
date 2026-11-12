@@ -171,3 +171,63 @@ export async function searchWeibo(db: D1Database, q: string, limit = 20, afterTs
   ])
   return { items: itemsRes.results ?? [], total: countRes?.n ?? 0 }
 }
+
+/* ---------------- 输入联想（/search 搜索框的下拉建议，2026-11 搜索强化） ----------------
+ * 只做「标题级」预判：用户敲到第 2 个字就要有反应，所以刻意不走 FTS（短词本来就退回 LIKE，
+ * 长词再建一次 bm25 排序也没意义——联想只要「像不像」，不要「多相关」）。返回的是可直接点的
+ * 目的地：标签 → 文章 → 页面，顺序即「越窄的语义越靠前」。
+ */
+export interface SuggestItem {
+  /** post = 文章、page = 独立页面、tag = 标签 */
+  type: 'post' | 'page' | 'tag'
+  text: string
+  href: string
+}
+
+/** 搜索联想：标题 LIKE + 标签子串命中（标签由调用方传入，通常是 db.listPublishedTagsCached 的
+ *  那份 isolate 快照——联想每敲一次键都要用，不能每次真去读 1000 行 tags 列）。
+ *  q 少于 1 个字符、或整条查询异常时返回空数组：联想是锦上添花，绝不让搜索框报错。 */
+export async function suggestSearch(
+  db: D1Database,
+  q: string,
+  opts: { afterTs?: number; tags?: { name: string; count: number }[]; limit?: number } = {}
+): Promise<SuggestItem[]> {
+  const limit = Math.min(10, Math.max(1, Math.floor(opts.limit || 8)))
+  const needle = q.trim().slice(0, 30)
+  if (!needle) return []
+  const pat = likePattern(needle)
+  const afterTs = opts.afterTs || 0
+  // 可见窗口：联想与搜索页同一份口径，窗口外文章不能从下拉里漏出去
+  const vis = afterTs > 0 ? 'AND COALESCE(published_at, created_at) >= ?' : ''
+  const bound = (extra: unknown[]) => (afterTs > 0 ? [afterTs, ...extra] : extra)
+  try {
+    const [posts, pages] = await Promise.all([
+      db
+        .prepare(
+          `SELECT slug, title FROM posts WHERE deleted_at IS NULL AND status = 'published' ${vis} AND title LIKE ? ESCAPE '\\' ORDER BY COALESCE(published_at, created_at) DESC LIMIT ?`
+        )
+        .bind(...bound([pat, limit]))
+        .all<{ slug: string; title: string }>(),
+      db
+        .prepare(
+          `SELECT slug, title FROM pages WHERE deleted_at IS NULL AND status = 'published' AND title LIKE ? ESCAPE '\\' ORDER BY sort ASC, id ASC LIMIT 3`
+        )
+        .bind(pat)
+        .all<{ slug: string; title: string }>(),
+    ])
+    const lower = needle.toLowerCase()
+    const out: SuggestItem[] = []
+    for (const t of (opts.tags || []).filter((t) => t.name.toLowerCase().includes(lower)).slice(0, 3)) {
+      out.push({ type: 'tag', text: t.name, href: `/tag/${encodeURIComponent(t.name)}` })
+    }
+    for (const p of posts.results ?? []) {
+      out.push({ type: 'post', text: p.title, href: `/post/${encodeURIComponent(p.slug)}` })
+    }
+    for (const p of pages.results ?? []) {
+      out.push({ type: 'page', text: p.title, href: `/page/${encodeURIComponent(p.slug)}` })
+    }
+    return out.slice(0, limit)
+  } catch {
+    return []
+  }
+}

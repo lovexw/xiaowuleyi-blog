@@ -17,6 +17,16 @@
 
 > 列表排序（最新/最多阅读/最多点赞/最多留言/随机）目前只由 SSR 页面（首页 / 分类 / 搜索）使用，本接口固定按最新（置顶优先）返回。
 
+### GET /api/public/search-suggest?q=部署
+搜索框输入联想（`/search` 页与各主题首页的搜索框，客户端脚本 180ms 防抖后调用）。
+返回 `{"items":[{"type":"tag|post|page","text":"部署","href":"/tag/部署"}]}`，最多 8 条：
+标签（名称子串命中）→ 文章（标题匹配，发布时间倒序）→ 独立页面（标题匹配），
+`limit` 可选（1–10，默认 8）。**只匹配标题**——联想只要「像不像」，不追求正文命中。
+
+- 与 `/search` 页同口径：草稿 / 回收站 / 加密之外的可见窗口规则一致（窗口外文章不出现）
+- 限流同 IP 120 次/分钟；**超限返回空列表而不是 429**——联想失败不该在搜索框旁弹错误，回车搜索照常
+- 浏览器缓存 30 秒；不参与边缘页面缓存（有新文章时最多晚半分钟出现在下拉里）
+
 ### GET /api/public/weibo?page=1&limit=15&topic=话题
 已发布微博分页（摘要视图），返回 `{items, total, page, totalPages}`，元素含 `id/content/imageList/topicList/videoView(封面帧)/commentCount/likes/pinned/created_at`；`topic` 传话题名可按话题筛选。内容口径与 SSR `/weibo` 页一致（站点可见窗口外不出现，无敏感字段：email/qq/ip 不出）。
 

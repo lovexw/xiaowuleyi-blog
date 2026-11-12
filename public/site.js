@@ -3244,6 +3244,188 @@
         })
     })
 
+  /* ---------------- 搜索框：输入联想 + 最近搜索（2026-11 搜索强化） ----------------
+   * 只增强「表单提交到 /search」的那个输入框：八套主题的搜索框 action 都是 /search，
+   * 选择器不依赖各家的 class（mn-search-input / rn-search-input…），主题改样式不用管这里。
+   * 联想：180ms 防抖 + abort 掉上一发（打字快时不排队），↑↓ 选择 / Enter 进选中项 /
+   * Esc 收起；没高亮任何一项时 Enter 走表单原生的提交，行为与没有这段脚本时一致。
+   * 最近搜索：本地记 8 条，聚焦且输入为空时列出，可一键清空。
+   * 整段任何一步失败都静默跳过——搜索框必须还能正常回车搜索。 */
+  var SUG_HIST_KEY = 'xw-search-history'
+  var SUG_KIND = { tag: '标签', post: '文章', page: '页面' }
+
+  function sugHistory() {
+    var raw = storeGet(SUG_HIST_KEY)
+    if (!raw) return []
+    try {
+      var arr = JSON.parse(raw)
+      if (!Array.isArray(arr)) return []
+      return arr.filter(function (s) {
+        return typeof s === 'string' && s
+      }).slice(0, 8)
+    } catch (e) {
+      return []
+    }
+  }
+  function sugRemember(q) {
+    q = String(q || '').trim().slice(0, 60)
+    if (!q) return
+    var list = sugHistory().filter(function (s) {
+      return s !== q
+    })
+    list.unshift(q)
+    storeSet(SUG_HIST_KEY, JSON.stringify(list.slice(0, 8)))
+  }
+  function sugStyle() {
+    if (document.getElementById('xw-sug-style')) return
+    var css =
+      '.xw-sug{position:absolute;z-index:70;left:0;right:0;top:100%;margin-top:6px;background:#fff;color:#1a1a1a;border:1px solid rgba(0,0,0,.12);border-radius:10px;box-shadow:0 14px 34px rgba(0,0,0,.18);overflow:hidden;text-align:left}' +
+      '.xw-sug-item{display:flex;gap:8px;align-items:center;padding:9px 12px;font-size:14px;line-height:1.3;text-decoration:none;color:#1a1a1a;cursor:pointer}' +
+      '.xw-sug-item:hover,.xw-sug-item.is-active{background:#f4f4f4}' +
+      '.xw-sug-kind{flex:0 0 auto;font-size:11px;line-height:1.6;color:#8a8a8a;border:1px solid #e2e2e2;border-radius:4px;padding:0 4px}' +
+      '.xw-sug-text{flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}' +
+      '.xw-sug-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px 4px;font-size:11px;color:#999}' +
+      '.xw-sug-clear{background:none;border:0;padding:0;font:inherit;color:#999;cursor:pointer;text-decoration:underline}'
+    var st = document.createElement('style')
+    st.id = 'xw-sug-style'
+    st.textContent = css
+    document.head.appendChild(st)
+  }
+  function initSearchBox(input) {
+    var form = input.form || input.closest('form')
+    if (!form) return
+    sugStyle()
+    var box = document.createElement('div')
+    box.className = 'xw-sug'
+    box.setAttribute('role', 'listbox')
+    box.hidden = true
+    if (window.getComputedStyle && getComputedStyle(form).position === 'static') form.style.position = 'relative'
+    form.appendChild(box)
+
+    var timer = null
+    var ctrl = null
+    var items = []
+    var active = -1
+
+    function close() {
+      box.hidden = true
+      box.innerHTML = ''
+      items = []
+      active = -1
+    }
+    function row(kind, text, href) {
+      var a = document.createElement('a')
+      a.className = 'xw-sug-item'
+      a.href = href
+      var k = document.createElement('span')
+      k.className = 'xw-sug-kind'
+      k.textContent = kind
+      var t = document.createElement('span')
+      t.className = 'xw-sug-text'
+      t.textContent = text
+      a.appendChild(k)
+      a.appendChild(t)
+      items.push(a)
+      box.appendChild(a)
+    }
+    function renderSuggest(list) {
+      box.innerHTML = ''
+      items = []
+      active = -1
+      if (!list || !list.length) return close()
+      for (var i = 0; i < list.length; i++) {
+        var it = list[i]
+        if (!it || !it.href || !it.text) continue
+        row(SUG_KIND[it.type] || '搜索', String(it.text), it.href)
+      }
+      if (!items.length) return close()
+      box.hidden = false
+    }
+    function renderHistory() {
+      var list = sugHistory()
+      if (!list.length) return close()
+      box.innerHTML = ''
+      items = []
+      active = -1
+      var head = document.createElement('div')
+      head.className = 'xw-sug-head'
+      var title = document.createElement('span')
+      title.textContent = '最近搜索'
+      var clr = document.createElement('button')
+      clr.type = 'button'
+      clr.className = 'xw-sug-clear'
+      clr.textContent = '清空'
+      clr.addEventListener('click', function () {
+        storeSet(SUG_HIST_KEY, '[]')
+        close()
+      })
+      head.appendChild(title)
+      head.appendChild(clr)
+      box.appendChild(head)
+      for (var i = 0; i < list.length; i++) row('搜索', list[i], '/search?q=' + encodeURIComponent(list[i]))
+      box.hidden = false
+    }
+    function paint() {
+      for (var i = 0; i < items.length; i++) {
+        if (i === active) items[i].className = 'xw-sug-item is-active'
+        else items[i].className = 'xw-sug-item'
+      }
+    }
+
+    input.setAttribute('autocomplete', 'off')
+    input.addEventListener('input', function () {
+      var v = input.value.trim()
+      clearTimeout(timer)
+      if (!v) {
+        if (ctrl) ctrl.abort()
+        renderHistory()
+        return
+      }
+      timer = setTimeout(function () {
+        if (ctrl) ctrl.abort()
+        ctrl = typeof AbortController === 'function' ? new AbortController() : null
+        fetch('/api/public/search-suggest?q=' + encodeURIComponent(v), ctrl ? { signal: ctrl.signal } : undefined)
+          .then(function (r) {
+            return r.ok ? r.json() : null
+          })
+          .then(function (d) {
+            // 只认「回来的还是当前这串」的结果：防抖窗口内又改了字就丢掉旧响应
+            if (d && d.items && input.value.trim() === v) renderSuggest(d.items)
+          })
+          .catch(function () {
+            /* 联想失败就安静地什么都不显示 */
+          })
+      }, 180)
+    })
+    input.addEventListener('focus', function () {
+      if (!input.value.trim()) renderHistory()
+    })
+    input.addEventListener('keydown', function (e) {
+      if (box.hidden) return
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        if (!items.length) return
+        e.preventDefault()
+        active = e.key === 'ArrowDown' ? (active + 1) % items.length : (active - 1 + items.length) % items.length
+        paint()
+      } else if (e.key === 'Enter') {
+        if (active >= 0 && items[active]) {
+          e.preventDefault()
+          location.href = items[active].href
+        }
+      } else if (e.key === 'Escape' || e.key === 'Esc') {
+        close()
+      }
+    })
+    form.addEventListener('submit', function () {
+      sugRemember(input.value)
+    })
+    document.addEventListener('click', function (e) {
+      if (!box.hidden && !form.contains(e.target)) close()
+    })
+  }
+  var searchInputs = document.querySelectorAll('form[action="/search"] input[name="q"]')
+  for (var si = 0; si < searchInputs.length; si++) initSearchBox(searchInputs[si])
+
   /* ---------------- 访客统计打点（后台「统计」页，服务端见 src/stats.ts） ----------------
    * 只上报匿名访客 id / 路径 / 标题 / 来源域名，不碰 Cookie 不存 IP；
    * 页面带 <meta name="xw-stats" content="off">（后台关闭采集）时完全不发请求 */

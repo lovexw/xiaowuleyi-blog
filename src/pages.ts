@@ -20,7 +20,7 @@ import {
   listOnThisDay,
   listPages,
   listPosts,
-  listPublishedTags,
+  listPublishedTagsCached,
   listRankTop,
   listWeibo,
   listWeiboTopics,
@@ -57,6 +57,7 @@ import {
   responsiveContentImages,
   SEARCH_HL_CSS,
   searchExtrasHtml,
+  searchFallbackHtml,
   searchSnippet,
   siteBase,
   siteMode,
@@ -189,20 +190,9 @@ function shouldCountView(host: string, ip: string, postId: number): boolean {
 }
 
 /** 顶部导航「分类话题」菜单用：已发布文章的标签（按使用次数排序，计数展示）。
- *  单 isolate 记忆（D1 读放大治理，2026-10-23）：listPublishedTags 每次渲染全量读已发布文章的
- *  tags 列（随文章数线性增长；边缘缓存被发布风暴打穿时实测一天 1618 次渲染 × 209 行 = 33 万行）。
- *  以 pageCacheEpoch 为记忆键：任何内容变更（文章写路径必经 purgePageCache）都会换代，
- *  标签一变必失效；epoch 不变则同 isolate 内零读。按 db 实例 WeakMap 隔离——docker-poc
- *  单进程多站点与 Node 测试多实例不串租户（与 db.ts settings 快照同款规矩）。 */
-const navTagsMemo = new WeakMap<object, { epoch: string; tags: { name: string; count: number }[] }>()
+ *  单 isolate 快照的实现在 db.listPublishedTagsCached（搜索联想也要用同一份，见该函数注释） */
 async function navTags(c: C): Promise<{ name: string; count: number }[]> {
-  const settings = await getSettings(c.env.DB)
-  const epoch = settings.pageCacheEpoch || ''
-  const memo = navTagsMemo.get(c.env.DB)
-  if (memo && memo.epoch === epoch) return memo.tags
-  const tags = await listPublishedTags(c.env.DB)
-  navTagsMemo.set(c.env.DB, { epoch, tags })
-  return tags
+  return listPublishedTagsCached(c.env.DB)
 }
 
 async function commentCount(c: C, postId: number): Promise<number> {
@@ -289,6 +279,11 @@ async function renderList(
   // 纯微博：打开首页就是微博时间线（文章数据不动，/post/ 直链仍可访问）；/tag/:tag 属博客概念照旧渲染
   if (opts.mode === 'home' && mode === 'weibo' && !tag) return renderWeibo(c, true)
   const q = (url.searchParams.get('q') || '').trim().slice(0, 60)
+  // 单字查询：几乎命中全站、且必然触发一次全表 LIKE 扫（trigram 索引连 2 字都成不了窗，更别说 1 字），
+  // 结果也毫无信息量。所以按「还没输入」处理，但把原因说出来，别让人以为搜索坏了。
+  // 输入框照旧回填用户打的字（theme 的 q 用原值），只是不拿它去查库
+  const qTooShort = !!q && [...q].length < 2
+  const sq = qTooShort ? '' : q
   const categorySlug = opts.mode === 'category' ? c.req.param('slug') || '' : ''
   const pageNum = clampInt(url.searchParams.get('page'), 1, 1000, 1)
   const perPage = clampInt(settings.postsPerPage, 1, 50, 10)
@@ -330,12 +325,12 @@ async function renderList(
     // 搜索页的独立页面结果
     pgSearch,
   ] = await Promise.all([
-    opts.mode === 'search' && q
-      ? searchPosts(c.env.DB, q, { page: pageNum, perPage, sort: searchSort, afterTs: postCutoff })
+    opts.mode === 'search' && sq
+      ? searchPosts(c.env.DB, sq, { page: pageNum, perPage, sort: searchSort, afterTs: postCutoff })
       : listPosts(c.env.DB, {
           status: 'published',
           tag: opts.mode === 'home' ? tag : undefined,
-          q: opts.mode === 'search' ? q || undefined : undefined,
+          q: opts.mode === 'search' ? sq || undefined : undefined,
           categorySlug: categorySlug || undefined,
           page: pageNum,
           limit: perPage,
@@ -363,9 +358,9 @@ async function renderList(
     // 上面为会员豁免提前查过就直接复用，避免同一请求查两次
     earlyMember ? Promise.resolve(earlyMember) : membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
     // 搜索页微博结果（ROADMAP B4）：长词走 weibo_fts、短词 LIKE 扫微博表，都在 fts.ts 内部定（吃微博可见窗口）
-    opts.mode === 'search' && q ? searchWeibo(c.env.DB, q, 20, weiboCutoff) : Promise.resolve(null),
+    opts.mode === 'search' && sq ? searchWeibo(c.env.DB, sq, 20, weiboCutoff) : Promise.resolve(null),
     // 搜索页的独立页面结果（/page/:slug 那套自建页）：页面数量少，走 LIKE 全扫（fts.ts 里说明过不建虚表）
-    opts.mode === 'search' && q ? searchPages(c.env.DB, q, 6) : Promise.resolve(null),
+    opts.mode === 'search' && sq ? searchPages(c.env.DB, sq, 6) : Promise.resolve(null),
   ])
   if (opts.mode === 'category' && !category) return renderNotFound(c)
   // 页码跳转可能输入越界，回到最后一页重新取一次（FTS 路径已在 fts.ts 内部夹好，这里只管 LIKE 路径）
@@ -467,16 +462,30 @@ async function renderList(
 
   // 搜索页补充结果（独立页面 + 标签）：标签直接从导航标签里挑名字命中的，零额外查询
   // ——navTags 每个列表页本来就要取；页面命中来自 fts.searchPages 的 LIKE 查询
+  const tagHits = opts.mode === 'search' && sq ? tags.filter((t) => textHasTerm(t.name, sq)) : []
   let searchExtras = ''
-  if (opts.mode === 'search' && q) {
-    const tagHits = tags.filter((t) => textHasTerm(t.name, q))
+  if (opts.mode === 'search' && sq) {
     searchExtras = searchExtrasHtml({
       pages: pgSearch?.items,
       pagesTotal: pgSearch?.total,
       tags: tagHits.slice(0, 8),
       tagsTotal: tagHits.length,
-      q,
+      q: sq,
     })
+  }
+  // 零命中兜底：文章/微博/页面/标签全线无果时，给「热门标签」与「最近发布」两条出路，
+  // 别让搜索页变成死胡同。只在真的零命中时多查一次最近发布（5 条）
+  let searchFallback = ''
+  let zeroHit = false
+  if (opts.mode === 'search' && sq) {
+    zeroHit = r.total + (wbSearch?.total || 0) + (pgSearch?.total || 0) + tagHits.length === 0
+    if (zeroHit) {
+      const recent = await listPosts(c.env.DB, { status: 'published', page: 1, limit: 5, afterTs: postCutoff })
+      searchFallback = searchFallbackHtml({
+        tags: tags.map((t) => t.name),
+        posts: recent.items.map((p) => ({ slug: p.slug, title: p.title })),
+      })
+    }
   }
 
   let notice = ''
@@ -485,18 +494,29 @@ async function renderList(
   if (opts.mode === 'search') {
     // 搜索框已移到刊头标签上方，这里只展示结果信息。文章结果与首页同一套分页（页码器在列表底部），
     // 微博结果不分页、封顶 20 条——超限要明说，否则会让人以为「就搜到这么多」
-    if (q) {
-      const weiboText = searchWeiboView
-        ? `、${searchWeiboView.total} 条微博`
-        : ''
-      const pageText = r.totalPages > 1 ? `（第 ${r.page} / ${r.totalPages} 页）` : ''
-      const weiboCap = searchWeiboView && searchWeiboView.total > 20 ? '，微博仅显示前 20 条' : ''
-      notice = (`<p class="search-meta">找到 ${r.total} 篇文章${weiboText}与「${esc(q)}」相关${pageText}${weiboCap}</p>`)
-      emptyText = r.total
-        ? ''
-        : searchWeiboView
-            ? `没有找到与「${esc(q)}」相关的文章，换个关键词试试。`
-            : `没有找到与「${esc(q)}」相关的文章或微博，换个关键词试试。`
+    if (qTooShort) {
+      // 单字查询不查库（see qTooShort 注释），列表退化成「全部文章」；
+      // 提示放在 notice 里——列表非空时 emptyText 根本不会渲染
+      notice = `<p class="search-meta">「${esc(q)}」只有 1 个字，会命中全站内容；这里先列出全部文章，再多打一个字试试。</p>`
+      emptyText = ''
+    } else if (q) {
+      if (zeroHit) {
+        // 零命中：列表位写「没找到」，上方换成两条出路；连出路都没有才退回一句话
+        notice = searchFallback || `<p class="search-meta">没有找到与「${esc(q)}」相关的任何内容。</p>`
+        emptyText = `没有找到与「${esc(q)}」相关的内容，换个关键词试试。`
+      } else {
+        const weiboText = searchWeiboView
+          ? `、${searchWeiboView.total} 条微博`
+          : ''
+        const pageText = r.totalPages > 1 ? `（第 ${r.page} / ${r.totalPages} 页）` : ''
+        const weiboCap = searchWeiboView && searchWeiboView.total > 20 ? '，微博仅显示前 20 条' : ''
+        notice = (`<p class="search-meta">找到 ${r.total} 篇文章${weiboText}与「${esc(q)}」相关${pageText}${weiboCap}</p>`)
+        emptyText = r.total
+          ? ''
+          : searchWeiboView
+              ? `没有找到与「${esc(q)}」相关的文章，换个关键词试试。`
+              : `没有找到与「${esc(q)}」相关的文章或微博，换个关键词试试。`
+      }
     } else {
       notice = `<p class="search-meta">输入关键词，回车或点「搜索」</p>`
       emptyText = ''
@@ -572,7 +592,7 @@ async function renderList(
   // 分页 / 排序 / 搜索页 canonical 自指「当前规范化 URL」：此前第 2、3 页一律指向第一页，
   // 被搜索引擎判为重复内容；?wb= 深链、UTM 等噪声参数由 canonicalQuery 白名单挡在外面。
   const canonicalQ = canonicalQuery([
-    ['q', opts.mode === 'search' ? q || undefined : undefined],
+    ['q', opts.mode === 'search' ? sq || undefined : undefined],
     // 搜索页的排序列在白名单里只有 time：相关度是默认值，不写进 canonical
     ['sort', opts.mode === 'search' ? (searchSort === 'time' ? 'time' : undefined) : sort !== 'latest' ? sort : undefined],
     ['seed', opts.mode !== 'search' && sort === 'random' && seed ? seed : undefined],

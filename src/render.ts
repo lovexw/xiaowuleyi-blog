@@ -1046,8 +1046,7 @@ export function weiboSearchResults(o: {
 </section>`
 }
 
-/* ---------------- 搜索页的「补充结果」：独立页面与标签 ----------------
- * 文章列表之外的两组浅结果，整体一段预渲染 HTML（themes 只需透传 d.searchExtras）。
+/* ---------------- 搜索页的「补充结果」：独立页面与标签 ---------------- * 文章列表之外的两组浅结果，整体一段预渲染 HTML（themes 只需透传 d.searchExtras）。
  * 刻意复用既有 class：页面行用 .search-meta（八主题都有），标签用 .fs-bar/.fs-chip
  * （排序条那套 chip 样式），不新增任何一个 CSS 类，八套主题自动同款。
  */
@@ -1079,6 +1078,32 @@ export function searchExtrasHtml(o: {
       .join('')
     const more = o.tagsTotal && o.tagsTotal > o.tags.length ? `<span class="fs-label">共 ${o.tagsTotal} 个</span>` : ''
     parts.push(`<nav class="fs-bar" aria-label="相关标签"><span class="fs-label">标签</span>${chips}${more}</nav>`)
+  }
+  return parts.join('\n')
+}
+
+/** 零命中兜底：搜不到东西时搜索页不该是死胡同——给「热门标签」和「最近发布」两条出路。
+ *  同样复用 .search-meta / .fs-bar / .fs-chip，零新增 CSS；两组都空时返回空串。 */
+export function searchFallbackHtml(o: {
+  tags?: string[]
+  posts?: { slug: string; title: string }[]
+}): string {
+  const tags = (o.tags || []).slice(0, 8)
+  const posts = (o.posts || []).slice(0, 5)
+  const parts: string[] = []
+  if (tags.length) {
+    parts.push(
+      `<nav class="fs-bar" aria-label="热门标签"><span class="fs-label">热门标签</span>${tags
+        .map((t) => `<a class="fs-chip" href="${tagLink(t)}">${esc(t)}</a>`)
+        .join('')}</nav>`
+    )
+  }
+  if (posts.length) {
+    parts.push(
+      `<p class="search-meta">最近发布：${posts
+        .map((p) => `<a href="/post/${encodeURIComponent(p.slug)}">${esc(p.title)}</a>`)
+        .join(' · ')}</p>`
+    )
   }
   return parts.join('\n')
 }

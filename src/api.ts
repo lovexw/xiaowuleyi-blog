@@ -49,6 +49,7 @@ import {
   listFriendLinks,
   listMembersAdmin,
   listPages,
+  listPublishedTagsCached,
   getPageById,
   uniquePageSlug,
   listPosts,
@@ -139,6 +140,7 @@ import {
   PLAZA_OFFICIAL_HUB,
 } from './hooks'
 import { SITE_MODE_VALUES, siteBase, toHomePost, type SiteMode } from './render'
+import { suggestSearch } from './fts'
 import { sanitizeHtml } from './sanitize'
 import { cleanupUnreferenced, backfillHashes, mergeAllDuplicates, mergeDuplicate, runAudit } from './audit'
 import { imageExtOf, MAX_REMOTE_IMAGES, MAX_UPLOAD_BYTES, mediaDeleteKeys, saveUpload, sniffImageExt, sniffUploadExt, sniffVideoCodec, transferImage } from './store'
@@ -3419,6 +3421,24 @@ api.get('/public/posts', async (c) => {
     page: r.page,
     totalPages: r.totalPages,
   })
+})
+
+/* 搜索联想（/search 搜索框的下拉建议，数据在 src/fts.ts suggestSearch）：
+ * 客户端 180ms 防抖后每敲几个字才发一发；这里再按 IP 限 120 次/分钟兜住异常脚本。
+ * 超限**返回空列表而不是 429**——联想挂掉不该在搜索框旁边弹错误，主流程照旧回车即搜。
+ * 浏览器缓存 30 秒：同一次输入里反复聚焦不必重打；文章刚发布时最多晚半分钟出现在下拉里。 */
+api.get('/public/search-suggest', async (c) => {
+  const q = (c.req.query('q') || '').trim().slice(0, 30)
+  c.header('Cache-Control', 'public, max-age=30')
+  if (!q) return c.json({ items: [] })
+  if (!rateLimit(c.env, `suggest:${clientIp(c.req.raw)}`, 120, 60_000)) return c.json({ items: [] })
+  const settings = await getSettings(c.env.DB)
+  const items = await suggestSearch(c.env.DB, q, {
+    // 可见窗口同搜索页口径；标签用 isolate 快照，不每次真读 1000 行 tags 列
+    afterTs: siteVisibleCutoff(settings),
+    tags: await listPublishedTagsCached(c.env.DB),
+  })
+  return c.json({ items })
 })
 
 // 广场微博补漏口（docs/PLAZA.md「微博补漏」）：hub 的 RSS 拉取只覆盖文章，微博漏推

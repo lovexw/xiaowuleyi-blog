@@ -589,8 +589,22 @@ export async function listPublishedTags(db: D1Database): Promise<{ name: string;
     .map(([name, count]) => ({ name, count }))
 }
 
-/* ---------------- 历史上的今天（首页时光机卡） ---------------- */
+/** 标签聚合的 isolate 内快照：导航菜单与搜索联想（每敲一次键都要用）共用一份。
+ *  以 settings.pageCacheEpoch 换代——任何内容写入必经 saveSettings/purgePageCache 换代，
+ *  标签一变必失效；epoch 不变则同 isolate 内零读。按 db 实例 WeakMap 隔离（docker-poc
+ *  单进程多站点、Node 测试多实例不串租户，与 settings 快照同款规矩）。 */
+const publishedTagsMemo = new WeakMap<object, { epoch: string; tags: { name: string; count: number }[] }>()
+export async function listPublishedTagsCached(db: D1Database): Promise<{ name: string; count: number }[]> {
+  const epoch = (await getSettings(db)).pageCacheEpoch || ''
+  const key = db as unknown as object
+  const memo = publishedTagsMemo.get(key)
+  if (memo && memo.epoch === epoch) return memo.tags
+  const tags = await listPublishedTags(db)
+  publishedTagsMemo.set(key, { epoch, tags })
+  return tags
+}
 
+/* ---------------- 历史上的今天（首页时光机卡） ---------------- */
 export interface OnThisDayItem {
   kind: 'post' | 'weibo'
   /** 跳转地址：/post/:slug 或 /weibo?wb=:id#wb-:id（?wb= 让 /weibo 定位到所在页） */

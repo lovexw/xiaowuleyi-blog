@@ -77,6 +77,16 @@ npm run videos:fix-hevc -- --site https://blog.xiaowuleyi.com --user 管理员 -
 - 索引增量同步触发器**只在 db.ts 的 `SCHEMA_TRIGGERS`**（ensureSchema 挂，所有部署形态冷启动必经）——schema.sql 只放 FTS 虚表（无分号体）——朴素按分号切分执行 SQL 时切不开 `BEGIN...END`（tests/fts.test.ts 守着「schema.sql 不含 CREATE TRIGGER」）；UPDATE 触发器带 `OF title, summary, content` 列清单，views/likes 高频自增不得触发索引重建，**新加索引列时只准扩这个 OF 清单**，别改成全表 UPDATE 触发
 - 虚表是可重建的派生索引：**不进 BACKUP_TABLES**（备份恢复后靠 ensureSchema 的 settings 记账位 `ftsSeeded` 自动 rebuild 一次；注意 ftsSeeded 本身会随 settings 被备份带回，所以 ensureSchema 在记账位在场时还会用 `posts_fts_docsize` 行数复核索引非空——`SELECT rowid FROM posts_fts` 读的是原表测不出索引空，别改成那种探测；demo 清库重灌同理自动补）；DELETE posts/weibo 后 `meta.changes` 会把触发器内的 FTS 删除命令计入（D1 实测单行删除 = 2）——**判「确有删除」用 `< 1` 口径别用 `!== 1`**（api.ts 单条彻底删除守着，pages 同口径），恢复 / 置顶等 UPDATE 依赖 `OF` 清单不被触发、changes 仍为 1 不受影响
 
+**搜索页（/search，2026-11 强化，tests/fts.test.ts + tests/search-ui.test.ts）**
+
+- 文章结果**分页与首页同一套语义**：`searchPosts(db, q, { page, perPage, sort, afterTs })`，先 COUNT 再取页、越界页码回落最后一页，`perPage` 上限 50；**LIKE 兜底路径必须同口径夹页码**（listPosts 只管 `page ≥ 1`，不夹会吐「空列表 + 99 / 3 页」）
+- 排序两档：`relevance`（bm25，默认，不写进 URL）/ `time`（发布时间倒序）；**`sort=time` 必须留在 pagecache.ts 的 `CACHEABLE_SORTS` 里**——否则 `?q=x&sort=time` 会被规范化成与 `?q=x` 同一个缓存键，时间序被相关度的边缘副本顶掉
+- 高亮与片段全在 render.ts：`markHtml`（**先 esc 再包 `<mark class="srch-hl">`**，标签只由它生成，用户输入进不了 HTML）、`searchSnippet`（标题/摘要都没命中正文时，摘要位改吐正文首处命中片段）、`SEARCH_HL_CSS`（只在 /search 页随主题 CSS 内联，其他页面零字节）；主题侧只需对 title/summary 调 `markHtml(p.x, d.q)`
+- 搜索面：文章（FTS）→ 微博（weibo_fts）→ 独立页面（`fts.ts searchPages`，**故意用 LIKE 不建 pages_fts**：页面数是个位数，虚表+触发器+重建记账比内容还重）→ 标签（直接用 navTags 的 isolate 快照 `db.listPublishedTagsCached`，零额外查询）；后两组由 `render.ts searchExtrasHtml` 预渲染成一段 HTML（`d.searchExtras` 透传），**复用 `.search-meta` / `.fs-bar` / `.fs-chip`，不新增 CSS 类**
+- 零命中兜底 `searchFallbackHtml`：热门标签 + 最近发布（只在真零命中时多查一次最近 5 篇）
+- 联想 `GET /api/public/search-suggest`（`fts.ts suggestSearch`，**只匹配标题**，标签→文章→页面）：超限返回空列表不返 429（联想挂了不能影响回车搜索）；客户端在 site.js，选择器是 `form[action="/search"] input[name="q"]`（不依赖各主题 class），180ms 防抖 + abort，最近搜索存 localStorage `xw-search-history`
+- **2 字词为什么不建 bigram 影子索引（2026-11-12 实测后拍板，别再重开）**：SQLite 内置分词器只有 trigram，2 字查询根本进不了倒排索引——实测 `MATCH '"部署"'`、`MATCH '"部署"*'`、`MATCH '部署*'` 在重建过索引的库上**全部返回空**（前缀查询也要先过 tokenizer，2 字凑不出 token）。要做只能另建一张逐字窗口的影子索引：每篇文章写入时生成 5000+ 个 bigram token、正文存储翻三倍、三条触发器里塞递归 CTE。而实测 2000 篇 × 250 字下 2 字 LIKE（COUNT + 取页两条语句）约 3ms、≈2000 行读，对个人站根本不是瓶颈——**收益远小于机器成本，故不做**。真正的坑是 1 字查询（必然全表扫且结果无信息量）：`pages.ts` 用 `qTooShort` / `sq` 把它按「没输入」处理并提示再打一个字
+
 **回收站 / 软删除（tests/trash.test.ts、冒烟「回收站链路」，机制在 src/trash.ts）**
 
 - posts / weibo / pages 三表统一软删：`deleted_at` 毫秒时间戳，NULL = 存活；**任何新增的涉及三表的业务查询必须带 `deleted_at IS NULL`**（后台概览统计、likeDelta、置顶名额、scheduler 定时发布、/random、export 全部有过滤），改完跑 `grep -n "FROM posts\|FROM weibo\|FROM pages" src/` 逐个核对——漏一处就是把回收站内容泄漏到那个公开面；已知的**故意不过滤**例外：backup.ts（全表备份兜底）、trash 自身查询（listTrash/purgeTrash 只认 deleted_at IS NOT NULL）、db.ts 的 getPostById/getPageById（后台按 id 直取与恢复）、uniqueSlugIn（回收站行继续占用 slug，恢复后链接照旧）、api.ts 标签清理扫描（恢复时标签完整）

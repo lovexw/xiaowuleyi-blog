@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { homeListBase, homeSortBar, markHtml, searchExtrasHtml, searchSnippet, searchTerms, textHasTerm } from '../src/render.ts'
+import { homeListBase, homeSortBar, markHtml, searchExtrasHtml, searchFallbackHtml, searchSnippet, searchTerms, textHasTerm } from '../src/render.ts'
 
 // ── 搜索页的展示层（src/render.ts）：关键词高亮、正文命中片段、搜索排序条 ──
 // 分页与排序本身在 src/fts.ts（tests/fts.test.ts 守着），这里只管「结果怎么显示」。
@@ -120,4 +120,17 @@ test('searchExtrasHtml：两组都没命中就是空串（主题侧不渲染）'
   assert.equal(searchExtrasHtml({ pages: [], tags: [], q: 'x1x' }), '')
   assert.equal(searchExtrasHtml({ q: 'x1x' }), '')
   assert.equal(searchExtrasHtml({ pages: null, tags: null }), '')
+})
+
+test('searchFallbackHtml：零命中时给热门标签与最近发布两条出路', () => {
+  const html = searchFallbackHtml({
+    tags: ['生活', '技术'],
+    posts: [{ slug: 'hello', title: '第一篇' }, { slug: 'a b', title: '第二篇' }],
+  })
+  assert.ok(html.includes('aria-label="热门标签"'))
+  assert.ok(html.includes('<a class="fs-chip" href="/tag/%E7%94%9F%E6%B4%BB">生活</a>'))
+  assert.ok(html.includes('<a href="/post/hello">第一篇</a>'), '最近发布链到文章')
+  assert.ok(html.includes('href="/post/a%20b"'), 'slug 里的空格要编码')
+  assert.equal(searchFallbackHtml({ tags: ['生活'], posts: [] }).includes('最近发布'), false, '没有文章就不出这一行')
+  assert.equal(searchFallbackHtml({}), '')
 })

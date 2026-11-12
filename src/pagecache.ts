@@ -62,8 +62,11 @@ const CACHEABLE_PAGE_RE =
 const CACHEABLE_DATA_RE =
   /^(\/rss\.xml|\/rss|\/rss\/|\/feed|\/feed\/|\/feed\.xml|\/feed\/rss\.xml|\/feed\/rss|\/atom|\/atom\/|\/atom\.xml|\/index\.xml|\/feeds\/posts\/default|\/feed\.json|\/sitemap\.xml|\/llms\.txt|\/llms-full\.txt|\/api\/public\/weibo|\/api\/public\/posts)$/
 
-/** 列表排序白名单（render.ts HOME_SORTS 的 key）：random 每次现生成 seed，绝不缓存 */
-const CACHEABLE_SORTS = ['latest', 'views', 'likes', 'comments']
+/** 列表排序白名单（render.ts HOME_SORTS 的 key + 搜索页的 SearchSort）：random 每次现生成 seed，绝不缓存。
+ *  `time` 是搜索页的第二档（相关度/时间）：**必须进白名单**，否则 /search?q=x&sort=time 会被规范化成
+ *  与 /search?q=x 同一个键，时间序结果可能被相关度的边缘副本顶掉。首页带 ?sort=time 时服务端回落
+ *  latest，只会多占一个键，不会串内容 */
+const CACHEABLE_SORTS = ['latest', 'views', 'likes', 'comments', 'time']
 
 const encTrimmed = (v: string) => (v ? encodeURIComponent(v) : '')
 
