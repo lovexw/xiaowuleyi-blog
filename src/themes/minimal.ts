@@ -12,6 +12,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -70,8 +71,8 @@ export function home(d: HomeData): string {
     .map(
       (p) => `<a class="mn-item" href="/post/${esc(p.slug)}">
   <div class="mn-item-main">
-    <h2 class="mn-item-title">${esc(p.title)}${p.pinned ? `<sup class="mn-pin">TOP</sup>` : ''}</h2>
-    <p class="mn-item-abs">${esc(p.summary)}</p>
+    <h2 class="mn-item-title">${markHtml(p.title, d.q)}${p.pinned ? `<sup class="mn-pin">TOP</sup>` : ''}</h2>
+    <p class="mn-item-abs">${markHtml(p.summary, d.q)}</p>
   </div>
   ${p.cover ? `<div class="mn-thumb"><img src="${esc(p.cover)}" loading="lazy" alt=""></div>` : ''}
 </a>`

@@ -15,6 +15,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -135,8 +136,8 @@ export function home(d: HomeData): string {
       return `<a class="wx-post" href="/post/${esc(p.slug)}">
   ${dateHtml}
   <div class="wx-post-main">
-    <h2 class="wx-post-title">${esc(p.title)}</h2>
-    ${p.summary ? `<p class="wx-post-abs">${esc(p.summary)}</p>` : ''}
+    <h2 class="wx-post-title">${markHtml(p.title, d.q)}</h2>
+    ${p.summary ? `<p class="wx-post-abs">${markHtml(p.summary, d.q)}</p>` : ''}
     ${metaHtml}
   </div>
   ${p.cover ? `<span class="wx-post-thumb"><img src="${esc(variantUrl(p.cover, 192))}" loading="lazy" decoding="async" alt=""></span>` : ''}

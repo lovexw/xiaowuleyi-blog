@@ -12,6 +12,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -74,8 +75,8 @@ export function home(d: HomeData): string {
       (p) => `<a class="md-card" href="/post/${esc(p.slug)}">
   ${p.cover ? `<div class="md-card-cover"><img src="${esc(p.cover)}" loading="lazy" alt=""></div>` : ''}
   <div class="md-card-body">
-    <h2 class="md-card-title">${esc(p.title)}${p.pinned ? `<span class="md-pin">PINNED</span>` : ''}</h2>
-    <p class="md-card-abs">${esc(p.summary)}</p>
+    <h2 class="md-card-title">${markHtml(p.title, d.q)}${p.pinned ? `<span class="md-pin">PINNED</span>` : ''}</h2>
+    <p class="md-card-abs">${markHtml(p.summary, d.q)}</p>
     <div class="md-card-meta"><time>${fmtDate(p.published_at)}</time><span>·</span><span>${`${p.views} 阅读`}</span>${p.tags.slice(0, 2).map((t) => `<span class="md-chip">${esc(t)}</span>`).join('')}</div>
   </div>
 </a>`

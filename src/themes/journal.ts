@@ -14,6 +14,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -92,8 +93,8 @@ export function home(d: HomeData): string {
   <a class="jrn-entry-link" href="/post/${esc(p.slug)}">
     ${dayBadge(p.published_at)}
     <div class="jrn-entry-main">
-      <h2 class="jrn-entry-title">${esc(p.title)}${p.pinned ? `<span class="jrn-pin">置顶</span>` : ''}</h2>
-      <p class="jrn-entry-abs">${esc(p.summary)}</p>
+      <h2 class="jrn-entry-title">${markHtml(p.title, d.q)}${p.pinned ? `<span class="jrn-pin">置顶</span>` : ''}</h2>
+      <p class="jrn-entry-abs">${markHtml(p.summary, d.q)}</p>
       <p class="jrn-entry-meta"><span>${`${fmtViews(p.views)} 阅读`}</span><span>${`${p.likes} 赞`}</span>${
         p.commentCount ? `<span>${`${p.commentCount} 评`}</span>` : ''
       }</p>

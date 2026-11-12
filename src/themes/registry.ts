@@ -15,6 +15,7 @@ import type {
   NavPage,
   OnThisDayItemView,
   RankEntryView,
+  SearchSort,
   TagCount,
   WeiboItemView,
 } from '../render'
@@ -36,8 +37,8 @@ export interface HomeData {
   tag?: string
   /** 搜索页当前关键词（刊头搜索框回填用） */
   q?: string
-  /** 列表当前排序（首页/分类/搜索共用排序条；随机时翻页需带 seed） */
-  sort?: PostSort
+  /** 列表当前排序（首页/分类页是 PostSort；搜索页是 SearchSort，即相关度/时间两档） */
+  sort?: PostSort | SearchSort
   /** 随机排序的种子：服务端生成后回传，翻页链接携带以稳住同一组顺序 */
   seed?: number
   /** 当前分类页的 slug（分类页排序条/翻页回链用） */

@@ -13,6 +13,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -98,11 +99,11 @@ export function home(d: HomeData): string {
       if (p.cover) {
         return `<a class="rn-card" href="/post/${esc(p.slug)}">
   <div class="rn-card-cover"><img src="${esc(p.cover)}" loading="lazy" alt=""></div>
-  <div class="rn-card-body"><h2 class="rn-card-title">${esc(p.title)}${p.pinned ? `<span class="rn-pin">置顶</span>` : ''}</h2>${foot}</div>
+  <div class="rn-card-body"><h2 class="rn-card-title">${markHtml(p.title, d.q)}${p.pinned ? `<span class="rn-pin">置顶</span>` : ''}</h2>${foot}</div>
 </a>`
       }
       return `<a class="rn-card" href="/post/${esc(p.slug)}">
-  <div class="rn-card-body is-textonly"><h2 class="rn-card-title">${esc(p.title)}${p.pinned ? `<span class="rn-pin">置顶</span>` : ''}</h2><p class="rn-card-abs">${esc(p.summary)}</p>${foot}</div>
+  <div class="rn-card-body is-textonly"><h2 class="rn-card-title">${markHtml(p.title, d.q)}${p.pinned ? `<span class="rn-pin">置顶</span>` : ''}</h2><p class="rn-card-abs">${markHtml(p.summary, d.q)}</p>${foot}</div>
 </a>`
     })
     .join('\n')

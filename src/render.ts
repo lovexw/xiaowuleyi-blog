@@ -3,7 +3,7 @@ import type { PostSort, WeiboVideoView } from './db'
 import { assetUrl, assetVersion } from './assets'
 import { renderFooterHtml } from './hooks'
 import { outHref } from './outlink'
-import { cstDate, esc, excerpt, extractWeiboTopics, fmtDate, fmtDateCN, fmtDateTime, isoDate, NICKNAME_CHANGE_COOLDOWN_MS, nicknameCooldown } from './utils'
+import { cstDate, esc, excerpt, extractWeiboTopics, fmtDate, fmtDateCN, fmtDateTime, isoDate, NICKNAME_CHANGE_COOLDOWN_MS, nicknameCooldown, plainText } from './utils'
 import { effectiveTier, parseMemberTiers, tierByKey, type MemberTierDef } from './tiers'
 import { commentGateMoreText, commentGateText } from './commentgate'
 import { replaceEmoji } from './emoji'
@@ -1722,6 +1722,66 @@ export function tagLink(name: string): string {
   return `/tag/${encodeURIComponent(name)}`
 }
 
+/* ---------------- 搜索关键词高亮与命中片段 ----------------
+ * 搜索页要把「为什么这条排在这」说清楚：标题/摘要里的命中词标成 <mark>，
+ * 标题摘要都没提词（正文命中）时，摘要位改吐正文里第一处命中前后的片段。
+ * 两者都在 esc() 之后做——拼进 HTML 的只有 <mark> 这一对标签，用户输入全程被转义。
+ */
+
+/** 正则元字符转义：关键词里的 . * ( ) 不能当通配符 */
+function regexEsc(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 关键词切词：与 src/fts.ts 的 MATCH 表达式同源（按空白切、去重、最长优先，
+ *  最长优先避免「博客」被「博」抢先切碎），上限 12 个词防超长查询拖慢正则 */
+export function searchTerms(q: string | undefined): string[] {
+  if (!q) return []
+  return [...new Set(q.split(/\s+/).map((t) => t.trim()).filter(Boolean))]
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 12)
+}
+
+/** 文本里是否含任一关键词（大小写不敏感；空关键词恒 false） */
+export function textHasTerm(text: string, q: string | undefined): boolean {
+  if (!text || !q) return false
+  const lower = text.toLowerCase()
+  return searchTerms(q).some((t) => lower.includes(t.toLowerCase()))
+}
+
+/** 关键词高亮：先 esc 再包 <mark class="srch-hl">，返回可直接拼进 HTML 的串。
+ *  q 为空时与 esc(text) 逐字节相同——非搜索页的输出一点没变。 */
+export function markHtml(text: unknown, q?: string): string {
+  const s = esc(text)
+  const terms = searchTerms(q)
+  if (!s || !terms.length) return s
+  const re = new RegExp(terms.map((t) => regexEsc(esc(t))).join('|'), 'gi')
+  return s.replace(re, (m) => `<mark class="srch-hl">${m}</mark>`)
+}
+
+/** 正文命中片段：正文纯文本里取首处命中前后各 ~1/3 词长的片段（标题与摘要都没命中时顶替摘要）。
+ *  找不到命中就原样返回 fallback——不硬造一段跟关键词无关的正文。 */
+export function searchSnippet(contentHtml: string, q: string | undefined, fallback = '', n = 96): string {
+  const text = plainText(contentHtml || '')
+  if (!text) return fallback
+  const lower = text.toLowerCase()
+  let at = -1
+  for (const t of searchTerms(q)) {
+    const i = lower.indexOf(t.toLowerCase())
+    if (i >= 0 && (at < 0 || i < at)) at = i
+  }
+  if (at < 0) return fallback
+  const start = Math.max(0, at - Math.floor(n / 3))
+  const end = Math.min(text.length, start + n)
+  return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`
+}
+
+/** 搜索高亮样式（只在 /search 页随主题 CSS 一起内联，其他页面零字节）。
+ *  半透明琥珀底 + color: inherit：亮色主题上是荧光笔，深色主题上仍是浅字可读，
+ *  八套主题共用一段，不必各写一份。 */
+export const SEARCH_HL_CSS =
+  'mark.srch-hl{background:rgba(255,196,0,.38);color:inherit;padding:0 .1em;border-radius:2px;}'
+
 /* ---------------- 首页列表排序筛选（共享构建器） ----------------
  * 结构全主题共用（语义化 .fs-* class），视觉由主题 CSS 塑形。
  * 随机排序：点「随机」不带 seed，服务端每次生成新 seed 洗一组；
@@ -1737,8 +1797,18 @@ export const HOME_SORTS: { key: PostSort; label: string }[] = [
   { key: 'random', label: '随机' },
 ]
 
+/** 搜索页排序档位（相关度 / 时间）。与首页那套 PostSort 是两回事：
+ *  「最多阅读 / 随机」在搜索结果里没有意义，硬塞进排序条只会让人以为排序坏了 */
+export type SearchSort = 'relevance' | 'time'
+
+export const SEARCH_SORTS: { key: SearchSort; label: string }[] = [
+  { key: 'relevance', label: '相关度' },
+  { key: 'time', label: '最新发布' },
+]
+
 export interface ListPageContext {
-  sort?: PostSort
+  /** 列表排序：搜索页传 SearchSort，其余页传 PostSort（两套白名单互不串门） */
+  sort?: PostSort | SearchSort
   seed?: number
   tag?: string
   categorySlug?: string
@@ -1750,8 +1820,13 @@ function listQuery(o: ListPageContext): string {
   const params = new URLSearchParams()
   if (o.tag) params.set('tag', o.tag)
   if (o.q) params.set('q', o.q)
-  if (o.sort && o.sort !== 'latest') params.set('sort', o.sort)
-  if (o.sort === 'random' && o.seed) params.set('seed', String(o.seed))
+  if (o.q) {
+    // 搜索页：默认相关度（不写进 URL，保持 /search?q=x 这条干净短链），只有时间序才带 sort
+    if (o.sort === 'time') params.set('sort', 'time')
+  } else if (o.sort && o.sort !== 'latest') {
+    params.set('sort', o.sort)
+    if (o.sort === 'random' && o.seed) params.set('seed', String(o.seed))
+  }
   return params.toString()
 }
 
@@ -1763,15 +1838,21 @@ export function listPageUrl(o: ListPageContext): string {
   return '/' + (qs ? `?${qs}` : '')
 }
 
-/** 排序筛选条：一排 chips，当前排序高亮；点「随机」永远洗新一组 */
+/** 排序筛选条：一排 chips，当前排序高亮；点「随机」永远洗新一组。
+ *  带 q 时（搜索页）换成相关度/时间两档——搜索结果按「最多阅读」排是说不通的。 */
 export function homeSortBar(o: ListPageContext): string {
-  const chips = HOME_SORTS.map(
-    (s) =>
-      `<a class="fs-chip${s.key === (o.sort || 'latest') ? ' is-active' : ''}" href="${esc(
-        listPageUrl({ ...o, sort: s.key, seed: undefined })
-      )}">${s.label}</a>`
-  ).join('')
-  return `<nav class="fs-bar" aria-label="文章排序"><span class="fs-label">排序</span>${chips}</nav>`
+  const isSearch = !!o.q
+  const active = isSearch ? (o.sort === 'time' ? 'time' : 'relevance') : o.sort || 'latest'
+  const items: { key: string; label: string }[] = isSearch ? SEARCH_SORTS : HOME_SORTS
+  const chips = items
+    .map(
+      (s) =>
+        `<a class="fs-chip${s.key === active ? ' is-active' : ''}" href="${esc(
+          listPageUrl({ ...o, sort: s.key as PostSort, seed: undefined })
+        )}">${s.label}</a>`
+    )
+    .join('')
+  return `<nav class="fs-bar" aria-label="${isSearch ? '搜索结果排序' : '文章排序'}"><span class="fs-label">排序</span>${chips}</nav>`
 }
 
 /** 翻页链接前缀（形如 "/?tag=x&sort=random&seed=5&"），随机时带 seed 稳住顺序 */

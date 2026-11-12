@@ -12,6 +12,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   rankListHtml,
@@ -90,8 +91,8 @@ export function home(d: HomeData): string {
     .map(
       (p) => `<a class="nw-item" href="/post/${esc(p.slug)}">
   <div class="nw-item-main">
-    <h3 class="nw-item-title">${esc(p.title)}${p.pinned ? `<sup class="nw-pin">置顶</sup>` : ''}</h3>
-    <p class="nw-item-abs">${esc(p.summary)}</p>
+    <h3 class="nw-item-title">${markHtml(p.title, d.q)}${p.pinned ? `<sup class="nw-pin">置顶</sup>` : ''}</h3>
+    <p class="nw-item-abs">${markHtml(p.summary, d.q)}</p>
     <time class="nw-item-time">${fmtDate(p.published_at)}</time>
   </div>
   ${p.cover ? `<div class="nw-thumb"><img src="${esc(p.cover)}" loading="lazy" alt=""></div>` : ''}

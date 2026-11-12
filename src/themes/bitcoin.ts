@@ -13,6 +13,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -88,8 +89,8 @@ export function home(d: HomeData): string {
       (p) => `<a class="bt-item" href="/post/${esc(p.slug)}">
   <div class="bt-item-main">
     <p class="bt-item-meta"><time>${fmtDate(p.published_at)}</time>${p.commentCount ? `<i>·</i><span>${`${p.commentCount} 评`}</span>` : ''}</p>
-    <h2 class="bt-item-title">${esc(p.title)}${p.pinned ? `<span class="bt-pin">置顶</span>` : ''}</h2>
-    <p class="bt-item-abs">${esc(p.summary)}</p>
+    <h2 class="bt-item-title">${markHtml(p.title, d.q)}${p.pinned ? `<span class="bt-pin">置顶</span>` : ''}</h2>
+    <p class="bt-item-abs">${markHtml(p.summary, d.q)}</p>
   </div>
   ${p.cover ? `<div class="bt-thumb"><img src="${esc(p.cover)}" loading="lazy" alt=""></div>` : ''}
 </a>`

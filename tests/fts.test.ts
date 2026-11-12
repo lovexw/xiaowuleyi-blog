@@ -94,7 +94,7 @@ test('searchPosts：FTS 命中 + bm25 相关度排序 + 加密文/回收站排�
   seedPost(db, 'p4', '回收站文', '部署教程已删', "'', 99")
   db.exec("INSERT INTO posts (slug, title, content, status, created_at, updated_at) VALUES ('p5','草稿','部署教程草稿','draft',1,1)")
 
-  const r = await searchPosts(d1, '部署教程', 50)
+  const r = await searchPosts(d1, '部署教程', { perPage: 50 })
   assert.deepEqual(
     r.items.map((p) => p.slug),
     ['p2', 'p1'],
@@ -104,7 +104,7 @@ test('searchPosts：FTS 命中 + bm25 相关度排序 + 加密文/回收站排�
 
   // 二次 ensureSchema：ftsSeeded 记账位已置，不重复 rebuild，索引照常可搜
   await ensureSchema(d1)
-  assert.equal((await searchPosts(d1, '部署教程', 50)).total, 2)
+  assert.equal((await searchPosts(d1, '部署教程', { perPage: 50 })).total, 2)
 })
 
 test('searchPosts：存量库升级路径 B——先有数据后 ensureSchema，rebuild 全量补索引', async () => {
@@ -113,7 +113,7 @@ test('searchPosts：存量库升级路径 B——先有数据后 ensureSchema，
   seedPost(db, 'p1', '部署教程入门', '这是部署教程正文，讲清楚第一步')
   const d1 = d1FromSqlite(db)
   await ensureSchema(d1)
-  const r = await searchPosts(d1, '部署教程', 50)
+  const r = await searchPosts(d1, '部署教程', { perPage: 50 })
   assert.deepEqual(r.items.map((p) => p.slug), ['p1'])
 })
 
@@ -124,7 +124,7 @@ test('searchPosts：2 字短词退回 listPosts LIKE 老路，口径与旧搜索
   await ensureSchema(d1)
   seedPost(db, 'p1', '部署教程入门', '讲清楚第一步')
   seedPost(db, 'p2', '生活随笔', '今天把博客的部署弄好了')
-  const r = await searchPosts(d1, '部署', 50)
+  const r = await searchPosts(d1, '部署', { perPage: 50 })
   assert.deepEqual(r.items.map((p) => p.slug).sort(), ['p1', 'p2'])
   assert.equal(r.page, 1)
   assert.ok(r.totalPages >= 1)
@@ -136,8 +136,92 @@ test('searchPosts：词内双引号的用户输入不炸 MATCH', async () => {
   const d1 = d1FromSqlite(db)
   await ensureSchema(d1)
   seedPost(db, 'p1', '部署教程', '正文里有 a"b 这样的字符')
-  const r = await searchPosts(d1, 'a"b 部署教程', 50)
+  const r = await searchPosts(d1, 'a"b 部署教程', { perPage: 50 })
   assert.ok(Array.isArray(r.items))
+})
+
+/** 带发布时间的种子（排序测试要能控制「谁更新」） */
+function seedPostAt(db: DatabaseSync, slug: string, title: string, content: string, ts: number) {
+  db.prepare(
+    `INSERT INTO posts (slug, title, content, status, created_at, updated_at, published_at) VALUES (?,?,?,'published',?,?,?)`
+  ).run(slug, title, content, ts, ts, ts)
+}
+
+test('searchPosts：分页——先 COUNT 再取页，越界页码回落到最后一页', async () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(SCHEMA_SQL)
+  const d1 = d1FromSqlite(db)
+  await ensureSchema(d1)
+  for (let i = 1; i <= 12; i++) seedPost(db, `s${i}`, `第${i}篇`, '分页测试正文，关键词只出现一次')
+
+  const p1 = await searchPosts(d1, '分页测试', { page: 1, perPage: 5 })
+  assert.equal(p1.total, 12, 'total 是全量命中数，不是当前页条数')
+  assert.equal(p1.totalPages, 3)
+  assert.equal(p1.items.length, 5)
+  assert.equal(p1.page, 1)
+
+  const p3 = await searchPosts(d1, '分页测试', { page: 3, perPage: 5 })
+  assert.equal(p3.items.length, 2, '最后一页只剩 2 条')
+
+  const over = await searchPosts(d1, '分页测试', { page: 99, perPage: 5 })
+  assert.equal(over.page, 3, '手输 ?page=99 回落到最后一页，不吐「空列表 + 越界页码器」')
+  assert.equal(over.items.length, 2)
+
+  const tiny = await searchPosts(d1, '分页测试', { perPage: 0, page: 2 })
+  assert.equal(tiny.totalPages, 2, 'perPage 传 0/脏值回落默认 10（与 settings.postsPerPage 的 clampInt 同口径）')
+  assert.equal(tiny.items.length, 2, '默认 10 条一页，第 2 页剩 2 条')
+
+  const miss = await searchPosts(d1, '压根没有这个词组', { page: 3, perPage: 5 })
+  assert.deepEqual([miss.total, miss.page, miss.totalPages], [0, 1, 1], '零命中恒回第 1 页')
+})
+
+test('searchPosts：短词 LIKE 路径同样把越界页码夹回最后一页', async () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(SCHEMA_SQL)
+  const d1 = d1FromSqlite(db)
+  await ensureSchema(d1)
+  seedPost(db, 'a', '部署一', '正文甲')
+  seedPost(db, 'b', '部署二', '正文乙')
+  seedPost(db, 'c', '部署三', '正文丙')
+
+  const over = await searchPosts(d1, '部署', { page: 9, perPage: 1 })
+  assert.equal(over.total, 3)
+  assert.equal(over.page, 3, '2 字词不走 FTS，但页码口径必须与 FTS 路径一致')
+  assert.equal(over.items.length, 1)
+})
+
+test('searchPosts：sort=time 按发布时间倒序，默认按 bm25 相关度', async () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(SCHEMA_SQL)
+  const d1 = d1FromSqlite(db)
+  await ensureSchema(d1)
+  // 新文只提一次、旧文提三次：相关度排序旧文在前，时间排序新文在前
+  seedPostAt(db, 'new', '新文', '排序测试正文，只提一次排序测试', 2_000)
+  seedPostAt(db, 'old', '旧文', '排序测试排序测试排序测试，反复提', 1_000)
+
+  const rel = await searchPosts(d1, '排序测试', { perPage: 10 })
+  assert.deepEqual(rel.items.map((p) => p.slug), ['old', 'new'], '默认相关度：命中多的在前')
+
+  const byTime = await searchPosts(d1, '排序测试', { perPage: 10, sort: 'time' })
+  assert.deepEqual(byTime.items.map((p) => p.slug), ['new', 'old'], 'sort=time：按发布时间倒序')
+
+  // 排序不影响总数：两条都在
+  assert.equal(byTime.total, rel.total)
+})
+
+test('searchPosts：afterTs 可见窗口把窗口外文章挡在搜索之外', async () => {
+  const db = new DatabaseSync(':memory:')
+  db.exec(SCHEMA_SQL)
+  const d1 = d1FromSqlite(db)
+  await ensureSchema(d1)
+  seedPostAt(db, 'recent', '近期文', '窗口测试正文，可搜到', 2_000)
+  seedPostAt(db, 'ancient', '往年文', '窗口测试正文，应被挡', 1_000)
+
+  const all = await searchPosts(d1, '窗口测试', { perPage: 10 })
+  assert.equal(all.total, 2)
+  const windowed = await searchPosts(d1, '窗口测试', { perPage: 10, afterTs: 1_500 })
+  assert.deepEqual(windowed.items.map((p) => p.slug), ['recent'], '窗口外文章不参与搜索（命中本身即泄露）')
+  assert.equal(windowed.total, 1)
 })
 
 test('searchWeibo：FTS 命中已发布微博，草稿与回收站不出现；短词走 LIKE', async () => {

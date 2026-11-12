@@ -55,8 +55,11 @@ import {
 
   rankListHtml,
   responsiveContentImages,
+  SEARCH_HL_CSS,
+  searchSnippet,
   siteBase,
   siteMode,
+  textHasTerm,
   toHomePost,
   stripCoverDuplicate,
 
@@ -64,6 +67,7 @@ import {
   type MemberActivityView,
   type NavPage,
   type RankEntryView,
+  type SearchSort,
   type WeiboItemView,
 } from './render'
 import { extractOgImage, sanitizeHtml } from './sanitize'
@@ -290,6 +294,9 @@ async function renderList(
   // 列表排序：最新（默认，置顶优先）/ 最多阅读 / 最多点赞 / 最多留言 / 随机
   const sortParam = (url.searchParams.get('sort') || '').trim()
   const sort: PostSort = HOME_SORTS.some((s) => s.key === sortParam) ? (sortParam as PostSort) : 'latest'
+  // 搜索页的排序是另一套档位（相关度 / 时间）：搜索按「最多阅读」排没有意义，
+  // 两套白名单互不串门——?sort=views 在 /search 上只会落到默认的相关度
+  const searchSort: SearchSort = sortParam === 'time' ? 'time' : 'relevance'
   // 随机排序用 seed 稳住一组顺序：URL 没带就现生成一个，翻页链接会带上它
   const seed =
     sort === 'random' ? clampInt(url.searchParams.get('seed'), 1, 999999999, 0) || 1 + Math.floor(Math.random() * 999999998) : 0
@@ -304,7 +311,8 @@ async function renderList(
   const postCutoff = earlyMember ? 0 : postCutoffBase
   const weiboCutoff = earlyMember ? 0 : weiboCutoffBase
 
-  // 搜索模式不分页，直接取前 50 条；文章搜索走 FTS5（src/fts.ts，短词自动退回 LIKE 同口径）
+  // 搜索模式与首页同一套分页：文章走 FTS5（src/fts.ts，短词自动退回 LIKE 同口径），
+  // 页码/每页条数由 URL 与 settings.postsPerPage 决定，越界页码在 fts.ts 内部回落到最后一页
   const [
     r,
     tags,
@@ -320,14 +328,14 @@ async function renderList(
     wbSearch,
   ] = await Promise.all([
     opts.mode === 'search' && q
-      ? searchPosts(c.env.DB, q, 50, postCutoff)
+      ? searchPosts(c.env.DB, q, { page: pageNum, perPage, sort: searchSort, afterTs: postCutoff })
       : listPosts(c.env.DB, {
           status: 'published',
           tag: opts.mode === 'home' ? tag : undefined,
           q: opts.mode === 'search' ? q || undefined : undefined,
           categorySlug: categorySlug || undefined,
-          page: opts.mode === 'search' ? 1 : pageNum,
-          limit: opts.mode === 'search' ? 50 : perPage,
+          page: pageNum,
+          limit: perPage,
           sort,
           seed,
           afterTs: postCutoff,
@@ -355,7 +363,7 @@ async function renderList(
     opts.mode === 'search' && q ? searchWeibo(c.env.DB, q, 20, weiboCutoff) : Promise.resolve(null),
   ])
   if (opts.mode === 'category' && !category) return renderNotFound(c)
-  // 页码跳转可能输入越界，回到最后一页重新取一次
+  // 页码跳转可能输入越界，回到最后一页重新取一次（FTS 路径已在 fts.ts 内部夹好，这里只管 LIKE 路径）
   if (opts.mode !== 'search' && r.page > r.totalPages && r.total > 0) {
     const fixed = await listPosts(c.env.DB, {
       status: 'published',
@@ -374,7 +382,14 @@ async function renderList(
     c.env.DB,
     r.items.map((p) => p.id)
   )
-  const posts = r.items.map((p) => toHomePost(p, parseTags(p), countMap.get(p.id) ?? 0))
+  const posts = r.items.map((p) => {
+    const view = toHomePost(p, parseTags(p), countMap.get(p.id) ?? 0)
+    if (opts.mode !== 'search' || !q) return view
+    // 标题和摘要都没提关键词、却是正文命中（只有 FTS 找得到）——摘要位改吐正文里首处命中的片段，
+    // 否则这条结果在列表里看起来跟关键词毫无关系，用户会以为搜坏了
+    if (textHasTerm(view.title, q) || textHasTerm(view.summary, q)) return view
+    return { ...view, summary: searchSnippet(p.content || '', q, view.summary) }
+  })
 
   const weibo = wb
     ? {
@@ -449,18 +464,15 @@ async function renderList(
   let emptyText = ''
   let title = ''
   if (opts.mode === 'search') {
-    // 搜索框已移到刊头标签上方，这里只展示结果信息；文章封顶 50 条、微博封顶 20 条，超限要说清楚
+    // 搜索框已移到刊头标签上方，这里只展示结果信息。文章结果与首页同一套分页（页码器在列表底部），
+    // 微博结果不分页、封顶 20 条——超限要明说，否则会让人以为「就搜到这么多」
     if (q) {
       const weiboText = searchWeiboView
         ? `、${searchWeiboView.total} 条微博`
         : ''
-      const caps: string[] = []
-      if (r.total > 50) caps.push(('文章仅显示前 50 条'))
-      if (searchWeiboView && searchWeiboView.total > 20) caps.push(('微博仅显示前 20 条'))
-      const capText = caps.length
-        ? `，${caps.join('、')}，试试更具体的关键词`
-        : ''
-      notice = (`<p class="search-meta">找到 ${r.total} 篇文章${weiboText}与「${esc(q)}」相关${capText}</p>`)
+      const pageText = r.totalPages > 1 ? `（第 ${r.page} / ${r.totalPages} 页）` : ''
+      const weiboCap = searchWeiboView && searchWeiboView.total > 20 ? '，微博仅显示前 20 条' : ''
+      notice = (`<p class="search-meta">找到 ${r.total} 篇文章${weiboText}与「${esc(q)}」相关${pageText}${weiboCap}</p>`)
       emptyText = r.total
         ? ''
         : searchWeiboView
@@ -486,12 +498,12 @@ async function renderList(
   const html = theme.home({
     settings,
     posts,
-    page: opts.mode === 'search' ? 1 : r.page,
-    totalPages: opts.mode === 'search' ? 1 : r.totalPages,
+    page: r.page,
+    totalPages: r.totalPages,
     total: r.total,
     tag: opts.mode === 'home' ? tag : undefined,
     q: opts.mode === 'search' ? q : undefined,
-    sort,
+    sort: opts.mode === 'search' ? searchSort : sort,
     seed,
     categorySlug: categorySlug || undefined,
     tags,
@@ -540,14 +552,16 @@ async function renderList(
   // 被搜索引擎判为重复内容；?wb= 深链、UTM 等噪声参数由 canonicalQuery 白名单挡在外面。
   const canonicalQ = canonicalQuery([
     ['q', opts.mode === 'search' ? q || undefined : undefined],
-    ['sort', opts.mode !== 'search' && sort !== 'latest' ? sort : undefined],
+    // 搜索页的排序列在白名单里只有 time：相关度是默认值，不写进 canonical
+    ['sort', opts.mode === 'search' ? (searchSort === 'time' ? 'time' : undefined) : sort !== 'latest' ? sort : undefined],
     ['seed', opts.mode !== 'search' && sort === 'random' && seed ? seed : undefined],
     ['page', r.page > 1 ? r.page : undefined],
   ])
   return c.html(
     page(pageOpts(c, {
       settings,
-      css: theme.css,
+      // 搜索页多带一小段高亮样式（mark.srch-hl）：其他页面零字节，不必让八套主题各写一份
+      css: opts.mode === 'search' ? theme.css + SEARCH_HL_CSS : theme.css,
       title,
       description: (opts.mode === 'category' && category?.description) || settings.siteDescription,
       path: listPath,

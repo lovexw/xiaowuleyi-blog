@@ -34,13 +34,39 @@ export function ftsMatchExpr(q: string): string | null {
   return terms.map((t) => `"${t.replace(/"/g, '""')}"`).join(' AND ')
 }
 
+/** /search 页文章搜索的可选参数。分页与排序都在这里收口：
+ *  - `page` / `perPage`：与首页列表同一套语义（perPage 上限 50，越界页码回落到最后一页）
+ *  - `sort`：`relevance`（bm25，默认）或 `time`（发布时间倒序）。**LIKE 兜底路径恒为时间序**
+ *    ——LIKE 没有相关度可排，硬拗一个假的「相关度」只会误导。
+ *  - `afterTs`：站点可见窗口下界，窗口外文章不参与搜索（命中本身即泄露） */
+export interface PostSearchOpts {
+  page?: number
+  perPage?: number
+  sort?: 'relevance' | 'time'
+  afterTs?: number
+}
+
 /** /search 页文章搜索：FTS 命中按 bm25 相关度排序（好匹配在前），短词或 FTS 异常退回
  *  listPosts 的 LIKE 路径（时间序）——调用方拿到的都是同构 ListPostsResult，无感切换。
  *  加密文 / 回收站 / 非公开状态在 FTS 查询层直接排除（防线 2），locked 文章照常参与搜索、
  *  由渲染层的摘要口径兜底（与旧搜索同口径）。 */
-export async function searchPosts(db: D1Database, q: string, limit = 50, afterTs = 0): Promise<ListPostsResult> {
+export async function searchPosts(db: D1Database, q: string, opts: PostSearchOpts = {}): Promise<ListPostsResult> {
+  const perPage = Math.min(50, Math.max(1, Math.floor(opts.perPage || 10)))
+  const wantPage = Math.max(1, Math.floor(opts.page || 1))
+  const sort = opts.sort === 'time' ? 'time' : 'relevance'
+  const afterTs = opts.afterTs || 0
   const expr = ftsMatchExpr(q)
-  if (!expr) return listPosts(db, { status: 'published', q, page: 1, limit, afterTs })
+  /** LIKE 兜底：短词（trigram 成不了窗）或 FTS 虚表缺失时走这里。
+   *  页码也要夹回最后一页——listPosts 只管「page ≥ 1」，不管是否越过 totalPages，
+   *  否则手输 ?page=99 在 2 字短词下会吐一个「空列表 + 99 / 3 页」的破页 */
+  const likePath = async (): Promise<ListPostsResult> => {
+    const r = await listPosts(db, { status: 'published', q, page: wantPage, limit: perPage, afterTs })
+    if (r.total > 0 && r.page > r.totalPages) {
+      return listPosts(db, { status: 'published', q, page: r.totalPages, limit: perPage, afterTs })
+    }
+    return r
+  }
+  if (!expr) return likePath()
   // 与 listPosts q 分支同口径的过滤条件（防线 2）；matches 必须回连原表过这些业务过滤；
   // 站点可见窗口（afterTs）同 listPosts 口径——窗口外文章不参与搜索，防「命中本身即泄露」
   const vis = afterTs > 0 ? 'AND COALESCE(p.published_at, p.created_at) >= ?' : ''
@@ -48,22 +74,28 @@ export async function searchPosts(db: D1Database, q: string, limit = 50, afterTs
     `posts_fts MATCH ? AND p.deleted_at IS NULL AND p.status = 'published' AND (p.password_hash IS NULL OR p.password_hash = '') ${vis}`
   const binds = (args: unknown[]) => (afterTs > 0 ? [...args, afterTs] : args)
   try {
-    const [itemsRes, countRes] = await Promise.all([
-      db
-        .prepare(
-          `SELECT p.* FROM posts_fts JOIN posts p ON p.id = posts_fts.rowid WHERE ${where} ORDER BY bm25(posts_fts) LIMIT ?`
-        )
-        .bind(...binds([expr]), limit)
-        .all<PostRow>(),
-      db
-        .prepare(`SELECT COUNT(*) AS n FROM posts_fts JOIN posts p ON p.id = posts_fts.rowid WHERE ${where}`)
-        .bind(...binds([expr]))
-        .first<{ n: number }>(),
-    ])
-    return { items: itemsRes.results ?? [], total: countRes?.n ?? 0, page: 1, totalPages: 1 }
+    // 先拿总数再取页：页码越界（手输 ?page=99）时回落到最后一页，别吐一个空列表配一个越界的页码器
+    const countRes = await db
+      .prepare(`SELECT COUNT(*) AS n FROM posts_fts JOIN posts p ON p.id = posts_fts.rowid WHERE ${where}`)
+      .bind(...binds([expr]))
+      .first<{ n: number }>()
+    const total = countRes?.n ?? 0
+    const totalPages = Math.max(1, Math.ceil(total / perPage))
+    const page = Math.min(wantPage, totalPages)
+    if (!total) return { items: [], total: 0, page: 1, totalPages: 1 }
+    // bm25() 越小越相关（FTS5 的约定），升序即「最相关在前」；时间序另按发布时间倒序，
+    // 同刻并列用 id 兜底，避免同秒内两条结果的顺序随查询计划漂移
+    const order = sort === 'time' ? 'COALESCE(p.published_at, p.created_at) DESC, p.id DESC' : 'bm25(posts_fts)'
+    const itemsRes = await db
+      .prepare(
+        `SELECT p.* FROM posts_fts JOIN posts p ON p.id = posts_fts.rowid WHERE ${where} ORDER BY ${order} LIMIT ? OFFSET ?`
+      )
+      .bind(...binds([expr]), perPage, (page - 1) * perPage)
+      .all<PostRow>()
+    return { items: itemsRes.results ?? [], total, page, totalPages }
   } catch {
     // FTS 虚表缺失（迁移未跑完的冷启动窗口）等异常：退回 LIKE，搜索不能因索引挂掉而 500
-    return listPosts(db, { status: 'published', q, page: 1, limit, afterTs })
+    return likePath()
   }
 }
 

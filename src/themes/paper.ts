@@ -12,6 +12,7 @@ import {
   homeListBase,
   homeSortBar,
   likesBtn,
+  markHtml,
   memberAuthHtml,
   memberCardHtml,
   onThisDayCard,
@@ -82,8 +83,8 @@ export function home(d: HomeData): string {
     .map(
       (p) => `<a class="pp-item" href="/post/${esc(p.slug)}">
   <div class="pp-item-main">
-    <h2 class="pp-item-title">${esc(p.title)}</h2>
-    <p class="pp-item-abs">${esc(p.summary)}</p>
+    <h2 class="pp-item-title">${markHtml(p.title, d.q)}</h2>
+    <p class="pp-item-abs">${markHtml(p.summary, d.q)}</p>
     <div class="pp-item-meta">
       <time>${fmtDate(p.published_at)}</time>
       ${p.tags.slice(0, 3).map((t) => `<span class="pp-tag">${esc(t)}</span>`).join('')}
