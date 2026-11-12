@@ -205,6 +205,13 @@ try {
   await check('GET', `/search?q=${encodeURIComponent('定位目标')}`, 200, 'wb-home-feed')
   // 2 字短词退回 LIKE 老路：新旧两条路都必须能搜到
   await check('GET', `/search?q=${encodeURIComponent('冒烟')}`, 200, 'smoke-multi-tag')
+  // 搜索强化（2026-11）：命中词高亮（class="srch-hl" 只出现在真标记里，样式表里是 mark.srch-hl）、
+  // 排序切换两档、分页不炸、联想端点出 JSON
+  await check('GET', `/search?q=${encodeURIComponent('多标签')}`, 200, 'class="srch-hl"')
+  await check('GET', `/search?q=${encodeURIComponent('多标签')}&sort=time`, 200, 'aria-label="搜索结果排序"')
+  await check('GET', `/search?q=${encodeURIComponent('多标签')}&page=2`, 200)
+  await check('GET', `/api/public/search-suggest?q=${encodeURIComponent('多标签')}`, 200, '"items"')
+  await check('GET', '/api/public/search-suggest?q=', 200, '"items":[]')
   await check('GET', '/rss.xml', 200)
   // JSON Feed 1.1（C12）：机器可读订阅格式，与 RSS 同一份防泄漏口径
   await check('GET', '/feed.json', 200, '"version":"https://jsonfeed.org/version/1.1"')
