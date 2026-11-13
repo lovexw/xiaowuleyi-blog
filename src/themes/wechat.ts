@@ -45,11 +45,10 @@ const id = 'wechat'
 function foot(s: SettingsMap, links: string): string {
   return `<footer class="wx-footer">${footCardHtml(s)}${esc((s.footerText || ''))}<span class="wx-footer-links">${footLinks(s, links)}</span></footer>`
 }
-/** 页脚链接组：微博/留言板/友情链接/关于我已进顶栏（compact 收窄后页脚不再重复），页脚只留次级入口（排行随会员开关，纯微博不出「随机」，与顶栏同口径） */
+/** 页脚链接组：微博/留言板/友情链接/关于我已进顶栏（compact 收窄后页脚不再重复），页脚只留次级入口（纯微博不出「随机」，与顶栏同口径） */
 function footLinksFor(s: SettingsMap): { home: string; archive: string; article: string; about: string } {
-  const rank = s.membersEnabled === '1' ? `<a href="/rank">排行榜</a>` : ''
   const random = siteMode(s) === 'weibo' ? '' : `<a href="/random">随机</a>`
-  const secondary = `${rank}${random}`
+  const secondary = random
   const admin = `<a href="/admin">管理</a>`
   const rss = '<a href="/rss.xml">RSS</a>'
   const back = `<a href="/">回主页</a>`
@@ -225,7 +224,7 @@ export function post(d: PostData): string {
   <div class="wx-meta">
     <a class="wx-meta-avatar" href="/" aria-label="返回首页">${avatar(s)}</a>
     <div class="wx-meta-main">
-      <a class="wx-account" href="/">${esc(p.authorName ? `${s.siteName} · ${p.authorName}` : s.siteName)}</a>
+      <a class="wx-account" href="/">${esc(s.siteName)}</a>
       <span class="wx-date">${`${fmtDateCN(p.published_at)}${p.aiGenerated ? ' · AI 生成' : ''}`}</span>
     </div>
   </div>

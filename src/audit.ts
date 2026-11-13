@@ -12,7 +12,7 @@ import type { Env } from './types'
  * 引用源清单（新增存图片地址的字段时必须同步 pullReferenceTexts）：
  *   posts.content（含 <meta data-og-image>）与 posts.cover、pages.content、weibo.images、
  *   weibo.video（视频地址与封面帧，B19）、
- *   users.avatar、comments.avatar / members.avatar（评论头像 C2 / 会员 QQ 头像——
+ *   users.avatar、comments.avatar（评论头像 C2 / 游客 QQ 头像——
  *   2026-11 审计 P1-8 补登记，此前体检会把在用头像误判成未引用并清理掉）、
  *   friend_links.icon、settings.value（favicon/头像/OG 默认图）、tg_buffer（待合并的 TG 相册）。
  *   评论正文是纯文本不存 HTML，不构成引用源。
@@ -111,7 +111,6 @@ const MEDIA_REF_COLUMNS: { table: string; col: string; mode: 'scan' | 'small' }[
   { table: 'users', col: 'avatar', mode: 'small' },
   // 评论头像 C2 / 会员 QQ 头像：都经 saveUpload 落 /images/，漏登记会打瘫评论区头像（P1-8）
   { table: 'comments', col: 'avatar', mode: 'small' },
-  { table: 'members', col: 'avatar', mode: 'small' },
   { table: 'friend_links', col: 'icon', mode: 'small' },
   { table: 'settings', col: 'value', mode: 'small' },
   // tg_buffer 是待合并的 TG 相册缓冲，行数个位数且**没有 id 列**（分桶查询按 id 取行，用不了）

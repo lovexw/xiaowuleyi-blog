@@ -131,14 +131,11 @@ export interface PostData {
     cover: string
     tags: string[]
     published_at: number | null
-  /** 多作者署名（3.0-M1）：author 角色的展示名；单作者站（admin 执笔）为 undefined，主题 meta 行不显示 */
-  authorName?: string
     views: number
     likes: number
-    /** 谁能看档位（编辑器「谁能看」选择，缺省 'all' 全员可见；'member' = 登录会员可见；
-     *  会员 3.0 预备起也可以是自定义档位 key（settings.memberTiers），付费墙文案由 paywallHtml 按 settings 解析） */
+    /** 谁能看档位（编辑器「谁能看」选择）：all 公开 / fixed 固定密码 / member 会员密码（两档站级口令见 src/protect.ts） */
     minTier?: string
-    /** true = 当前访客不可读全文：contentHtml 已被服务端截断为试读段，主题在正文后渲染付费墙遮挡卡（paywallHtml），不得自行补全内容 */
+    /** 兼容保留：口令墙改造后恒为 false（锁文整页只出解锁表单，不再有试读段遮挡卡） */
     locked?: boolean
     /** true = 作者在编辑器「更多」勾选了「AI 生成」（自愿申报）：meta 行尾部输出 AI 生成标识；缺省不渲染，输出字节级不变 */
     aiGenerated?: boolean

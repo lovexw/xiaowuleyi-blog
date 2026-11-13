@@ -1982,11 +1982,6 @@ api.put('/admin/settings', async (c) => {
       patch[key] = v === '1' || v === 'true' ? '1' : '0'
       continue
     }
-    if (key === 'rankTopN') {
-      // 排行榜展示条数：1-50，脏值回退 10
-      patch[key] = String(clampInt(v, 1, 50, 10))
-      continue
-    }
     if (key === 'verifyMetas') {
       // 站点验证 meta（B20）：解析成结构化 JSON 存库（name 白名单 + content 形态，见 src/seo.ts），
       // 非法整体 400——渲染端按结构化值重放，不存在原始 HTML 透传面
@@ -2014,13 +2009,6 @@ api.put('/admin/settings', async (c) => {
       // 渲染端 readAiPolicy 另有一层容错兜底（脏值一律当 allow）
       if (!AI_POLICY_VALUES.includes(v as AiPolicy)) return jsonError('AI 抓取策略档位不正确')
       patch[key] = v
-      continue
-    }
-    if (key === 'updateIgnoredVersion') {
-      // 更新中心「保持当前版本」记账位（src/update.ts）：只认 x.y.z 形态，脏值清空
-      // （清空即「没选择忽略」，下次检查照常提示更新——宁缺毋滥，不让脏值锁死更新提示）
-      const u = v.trim().replace(/^v/, '')
-      patch[key] = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/.test(u) ? u : ''
       continue
     }
     patch[key] = v.slice(0, 500)
