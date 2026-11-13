@@ -3372,8 +3372,6 @@ function apPreviewHtml(ap) {
 }
 
 async function viewAppearance() {
-  const q = new URLSearchParams(location.hash.split('?')[1] || '')
-  const tab = q.get('tab') === 'market' ? 'market' : 'mine'
   let themes
   try {
     ;[{ settings: state.settings }, themes] = await Promise.all([api('/admin/settings'), api('/meta/themes')])
@@ -3381,7 +3379,6 @@ async function viewAppearance() {
     return handleApiErr(e)
   }
   const list = themes.themes || []
-  const catalog = tab === 'market' ? await fetchCatalog() : null
 
   const mine = list
     .map(
@@ -3391,31 +3388,9 @@ async function viewAppearance() {
     </div>`
     )
     .join('')
-  const market = (catalog?.themes || [])
-    .map((t) => {
-      const installed = list.some((x) => t.id === x.id)
-      return `<a class="theme-card mk-card" href="${esc(safeHttpUrl(t.link))}" target="_blank" rel="noopener">
-      ${swatchHtml(swatchOf(t))}
-      <div class="theme-meta"><div class="theme-name"><span>${esc(t.name)}</span>${installed ? '<span class="mk-badge">已安装</span>' : ''}</div><div class="theme-desc">${esc(t.description || '查看介绍与安装说明')}</div></div>
-    </a>`
-    })
-    .join('') || '<div class="empty-box">市场目录暂时空着，更多皮肤敬请期待</div>'
 
-  // 皮肤包（B8）：市场目录内联数据，一键应用 = PUT appearance + customCss 两键，
-  // CSS 由服务端样式安检门（src/skinpack.ts）净化后才进页面
-  const skinCards =
-    (catalog?.skins || [])
-      .map((s) => {
-        const p = s.pack && typeof s.pack === 'object' ? s.pack : null
-        if (!p) return ''
-        const colors = Array.isArray(s.colors) ? s.colors.slice(0, 5) : []
-        return `<div class="theme-card skin-card" data-skin="${esc(s.id || '')}">
-      <div class="skin-swatches">${colors.map((c) => `<i style="background:${esc(String(c))}"></i>`).join('')}</div>
-      <div class="theme-meta"><div class="theme-name"><span>${esc(s.name || s.id || '未命名')}</span></div><div class="theme-desc">${esc(s.description || '')}</div></div>
-      <div class="skin-ops"><button class="btn btn-sm sk-apply" type="button" data-skin="${esc(s.id || '')}">应用皮肤包</button></div>
-    </div>`
-      })
-      .join('') || '<div class="empty-box">市场暂时没有皮肤包</div>'
+  // 皮肤市场（主题 / 皮肤包目录）已随双主题精简移除：内置主题在「我的皮肤」里直接切换，
+  // 皮肤包本质是外观变量预设 + 自定义 CSS，外观面板与下面的自定义 CSS 已覆盖同一能力
 
   // 外观变量（B9 · 内测）：按当前皮肤的能力出表单——主题不支持的角色（如 minimal 无主色）不出现
   const curTheme = list.find((t) => t.id === state.settings.theme) || null
@@ -3471,19 +3446,16 @@ async function viewAppearance() {
     </div>`
   }
 
-  // 皮肤包 & 自定义 CSS（B8）：customCss 过服务端样式安检门后进每页 <style data-custom-css>
+  // 自定义 CSS（B8）：customCss 过服务端样式安检门（src/skinpack.ts）后进每页 <style data-custom-css>
   const cssVal = typeof state.settings.customCss === 'string' ? state.settings.customCss : ''
   const cssPanel = `
     <div class="panel" style="padding:20px;margin-top:16px;" id="sk-panel">
       <div class="form-section" style="margin-bottom:0;">
-        <h3>皮肤包与自定义 CSS</h3>
-        <div class="sec-desc">市场里的一键配色就是皮肤包——粘贴包 JSON 也能导入；自定义 CSS 追加在主题样式之后全站生效（服务端净化：@import、脚本类内容、外链非 https 资源不允许，url() 只收 https 与站内地址）</div>
-        <div class="form-item"><label>导入皮肤包（粘贴包 JSON）</label>
-          <textarea class="input" id="sk-pack" rows="3" placeholder='{"name":"苔原","appearance":{"accent":"#3d7a5f","radius":12},"css":""}'></textarea></div>
-        <div class="form-item"><label>自定义 CSS（留空 = 不启用；皮肤包自带的 CSS 会填到这里）</label>
+        <h3>自定义 CSS</h3>
+        <div class="sec-desc">追加在主题样式之后全站生效（服务端净化：@import、脚本类内容、外链非 https 资源不允许，url() 只收 https 与站内地址）</div>
+        <div class="form-item"><label>自定义 CSS（留空 = 不启用）</label>
           <textarea class="input" id="sk-css" rows="6" placeholder='.rich img { border-radius: 8px; }'>${esc(cssVal)}</textarea></div>
         <div class="ap-ops">
-          <button class="btn" id="btn-sk-apply" type="button">应用皮肤包</button>
           <button class="btn" id="btn-sk-css" type="button">保存自定义 CSS</button>
           <button class="btn btn-ghost" id="btn-sk-clear" type="button">清空自定义 CSS</button>
         </div>
@@ -3494,41 +3466,9 @@ async function viewAppearance() {
     'appearance',
     `<div class="page-head"><div><div class="page-title">皮肤</div><div class="page-sub">给博客换一身好看的衣服，选中即刻生效</div></div>
       <a class="btn" href="/" target="_blank" rel="noopener">预览主页 ↗</a></div>
-    <div class="toolbar"><div class="tabs">
-      <a class="tab${tab === 'mine' ? ' is-active' : ''}" href="#/appearance">我的皮肤</a>
-      <a class="tab${tab === 'market' ? ' is-active' : ''}" href="#/appearance?tab=market">皮肤市场</a>
-    </div></div>
-    ${tab === 'mine' ? `<div class="panel" style="padding:20px;"><div class="settings-grid" id="theme-grid">${mine}</div></div>${apPanel}${cssPanel}` : `<div class="panel" style="padding:20px;"><div class="settings-grid">${market}</div></div><div class="panel" style="padding:20px;margin-top:16px;"><h3 style="margin-bottom:12px;">皮肤包</h3><div class="settings-grid">${skinCards}</div></div>`}`
+    <div class="panel" style="padding:20px;"><div class="settings-grid" id="theme-grid">${mine}</div></div>${apPanel}${cssPanel}`
   )
 
-  // 皮肤包应用（市场卡与粘贴导入共用）：外观参数与自定义 CSS 一起写，二次确认防误覆盖
-  const applySkinPack = async (appearance, css, label) => {
-    const ok = await confirmBox(`应用皮肤包「${label}」将覆盖当前的外观变量与自定义 CSS，确定继续？`)
-    if (!ok) return
-    try {
-      const d = await api('/admin/settings', { method: 'PUT', body: { appearance, customCss: css } })
-      state.settings = d.settings
-      toast(`皮肤包「${label}」已应用，全站即时生效`)
-      navigate()
-    } catch (e) {
-      handleApiErr(e)
-    }
-  }
-  if (tab === 'market') {
-    $app.querySelectorAll('.sk-apply').forEach((btn) =>
-      btn.addEventListener('click', () => {
-        const s = (catalog?.skins || []).find((x) => (x.id || '') === btn.getAttribute('data-skin'))
-        const p = s && s.pack && typeof s.pack === 'object' ? s.pack : null
-        if (!p) return toast('皮肤包数据缺失', false)
-        const appearance =
-          p.appearance && typeof p.appearance === 'object' && !Array.isArray(p.appearance) ? JSON.stringify(p.appearance) : ''
-        if (!appearance) return toast('该皮肤包没有外观参数，无法应用', false)
-        applySkinPack(appearance, typeof p.css === 'string' ? p.css : '', (s.name || s.id || '未命名').toString())
-      })
-    )
-    return
-  }
-  if (tab !== 'mine') return
   // 点击卡片立即启用：乐观高亮，保存失败回退并提示
   let applying = false
   $app.querySelectorAll('.theme-card').forEach((card) =>
@@ -3651,24 +3591,6 @@ async function viewAppearance() {
     btnClearCss.addEventListener('click', () => {
       document.getElementById('sk-css').value = ''
       saveCustomCss('', '自定义 CSS 已清空')
-    })
-  // 粘贴导入皮肤包：与市场应用同路（服务端逐键净化，非法 400）
-  const btnApply = document.getElementById('btn-sk-apply')
-  if (btnApply)
-    btnApply.addEventListener('click', () => {
-      let pack = null
-      try {
-        pack = JSON.parse(document.getElementById('sk-pack').value)
-      } catch {
-        return toast('皮肤包不是合法的 JSON', false)
-      }
-      if (!pack || typeof pack !== 'object' || Array.isArray(pack)) return toast('皮肤包格式不正确', false)
-      const appearance =
-        pack.appearance && typeof pack.appearance === 'object' && !Array.isArray(pack.appearance)
-          ? JSON.stringify(pack.appearance)
-          : ''
-      if (!appearance) return toast('皮肤包缺少外观参数（appearance）', false)
-      applySkinPack(appearance, typeof pack.css === 'string' ? pack.css : '', String(pack.name || '导入的皮肤包'))
     })
 }
 

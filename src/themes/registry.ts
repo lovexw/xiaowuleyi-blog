@@ -1,10 +1,4 @@
-import * as bitcoin from './bitcoin'
-import * as journal from './journal'
-import * as midnight from './midnight'
-import * as news from './news'
 import * as minimal from './minimal'
-import * as paper from './paper'
-import * as rednote from './rednote'
 import * as wechat from './wechat'
 import type {
   ArchiveYearGroup,
@@ -283,22 +277,8 @@ export const THEMES: Record<string, ThemeModule> = {
     ...wechat,
     id: 'wechat',
     name: '微信公众号',
-    description: '订阅号卡片流 + 公众号文章页排版，明亮清爽',
+    description: '订阅号卡片流 + 公众号文章页排版，明亮清爽（两站在用）',
     colors: ['#ededed', '#b23a29', '#ffffff', '#e8f7ef', '#f2f2f2'],
-  },
-  journal: {
-    ...journal,
-    id: 'journal',
-    name: '手账',
-    description: '奶油纸面、和纸胶带、拍立得与贴纸，把博客写成一本手账',
-    colors: ['#faf5ea', '#e06a3c', '#fffdf6', '#fde7e2', '#e7f0da'],
-  },
-  paper: {
-    ...paper,
-    id: 'paper',
-    name: '纸墨',
-    description: '宋体排印、印章红点缀，安安静静读书的纸面',
-    colors: ['#f7f4ee', '#a03c2e', '#fffdf8', '#efe9db', '#f1ede2'],
   },
   minimal: {
     ...minimal,
@@ -306,34 +286,6 @@ export const THEMES: Record<string, ThemeModule> = {
     name: '极简',
     description: '黑白灰、大标题、大留白，内容即全部',
     colors: ['#ffffff', '#111111', '#f5f5f5', '#efefef', '#f7f7f7'],
-  },
-  midnight: {
-    ...midnight,
-    id: 'midnight',
-    name: '夜航',
-    description: '深夜星图蓝 + 等宽字体点缀的开发者日志风',
-    colors: ['#0f1115', '#58a6ff', '#161a22', '#1d232e', '#181d26'],
-  },
-  bitcoin: {
-    ...bitcoin,
-    id: 'bitcoin',
-    name: '比特币',
-    description: '比特币橙 × 暖白纸面，描边分层、衬线大标题与等宽眉题的品牌 kit 风',
-    colors: ['#faf9f6', '#f7931a', '#ffffff', '#fff3e0', '#f2f0ea'],
-  },
-  rednote: {
-    ...rednote,
-    id: 'rednote',
-    name: '小红书',
-    description: '发现页瀑布流笔记卡 + 品牌红点缀，把博客写成一册生活指南',
-    colors: ['#f7f8fa', '#ff2442', '#ffffff', '#ffeef0', '#f5f6f7'],
-  },
-  news: {
-    ...news,
-    id: 'news',
-    name: '快讯',
-    description: '新闻纸风资讯站：头条大卡 + 快讯时间流 + 晚报式文章排版（3.0 原型）',
-    colors: ['#fafaf7', '#c0392b', '#ffffff', '#f2f0ea', '#efede8'],
   },
 }
 

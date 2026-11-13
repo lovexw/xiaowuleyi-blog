@@ -48,30 +48,6 @@ export const THEME_APPEARANCE: Record<string, ThemeAppearance> = {
     },
     radius: { var: '--wx-radius', default: 8, lgFactor: 1.75 },
   },
-  paper: {
-    richSize: 17,
-    roles: {
-      accent: { vars: ['--pp-accent'], default: '#a03c2e' },
-      ink: { vars: ['--pp-ink'], default: '#2b2a26' },
-      sub: { vars: ['--pp-sub'], default: '#8a857a' },
-      bg: { vars: ['--pp-bg'], default: '#f7f4ee' },
-      card: { vars: ['--pp-card'], default: '#fffdf8' },
-      line: { vars: ['--pp-line'], default: '#e2dccc' },
-    },
-    radius: { var: '--pp-radius', default: 4, lgFactor: 1.5 },
-  },
-  midnight: {
-    richSize: 16.5,
-    roles: {
-      accent: { vars: ['--md-accent'], default: '#58a6ff' },
-      ink: { vars: ['--md-ink'], default: '#d7dde5' },
-      sub: { vars: ['--md-sub'], default: '#7d8590' },
-      bg: { vars: ['--md-bg'], default: '#0f1115' },
-      card: { vars: ['--md-card'], default: '#161a22' },
-      line: { vars: ['--md-line'], default: '#232936' },
-    },
-    radius: { var: '--md-radius', default: 8, lgFactor: 1.5 },
-  },
   minimal: {
     richSize: 17,
     roles: {
@@ -81,76 +57,6 @@ export const THEME_APPEARANCE: Record<string, ThemeAppearance> = {
       line: { vars: ['--mn-line'], default: '#eaeaea' },
     },
     radius: { var: '--mn-radius', default: 2, lgFactor: 2 },
-  },
-  journal: {
-    richSize: 17,
-    roles: {
-      accent: { vars: ['--jrn-accent'], default: '#e06a3c', derived: [{ varName: '--jrn-hl', kind: 'tint', amount: 14 }] },
-      ink: { vars: ['--jrn-ink'], default: '#3f3a31' },
-      sub: { vars: ['--jrn-ink-soft'], default: '#94897a' },
-      bg: { vars: ['--jrn-paper'], default: '#faf5ea' },
-      card: { vars: ['--jrn-card'], default: '#fffdf6' },
-      line: { vars: ['--jrn-line'], default: '#e7ddc9' },
-    },
-    radius: { var: '--jrn-radius', default: 10, lgFactor: 1.6 },
-  },
-  bitcoin: {
-    richSize: 16.5,
-    roles: {
-      accent: {
-        vars: ['--bt-accent'],
-        default: '#f7931a',
-        derived: [
-          { varName: '--bt-accent-deep', kind: 'shade', amount: 13 },
-          { varName: '--bt-accent-soft', kind: 'tint', amount: 12 },
-        ],
-      },
-      ink: { vars: ['--bt-ink'], default: '#191714' },
-      sub: { vars: ['--bt-muted'], default: '#6d6a63' },
-      bg: { vars: ['--bt-bg'], default: '#faf9f6' },
-      card: { vars: ['--bt-surface'], default: '#ffffff' },
-      line: { vars: ['--bt-border'], default: '#e7e4dc' },
-    },
-    radius: { var: '--bt-radius', default: 10, lgFactor: 1.6 },
-  },
-  rednote: {
-    richSize: 16,
-    roles: {
-      accent: {
-        vars: ['--rn-red'],
-        default: '#ff2442',
-        derived: [
-          { varName: '--rn-red-deep', kind: 'shade', amount: 15 },
-          { varName: '--rn-red-soft', kind: 'tint', amount: 8 },
-        ],
-      },
-      ink: { vars: ['--rn-ink'], default: '#333333' },
-      sub: { vars: ['--rn-sub'], default: '#666666' },
-      bg: { vars: ['--rn-bg'], default: '#f7f8fa' },
-      card: { vars: ['--rn-surface'], default: '#ffffff' },
-      line: { vars: ['--rn-line'], default: '#f0f0f0' },
-    },
-    radius: { var: '--rn-radius', default: 12, lgFactor: 1.33 },
-  },
-
-  news: {
-    richSize: 16,
-    roles: {
-      accent: {
-        vars: ['--nw-accent'],
-        default: '#c0392b',
-        derived: [
-          { varName: '--nw-accent-deep', kind: 'shade', amount: 15 },
-          { varName: '--nw-accent-soft', kind: 'tint', amount: 8 },
-        ],
-      },
-      ink: { vars: ['--nw-ink'], default: '#22211f' },
-      sub: { vars: ['--nw-sub'], default: '#75716a' },
-      bg: { vars: ['--nw-bg'], default: '#fafaf7' },
-      card: { vars: ['--nw-card'], default: '#ffffff' },
-      line: { vars: ['--nw-line'], default: '#e5e2da' },
-    },
-    radius: { var: '--nw-radius', default: 4, lgFactor: 1.5 },
   },
 }
 

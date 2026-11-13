@@ -78,7 +78,7 @@ test('site.js 删除键接线：双前缀选择器 + 后台评论端点 + 微博
   assert.ok(site.includes("'/api/admin/comments/' + encodeURIComponent(id)"), '删除请求应复用后台评论端点（会话鉴权）')
   assert.ok(site.includes('class="wb-cmt-del-btn"'), '微博评论（客户端渲染）也要出删除键')
   assert.ok(site.includes('删除这条评论？'), '删除前应有二次确认')
-  for (const theme of ['wechat', 'paper', 'midnight', 'minimal', 'journal', 'bitcoin', 'rednote']) {
+  for (const theme of ['wechat', 'minimal']) {
     const css = readFileSync(new URL(`../src/themes/${theme}.css`, import.meta.url), 'utf8')
     assert.ok(css.includes('.cmt-del-btn, .wb-cmt-del-btn'), theme + '.css 缺删除键样式')
   }

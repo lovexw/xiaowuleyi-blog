@@ -371,7 +371,7 @@ function seedSource(db: DatabaseSync): void {
              (2, 'og/202601/b.png', 'b.png', 'image/png', 3, ${now}, 'h2');
     INSERT INTO settings (key, value) VALUES
       ('siteName', '我的旧站'),
-      ('theme', 'paper'),
+      ('theme', 'minimal'),
       ('externalToken', 'OLD-SECRET-MUST-NOT-LEAK'),
       ('telegramBotToken', 'TG-SECRET'),
       ('siteUrl', 'https://old.example'),
@@ -472,7 +472,7 @@ test('整站包：导出 → 还原到空站，数据与图片完整回来（且
   // ── settings：包里的键覆盖，目标站自己的密钥/实例态键保住 ──
   const st = (k: string) => (dstDb.raw.prepare('SELECT value FROM settings WHERE key = ?').get(k) as { value: string } | undefined)?.value
   assert.equal(st('siteName'), '我的旧站')
-  assert.equal(st('theme'), 'paper')
+  assert.equal(st('theme'), 'minimal')
   assert.equal(st('siteFoot'), '{"posts":1}')
   assert.equal(st('siteUrl'), 'https://new.example')
   assert.equal(st('externalToken'), 'NEW-SECRET')
@@ -626,7 +626,7 @@ test('清空本站：内容清光（含回收站）、设置与管理员账号�
   }
   // settings / 管理员账号留住（换站不必重新填配置，也不会把自己锁在外面）
   assert.equal(st('siteName'), '我的旧站')
-  assert.equal(st('theme'), 'paper')
+  assert.equal(st('theme'), 'minimal')
   assert.equal(st('externalToken'), 'OLD-SECRET-MUST-NOT-LEAK')
   assert.equal(st('siteUrl'), 'https://old.example')
   assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM users').get()!.n, 1)
