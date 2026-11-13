@@ -22,9 +22,9 @@
 | 接口契约 | `docs/API.md` | 端点出参 / 净化白名单摘要 |
 | **部署 / 运维（主线）** | **`docs/DEPLOY-ORACLE.md`** | **唯一部署真相源**：服务器定时拉取、容器、数据目录、回滚 |
 | 主题 / 插件 | `docs/THEMES.md`、`docs/PLUGINS.md` | 各子系统的协议与规矩 |
-| 会员 / 跨站继承 | `docs/PARTNER.md` | 分站模式下的单向权益通道：数据模型、签名、两站配置、风险与防线 |
-| 下一批做什么 | `docs/ROADMAP.md` | 已折叠：保留的待办 + 已上线大事记 + 不做清单 |
-| 冻结形态的旧文档 | `docs/DEPLOY.md`、`docs/PLAZA.md`、`docs/CLOUDFLARE-BASICS.md` | 已挂冻结横幅，只在考古 / 对照时读，**不作为操作依据** |
+| 下一批做什么 | `docs/ROADMAP.md` | 第一性原理版：待办 + 不做清单（含 2026-11-13 删除记录）+ 大事记 |
+| **精简批次交底** | `docs/PROPOSAL-SIMPLIFY-2026-11-13.md` | 2026-11-13 大精简的方案 / 审计 / 风险与残留项（会员 / MCP / 更新中心 / 广场 / 六主题删除） |
+| 冻结形态的旧文档 | `docs/DEPLOY.md`、`docs/CLOUDFLARE-BASICS.md` | 已挂冻结横幅，只在考古 / 对照时读，**不作为操作依据**（PLAZA.md / PARTNER.md / UPDATING.md 已随功能删除） |
 | 历史审计 / 提案 / 契约 | `docs/archive/` | 只在考古时读，日常不用管 |
 
 ---
@@ -50,17 +50,6 @@
 7. **改 schema / 加 src 文件必须「两处同步 + 登记」**——加列 / 表：`schema.sql` 与 `db.ts` 的 `SCHEMA_COLUMNS` / `SCHEMA_TABLES` 两处同步（建表语句要自带全部列）；加 `src/` 文件：在 AGENTS.md「结构速查」登记一行。
 8. **写了 settings 就要失效缓存**——写完必须 `await invalidateSharedSettings(db)`（`saveSettings` 已内置），忘了 = 改完设置最多 60 秒读旧值。
 
-## 3.5 会员体系特别注意（改会员相关代码前必读，碰了就是线上 bug）
-
-会员 3.0 预备版已上线（自定义档位 / 档位时效 / 认证徽标 / 会员活动中心），防线细节在 AGENTS.md「会员体系」节与 `src/tiers.ts` 头注；这里是**最容易搞乱的四条大白话**：
-
-1. **档位 key 建好后是「身份证号」，永远别改**——`posts.min_tier`（谁能看）和 `members.tier` 都用 key 关联；改**名字 / 颜色**随便（前台跟着变），改 key 会让存量文章对不上号。`posts.min_tier` 现在只认 `'all'` / `'fixed'` / `'member'` 三个保留字（2026-11 两档口令改造，脏值一律按 `member` 收口），会员档位 key 只用于 `members.tier`。
-2. **第一档 = 全体会员的兜底身份，必须永久**——它承载「过期会员 / 定义缺失档位」的回落身份，校验在 `cleanMemberTiers`（第一档非永久整体拒绝），后台编辑器也锁死了。**档位顺序即等级**：排前面的低、排后面的高。
-3. **档位时效没有 cron**——过期是读侧 `effectiveTier` 即时判定的。任何要展示 / 判定档位的地方（评论徽标、排行榜、会员卡）都必须过 `effectiveTier` 拿**生效档位**，直接用 `members.tier` 原值 = 过期会员还能看付费文（真 bug）。`tier_expires_at` 时间戳只许在服务端用 + 本人视角展示，**任何公开出参（微博评论 JSON 等）出参前剥掉**。
-4. **会员数据只认五张表**——members / member_sessions / member_points_log / member_visits / member_likes（会话不进备份与整站包，其余要登记）。**严禁写 users / sessions**（那是管理员）；「我的足迹 / 点赞 / 评论 / 回复」只服务会员本人（/member 页 SSR 直出），**不进任何公开出参**；足迹 90 天滚动清理挂在 index.ts 备份 cron。
-
-> 涉及会员的新功能先读 `src/tiers.ts`（全部纯函数，tests/tiers.test.ts + tests/member-tiers.test.ts 守着），别在别处手写档位判定 / 过期逻辑。
-
 ## 4. 收工前（四件事）
 
 1. **全绿并贴原始输出**：`npm run typecheck` + `npm test`（动了 SQL 拼接 / 渲染 / 路由再跑 `npm run smoke`）。
@@ -83,7 +72,7 @@
 | 加一个设置项 | 直接裸写 `settings` | 走 `saveSettings`，或写完补 `await invalidateSharedSettings(db)` |
 | 加一个数据库列 | 只改 `schema.sql` | 同时改 `db.ts` 的 `SCHEMA_COLUMNS`（且 `SCHEMA_TABLES` 建表语句自带该列） |
 | 加一个后台页面 | 只写模板 | 同时登记 `MENU`、`navigate()`、`MOBILE_TAB_IDS` |
-| 加一个前台导航项 | 只测默认配置 | 四种站点模式 + 会员开/关都过一遍，390px 验证 |
+| 加一个前台导航项 | 只测默认配置 | 四种站点模式都过一遍，390px 验证 |
 | 服务器要抓一个外部网址 | 直接 `fetch()` | 走 `fetchPublicResource`（逐跳复查，防 302 到内网） |
 | 加一个动态 `<input type="file">` | 直接创建节点 | 走 `pickFiles` 助手（否则 iOS Safari 选完图不回填） |
 | 改前台 `site.js` | 箭头函数 / 模板字符串 / 裸 `localStorage` | 保持 ES5、禁 lookbehind；存储走 `storeGet/storeSet` |
@@ -92,11 +81,8 @@
 | 加一种评论/留言形态 | 抄一整段流程 | 复用 `api.ts` 的 `publicComment` 公共核心，只写细路由 + opts |
 | 新增对外出口（RSS/接口/导出） | 直接输出全部字段 | 过防泄漏清单（`min_tier` 非 `all` 的锁文一律只出作者摘要） |
 | 改主题 / 编辑器样式 | 只改一侧 | `.ed-editor`（编辑器）与 `.rich`（文章页）镜像同改 |
-| 给分站加「更新」按钮 | 做成自动拉代码 / 自动迁移 | 更新中心**只告知 + 记录选择**，升级是一次显式部署动作（docs/UPDATING.md） |
 | 批量替换文本（sed 全仓） | `git ls-files` 不加过滤直接 sed | 先按扩展名过滤（`*.md` `*.ts` `*.js`…）——sed 会把 PNG / SVG 等二进制改坏几字节，还会给全仓文件留「幻影改动」（status 显示 M、diff 为空），清理很费劲（2026-10-17 实踩） |
-| 改版本清单结构 | 只改生成脚本 / 只改校验器 | 三处同步：`scripts/build-release.mjs`、`src/update.ts` 校验器、`tests/update.test.ts` 守卫 |
 | 发布回填 CHANGELOG 之后 | 忘了重生成 `version.json` | 跑 `npm run build:release` 并随发布提交 |
-| 判定/展示会员档位 | 直接用 `members.tier` 原值 | 过 `effectiveTier` 拿生效档位（过期即时降级基础档），档位 key 是稳定标识别改，详见 §3.5 |
 
 ## 7. 话术模板（站长直接复制）
 

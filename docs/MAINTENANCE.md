@@ -27,16 +27,17 @@
 
 ## 2. 冻结清单（代码保留，不再维护更新）
 
-> 这一节冻结的是**部署形态**（跑在哪个运行时、给谁用）。站内**功能**的冻结另有清单：
-> 会员 / 排行榜 / 评论圈层 / 广场同步 / 豆瓣 / 英文版等见 [FROZEN-FEATURES.md](FROZEN-FEATURES.md)。
+> 这一节冻结的是**部署形态**（跑在哪个运行时、给谁用）。站内**功能**的冻结面已随 2026-11-13 精简
+> 基本转为**删除**（会员 / 排行榜 / 评论圈层 / 广场 / MCP / 更新中心等），清单见
+> [FROZEN-FEATURES.md](FROZEN-FEATURES.md)；仍冻结保留的只剩豆瓣书影音卡片一项。
 
 | 形态 | 位置 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| Cloudflare Workers / D1 / R2 部署 | `wrangler.jsonc`、`src/` 内的兼容分支 | 冻结 | 不再部署、不跟进 CF 平台的 API 变化；`wrangler.jsonc` 留作参照实现 |
+| Cloudflare Workers / D1 / R2 部署 | `wrangler.jsonc`、`src/` 内的兼容分支 | 冻结（仅作本地 dev/smoke 工具） | 不再部署、不跟进 CF 平台的 API 变化；`npm run dev` / `npm run smoke` 仍靠 wrangler dev 本地跑 |
 | Docker **多租户托管**（给他人开站） | `docker-poc/tenants.json`、`add-tenant.sh`、`control.ts` | 冻结 | **机制保留可用**（现在两个站就跑在它上面），但不再优化「一键给别人开站」的体验、不写托管服务文档 |
 | 演示站 | 已于 2026-11-11 **删除** | — | 源码 / 配置 / 门控 / 多租户 `--demo` 全部移除，线上 demo 站不再跟随本仓库 |
-| 广场（Plaza） | `plaza/`、`src/hooks.ts` 的广场同步插件 | 冻结 | 服务端协议不再演进；站上的广场同步插件继续可用，出事不修 |
-| 官网 | `website/` | 冻结 | 源码留档，不再更新内容与构建脚本 |
+| 官网 | `website/` | 冻结 | 源码留档（线上仍由服务器目录直出，**删目录前先停 openresty 站点**），不再更新内容与构建脚本 |
+| ~~广场（Plaza）~~ | 已于 2026-11-13 **删除** | — | hub / 同步插件 / 控制面收录链路整体移出仓库，见 PROPOSAL-SIMPLIFY-2026-11-13.md |
 
 ### 「冻结」到底意味着什么
 
@@ -50,8 +51,8 @@
 两个实际原因，不是舍不得：
 
 1. **`/opt/xwblog-app` 就是仓库目录**。服务器靠 `git reset --hard` 同步，删掉 `website/` 这类目录，
-   pull 之后目录就真的消失了。官网目前仍在线（2026-11-05 实测 200），删源码等于
-   给线上留一颗定时炸弹。
+   pull 之后目录就真的消失了。官网目前仍在线（2026-11-13 实测 200），删源码等于
+   给线上留一颗定时炸弹——**先在服务器上停掉 openresty 的官网站点，再删目录**。
 2. **引用面太广**。`docs/GUIDE.md`、`docs/CLOUDFLARE-BASICS.md`、`docs/UPDATING.md` 里共 6 处
    相对链接指向 `docs/DEPLOY.md`，`package.json` 里有 `deploy:site` / `build:docs` 指向 `website/`。
    删文件要连带改一圈，收益只有几 MB 仓库体积——不划算。

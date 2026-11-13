@@ -14,10 +14,8 @@
     "smoke": "node scripts/smoke.mjs",
     "db:init:local": "wrangler d1 execute DB --local --file schema.sql",
     "db:init:remote": "wrangler d1 execute DB --remote --file schema.sql",
-    "seed:3.0": "node scripts/seed-local-3.0.mjs",
     "videos:fix-hevc": "node scripts/fix-hevc-videos.mjs",
-    "test": "tsx --test tests/*.test.ts",
-    "tiers:migrate": "node scripts/migrate-tiers-3.mjs"
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "hono": "^4.9.0"

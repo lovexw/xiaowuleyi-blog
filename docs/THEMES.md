@@ -1,29 +1,25 @@
 # 主题开发指南
 
-博客号的公开页面（首页 / 文章页 / **微博页** / **友链页** / 关于我页 / **独立页面** / **归档页** / **留言板页** / **会员中心** / **积分排行榜**）由**主题模块**服务端渲染。任何会写 HTML/CSS 的人都可以新增主题，无需理解后端。
+博客号的公开页面（首页 / 文章页 / **微博页** / **友链页** / 关于我页 / **独立页面** / **归档页** / **留言板页**）由**主题模块**服务端渲染。任何会写 HTML/CSS 的人都可以新增主题，无需理解后端。
 
 ## 目录结构
 
 ```
 src/themes/
 ├── registry.ts     ← 主题注册表（新主题在这里加一行；ThemeModule 接口也在这里）
-├── wechat.ts / wechat.css
-├── journal.ts / journal.css
-├── paper.ts / paper.css
-├── minimal.ts / minimal.css
-├── midnight.ts / midnight.css
-├── bitcoin.ts / bitcoin.css
-└── rednote.ts / rednote.css
-```
+├── wechat.ts / wechat.css   ← 微信公众号（blog.xiaowuleyi.com 与 blog.btchao.com 都在用）
+└── minimal.ts / minimal.css ← 极简黑白灰（备胎）
+
+> 2026-11-13 精简：官方主题收敛为这两套（站长拍板「皮肤 2-3 个」）。其余六套（journal / paper /
+> midnight / bitcoin / rednote / news）已删，git revert 8e3013b 可整批找回。
 
 ## 一个主题需要提供什么
 
-一套主题 = **八个必需渲染函数**（`home` / `weibo` / `links` / `post` / `about` / `page` / `archives` / `guestbook`）+ 两个可选函数（`member` 会员中心 / `rank` 排行榜，缺省时 pages.ts 渲染通用版）+ 全局 CSS。新建 `src/themes/mytheme.ts` 与 `src/themes/mytheme.css`：
+一套主题 = **八个必需渲染函数**（`home` / `weibo` / `links` / `post` / `about` / `page` / `archives` / `guestbook`）+ 全局 CSS。（会员中心 / 排行榜两个可选函数随 2026-11-13 会员删除一并退役。）新建 `src/themes/mytheme.ts` 与 `src/themes/mytheme.css`：
 
 ```ts
 import type {
   HomeData, WeiboData, LinksData, PostData, AboutData, PageData, ArchivesData, GuestbookData,
-  MemberData, RankData,
 } from './registry'
 import {
   esc, fmtDate, likesBtn, pagerHtml,
@@ -142,9 +138,6 @@ export const THEMES: Record<string, ThemeModule> = {
 | `weiboTopicBar(topics, active?)` | 微博话题条（`?topic=` 筛选用） |
 | `friendLinkCards(items)` / `friendLinkApply()` | 友链卡片列表 / 访客申请收录表单（含蜜罐），class `.fl-*` |
 | `archiveGroups(posts)` / `archiveListHtml(groups)` | 归档按年分组 / 归档列表（年份小节 + 日期外置链接列表），class `.ar-*` |
-| `memberCardHtml(v)` / `memberAuthHtml()` | 会员中心：已登录会员卡 / 登录注册双表单（`member()` 可选函数内用） |
-| `rankListHtml(entries, me?)` | 积分排行榜列表（/rank 页主体，含本人行高亮），class `.rk-*` |
-| `paywallHtml(tierName)` | 会员付费墙遮挡卡（主题里照旧 `p.locked ? paywallHtml(...) : ''` 渲染）。注意：会员付费墙已冻结，`locked` 现在**恒为 false**，需要口令的文章由 pages 层换成口令表单（`.gp-box`），主题不用改 |
 
 ## 交互约定
 
