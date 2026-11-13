@@ -1,5 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import os from 'node:os'
 import { createD1 } from '../docker-poc/shims/d1.ts'
 
 /* db.batch 的返回结构（2026-11-06 线上事故回归）
@@ -54,7 +55,7 @@ test('D1 shim batch：INSERT ... RETURNING 也算结果集', async () => {
 })
 
 test('D1 shim batch：纯读批次不占写事务（读的同时另一条连接能写进去）', async () => {
-  const file = `${process.env.TMPDIR || '/tmp'}/d1-batch-readonly-${process.pid}.db`
+  const file = `${os.tmpdir()}/d1-batch-readonly-${process.pid}.db`
   const a = createD1(file)
   let b: ReturnType<typeof createD1> | null = null
   try {

@@ -29,3 +29,6 @@ douban-relay/data/
 # 广场 hub 甲骨文部署工作区（demo/hub-node）：实时库与 webroot 快照不入库——快照源在 website/，部署时重新组装
 demo/hub-node/data/
 demo/hub-node/public/
+
+# 本地 D1 状态备份（手工快照，不进库）
+.wrangler-state-backup*/
