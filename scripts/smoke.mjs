@@ -257,14 +257,28 @@ try {
   // 防止「接口 200 但 INSERT 静默失败」的假绿
   await new Promise((r) => setTimeout(r, 1500))
   try {
-    const out = await run(
-      NODE,
-      [
-        WRANGLER_JS, 'd1', 'execute', 'DB', '--local', '--json', '--command',
-        "SELECT COUNT(*) AS n FROM visit_log WHERE vid = 'smoke-visitor-1'",
-      ],
-      '校验打点已落库（visit_log）'
-    )
+    // Windows 抖动兜底：wrangler 子进程偶发崩溃（exit 0xC0000409 / 0x80000003），最多重试两次
+    const d1Query = () =>
+      run(
+        NODE,
+        [
+          WRANGLER_JS, 'd1', 'execute', 'DB', '--local', '--json', '--command',
+          "SELECT COUNT(*) AS n FROM visit_log WHERE vid = 'smoke-visitor-1'",
+        ],
+        '校验打点已落库（visit_log）'
+      )
+    let out
+    try {
+      try {
+        out = await d1Query()
+      } catch {
+        await new Promise((r) => setTimeout(r, 2000))
+        out = await d1Query()
+      }
+    } catch {
+      await new Promise((r) => setTimeout(r, 4000))
+      out = await d1Query()
+    }
     if (/"n"\s*:\s*[1-9]/.test(out)) {
       console.log('  ✓ visit_log 已收到打点记录')
       results.push(['visit_log 落库校验', true])
