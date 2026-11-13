@@ -2,44 +2,32 @@ import { type Context, Hono } from 'hono'
 import { runBackup } from './backup'
 import { analyticsScriptHtml, cleanAnalyticsScript, cleanCategoryDescription, cleanRobotsExtra, cleanVerifyMetas, verifyMetaTagsHtml, AI_POLICY_VALUES, type AiPolicy } from './seo'
 import {
-  clearMemberSessionCookie,
   clearSessionCookie,
   clientIp,
-  createMemberSession,
   createSession,
-  destroyMemberSession,
-  destroyMemberSessionsByMember,
-  destroyOtherMemberSessions,
   destroyOtherSessions,
   destroySession,
   getCookie,
-  getMemberUser,
   getSessionUser,
   hashPassword,
-  MEMBER_SESSION_COOKIE,
   rateLimit,
   safeEqual,
   SESSION_COOKIE,
   sessionCookie,
   isSecureRequest,
   tokenHash,
-  memberSessionCookie,
 } from './auth'
-import { verifyTurnstile } from './turnstile'
 import { updateStatus, validateUpdateManifest, UPDATE_GUIDE_URL, UPDATE_MANIFEST_URL } from './update'
 import { APP_VERSION } from './version'
 import {
   countUsers,
   createCategory,
   categoryNameMap,
-  createMember,
   bumpWeiboCount,
   bumpWeiboCountById,
   DEFAULT_SETTINGS,
   getCategoryById,
   getFriendLinkById,
-  getMemberById,
-  getMemberByUsername,
   getPostById,
   getPostBySlug,
   getPostCategoryId,
@@ -47,7 +35,6 @@ import {
   getWeiboById,
   listCategories,
   listFriendLinks,
-  listMembersAdmin,
   listPages,
   listPublishedTagsCached,
   getPageById,
@@ -61,25 +48,11 @@ import {
   parseWeiboVideo,
   postAdminView,
   invalidateSharedSettings,
-  recordMemberLike,
-  recordMemberVisit,
-  removeMemberLike,
   saveSettings,
   SECRET_SETTINGS,
   seedWelcomePost,
   setPostCategory,
   uniqueSlug,
-  updateMemberAdmin,
-  updateMemberNickname,
-  updateMemberQQ,
-  consumeInvite,
-  deleteInvite,
-  getInviteByCode,
-  getInviteById,
-  insertInviteCode,
-  listInvitesAdmin,
-  listInviteUses,
-  releaseInvite,
   weiboCommentCountMap,
   weiboImageList,
   weiboTopicList,
@@ -101,12 +74,6 @@ import {
   upsertInstalled,
 } from './pluginpkg'
 import { EMOJI_BASE, WECHAT_EMOJI } from './emoji'
-import { awardCommentPoints, awardPoints, bumpActiveDay, spendPoints } from './points'
-import { fanDay, fanLevel, nextStreak } from './fanrank'
-import { cleanMemberTiers, effectiveTier, parseMemberTiers, TIER_KEY_RE, tierByKey, upgradeTarget, type MemberTierDef } from './tiers'
-import { genInviteCode, inviteStatus, normalizeInviteCode, normalizeMaxUses } from './invite'
-import { claimPartnerGrants, cleanPartnerGrant, normalizeEmail, PARTNER_ID_RE, pushPartnerGrant, receivePartnerGrant, revokePartnerGrant, verifyPartnerSignature } from './partner'
-import { applyCommentGate, canReplyGatedComment, commentGateRank, commentGateViewerRank, threadRootTier } from './commentgate'
 import { collectRoutes } from './collect'
 import { exportRoutes } from './export'
 import { adminExternalRoutes, externalRoutes, notifyAdminComment, telegramRoutes } from './external'
@@ -164,10 +131,10 @@ import { getBotStats } from './bots'
 import { fetchLinkMeta, fetchableUrl } from './linkmeta'
 import { BROWSER_UA, buildCardHtml, coverProxyHostOk, coverReferer, fetchDoubanDetail, probeRelay, resolveCardCover, sanitizeMediaItem, searchMedia, subjectIdFromUrl, validateRelay, type MediaItem } from './douban'
 import { THEMES } from './themes/registry'
-import type { CommentRow, Env, MemberRow, PostRow, SessionUser, SettingsMap } from './types'
-import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanNickname, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, nicknameCooldown, normalizeLinkUrl, pageWindowCutoff, sha256Hex, siteVisibleCutoff, slugify, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import type { CommentRow, Env, PostRow, SessionUser, SettingsMap } from './types'
+import { appendOldSlug, clampInt, cleanDisabledPlugins, cleanSlug, excerpt, extractWeiboTopics, fmtDateCN, isValidQQ, jsonItemLikePattern, LIST_RANGES, listRangeCutoff, normalizeLinkUrl, pageWindowCutoff, sha256Hex, siteVisibleCutoff, slugify, weiboVisibleCutoff } from './utils'
 
-type AppEnv = { Bindings: Env; Variables: { user: SessionUser; memberSettings?: SettingsMap } }
+type AppEnv = { Bindings: Env; Variables: { user: SessionUser } }
 
 const VIDEO_MIMES: Record<string, string> = {
   'video/mp4': 'mp4',
@@ -345,7 +312,7 @@ api.post('/auth/login', async (c) => {
       c.header('Set-Cookie', sessionCookie(token, isSecureRequest(c.req.raw)))
       return c.json({
         ok: true,
-        user: { id: user.id, username: user.username, display_name: user.display_name, avatar: user.avatar, role: user.role },
+        user: { id: user.id, username: user.username, display_name: user.display_name, avatar: user.avatar },
       })
     }
   } else {
@@ -362,392 +329,6 @@ api.post('/auth/logout', async (c) => {
   return c.json({ ok: true })
 })
 
-/* ---------------- 会员（访客注册/登录，契约见 docs/archive/DEVPLAN-2026-10-07.md 附录 A） ---------------- */
-
-/** 对外视图裁剪：公开口径只有昵称/档位/积分；self = 本人视角（另给 email/username/createdAt），管理口径走 listMembersAdmin 原始行。
- *  档位出参按生效档位（src/tiers.ts：过期即时降到 fallback / 上一档）解析——tierName/tierColor 供前台直接渲染认证徽标 */
-function memberView(
-  m: MemberRow,
-  self = false,
-  defs: MemberTierDef[] = parseMemberTiers(undefined),
-  opts: { redeemCost?: number; paidNote?: string } = {}
-) {
-  const eff = effectiveTier(defs, m.tier, m.tier_expires_at)
-  const v: Record<string, unknown> = {
-    nickname: (m.display_name || m.username).slice(0, 24),
-    tier: m.tier,
-    tierName: eff.name,
-    tierColor: eff.color,
-    tierIsBase: eff.isBase,
-    tierExpiresAt: m.tier_expires_at ?? null,
-    tierExpired: eff.expired,
-    points: m.points,
-  }
-  // 到期降级后的原档位名（如「咖啡会员」）：本人视角拿来做「已到期，现按 X 生效」的文案
-  if (eff.downgradedFrom) v.tierDowngradedFrom = eff.downgradedFrom
-  if (m.avatar) v.avatarUrl = m.avatar
-  if (self) {
-    v.username = m.username
-    v.email = m.email
-    v.qq = m.qq
-    v.createdAt = m.created_at
-    v.displayNameChangedAt = m.display_name_changed_at ?? null
-    // 铁粉体系（3.0-M1）：等级与签到状态本人视角可见（会员卡渲染签到按钮态）
-    const fan = fanLevel(m.points, m.active_days ?? 0)
-    v.fanLevel = fan.level
-    v.fanName = fan.name
-    v.activeDays = m.active_days ?? 0
-    v.checkinStreak = m.checkin_streak ?? 0
-    v.checkedToday = m.last_checkin_day === fanDay()
-    // 升级入口（2026-11 第五批）：只在「当前档位低于优质会员」时下发，已在该档及以上整块不出
-    const target = upgradeTarget(defs)
-    if (target && eff.rank < (target.rank ?? 1)) {
-      v.upgradeTargetName = target.name
-      if ((opts.redeemCost ?? 0) > 0) v.upgradeCost = opts.redeemCost
-      if (opts.paidNote) v.paidNote = opts.paidNote
-    }
-  }
-  return v
-}
-
-/* ---------------- 会员功能总开关：/member/* 统一守卫 ----------------
- * 以前每个会员路由各写一遍 membersEnabled 检查，新增接口漏一行就等于「关了会员功能还能调」。
- * 这里统一挡一层，并把这次读到的 settings 放进 c.set 给 handler 复用，不增加额外 D1 查询。
- * logout 例外：关闭会员功能后仍应能清掉浏览器里遗留的会话 Cookie（与旧行为一致）。 */
-api.use('/member/*', async (c, next) => {
-  if (c.req.path.endsWith('/member/logout')) return next()
-  const settings = await getSettings(c.env.DB)
-  if (settings.membersEnabled !== '1') return jsonError('会员功能未开放', 404)
-  // handler 里改用 c.get('memberSettings') 复用这次读取，不多查一次库
-  c.set('memberSettings', settings)
-  await next()
-})
-
-/* ---------------- 跨站会员继承（src/partner.ts，分站模式） ---------------- */
-
-/**
- * 接收来源站推送的会员继承记录。鉴权走 HMAC 签名（settings.partnerPushSecret），
- * 不要求管理员会话——推送是从对方服务器发起的，那边没有本站的 Cookie。
- * 幂等：同 (issuer, subject) 重复推送按更新处理，来源站改了档位再推一次不会产生两条记录。
- */
-api.post('/partner/grant', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  const secret = String(settings.partnerPushSecret || '').trim()
-  // 没配密钥 = 本站不参与继承。回 404 而不是 401：不向外暴露「这个功能存在但没开」
-  if (!secret) return jsonError('未开启跨站继承', 404)
-  // 签名已挡伪造，限流只为防「大量垃圾请求刷 HMAC」；量级放宽（批量同步几十条也够用）。
-  // 限流带 env 作用域（P0-1 防线）：单进程多租户下同 IP 桶不跨站点共享
-  if (!rateLimit(c.env, `pgrant:${clientIp(c.req.raw)}`, 60, 60_000)) return jsonError('请求过于频繁', 429)
-  const g = cleanPartnerGrant(await c.req.json().catch(() => null))
-  if (!g) return jsonError('请求格式错误或时间戳超出窗口')
-  if (!(await verifyPartnerSignature(secret, g, c.req.header('X-Partner-Signature') || '')))
-    return jsonError('签名校验失败', 401)
-  const result = await receivePartnerGrant(c.env.DB, g, parseMemberTiers(settings.memberTiers))
-  // 档位不存在是最常见的配置错误（对方用 lifetime，本站只建了「永久会员」这种改名）：
-  // 明确回 400 而不是静默丢弃，站长在来源站后台能立刻看到推送失败的原因
-  if (result === 'unknown-tier') return jsonError(`本站未定义档位 ${g.tier}，请先在「设置 → 会员」里建好这一档`)
-  return c.json({ ok: true, result })
-})
-
-api.post('/member/register', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  const ip = clientIp(c.req.raw)
-  if (!rateLimit(c.env, `mreg:${ip}`, 5, 10 * 60_000)) return jsonError('注册太频繁，请稍后再试', 429)
-  const body = await c.req
-    .json<{ username?: string; password?: string; email?: string; nickname?: string; link?: string; turnstileToken?: string; inviteCode?: string }>()
-    .catch(() => null)
-  // 蜜罐字段 link：正常用户看不到、机器人会填 —— 静默丢弃（同 publicComment 口径）
-  if (body?.link) return c.json({ ok: true })
-  // 邀请码（可选，src/invite.ts）：持码注册直接拿码上指定的档位（默认优质会员）。
-  // 核销次数可限（max_uses：1 一码一人 / 0 不限 / N 限量 N 次），过期与次数用尽都在核销那一步原子判定
-  // memberRegOpen='0' 时它是**唯一入口**——做邀请制的站长不该为了发码而把注册重新放开
-  const inviteCode = normalizeInviteCode(body?.inviteCode)
-  const invite = inviteCode ? await getInviteByCode(c.env.DB, inviteCode) : null
-  const now = Date.now()
-  const inviteUsable = !!invite && inviteStatus(invite, now) === 'usable'
-  if (inviteCode && !inviteUsable) return jsonError('邀请码无效、已用完或已过期', 400)
-  if (settings.memberRegOpen === '0' && !inviteUsable) return jsonError('本站暂不开放注册，有邀请码可凭码注册', 403)
-  // 注册人机验证（Turnstile，A2 根治）：配置了 Secret 才启用，放在字段校验之前让无令牌机器人
-  // 最早出局。verifyTurnstile 拿不到结论一律 false —— 端点抖动时宁可挡注册，不留无验证窗口
-  if (settings.turnstileSecret) {
-    const ok = await verifyTurnstile(settings.turnstileSecret, String(body?.turnstileToken || ''), ip)
-    if (!ok) return jsonError('人机验证未通过，请刷新页面后重试')
-  }
-  const username = String(body?.username || '').trim()
-  const password = String(body?.password || '')
-  const email = normalizeEmail(body?.email)
-  // 昵称选填（中英文均可，仅展示不做唯一约束）；注册时填写不占用 30 天修改窗口
-  const nickname = cleanNickname(body?.nickname)
-  if (!/^[a-zA-Z0-9_-]{2,24}$/.test(username)) return jsonError('用户名需为 2-24 位字母、数字、_ 或 -')
-  if (password.length < 8 || password.length > 64) return jsonError('密码长度需为 8-64 位')
-  // 邮箱必填：跨站会员继承只认邮箱（src/partner.ts），没有它就没法认领权益。
-  // 不做邮箱验证（本站无邮件服务），所以只做格式 + 两次输入（前端）两道防手误
-  if (!email) return jsonError('请填写邮箱')
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return jsonError('邮箱格式不正确')
-  if (await getMemberByUsername(c.env.DB, username)) return jsonError('用户名已被占用')
-  // 邮箱唯一：跨站认领是「先到先得」，同邮箱两个账号会让谁拿权益变成竞态。
-  // 历史数据可能已有重复，因此不强制 UNIQUE 索引，只在新注册这一道拦
-  if (
-    await c.env.DB.prepare('SELECT id FROM members WHERE LOWER(email) = ? LIMIT 1')
-      .bind(email)
-      .first<{ id: number }>()
-  )
-    return jsonError('该邮箱已被其他账号使用')
-  const { hash, salt } = await hashPassword(password)
-  let memberId: number
-  try {
-    memberId = await createMember(c.env.DB, { username, hash, salt, email, displayName: nickname, tierSource: inviteUsable ? 'invite' : 'register' })
-  } catch {
-    return jsonError('用户名已被占用') // 并发注册撞 UNIQUE 约束的兜底
-  }
-  // 邀请码核销 + 授予档位。核销是一条条件 UPDATE（次数未满且未过期）——同一个码的最后一次
-  // 被两人同时提交时只有一位能过；抢输的那位把刚建的会员删掉再报错，避免留下「注册成功但没档位」的半成品
-  if (inviteUsable && invite) {
-    if (!(await consumeInvite(c.env.DB, invite, memberId, username, now))) {
-      await c.env.DB.prepare('DELETE FROM members WHERE id = ?').bind(memberId).run()
-      return jsonError('邀请码刚被用完了，换一个再试', 409)
-    }
-    const defs = parseMemberTiers(settings.memberTiers)
-    // 码上的档位被站长删掉时回落基础档（保守方向：不给多权限），有效期按该档默认天数
-    const def = tierByKey(defs, invite.tier) ?? defs[0]
-    const expiresAt = def.permanent ? null : now + (def.days || 365) * 86_400_000
-    await c.env.DB.prepare('UPDATE members SET tier = ?, tier_expires_at = ?, updated_at = ? WHERE id = ?')
-      .bind(def.key, expiresAt, now, memberId)
-      .run()
-  }
-  // 跨站会员继承（src/partner.ts）：填了邮箱的新会员立刻认领待认领记录。
-  // 「先在 btchao 付费、后来主站注册」这条最常见的时间顺序靠这一步兜住；
-  // 认领内部是「只升不降」，和上面的邀请码授予谁先谁后都不影响结果
-  if (email) await claimPartnerGrants(c.env.DB, memberId, email, parseMemberTiers(settings.memberTiers))
-  const token = await createMemberSession(c.env.DB, memberId)
-  c.header('Set-Cookie', memberSessionCookie(token, isSecureRequest(c.req.raw)))
-  await awardPoints(c.env.DB, memberId, 'dailyLogin')
-  await bumpActiveDay(c.env.DB, memberId)
-  const row = await getMemberById(c.env.DB, memberId)
-  // 档位名按站长的自定义定义解析（持码注册会带档位，默认口径的三档名可能对不上）
-  return c.json({
-    ok: true,
-    member: row
-      ? memberView(row, true, parseMemberTiers(settings.memberTiers), {
-          redeemCost: Math.trunc(Number(settings.premiumPointsCost || 0)),
-          paidNote: settings.premiumPaidNote?.trim() || undefined,
-        })
-      : null,
-  })
-})
-
-api.post('/member/login', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  const ip = clientIp(c.req.raw)
-  if (!rateLimit(c.env, `mlogin:${ip}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
-  const body = await c.req.json<{ username?: string; password?: string }>().catch(() => null)
-  const username = String(body?.username || '').trim()
-  const password = String(body?.password || '')
-  const m = await getMemberByUsername(c.env.DB, username)
-  if (m) {
-    const { hash } = await hashPassword(password, m.salt)
-    if (safeEqual(hash, m.password_hash)) {
-      // 先验口令再报封禁：不向未持有口令的人泄露账号状态（契约 A5：403 {error:'banned'}）
-      if (m.status === 'banned') return jsonError('banned', 403)
-      // 跨站会员继承（src/partner.ts）：登录时再扫一遍待认领队列，覆盖「后台先推送、
-      // 本人后来才注册且当时没填邮箱（之后在会员中心补上）」和「推送晚于注册」两种顺序。
-      // 邮箱为空直接返回，绝大多数请求不多一次查询
-      let cur = m
-      if (m.email) {
-        const n = await claimPartnerGrants(c.env.DB, m.id, m.email, parseMemberTiers(settings.memberTiers))
-        if (n > 0) cur = (await getMemberById(c.env.DB, m.id)) ?? m
-      }
-      const token = await createMemberSession(c.env.DB, m.id)
-      // 会员会话同款膨胀防护（每日签到每天都会登录一次，30 天有效期堆积更快）
-      await c.env.DB.prepare('DELETE FROM member_sessions WHERE member_id = ? AND expires_at <= ?').bind(m.id, Date.now()).run()
-      const mcnt = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM member_sessions WHERE member_id = ?').bind(m.id).first<{ n: number }>()
-      const mover = (mcnt?.n ?? 0) - SESSIONS_PER_USER_CAP
-      if (mover > 0)
-        await c.env.DB.prepare(
-          'DELETE FROM member_sessions WHERE token IN (SELECT token FROM member_sessions WHERE member_id = ? ORDER BY created_at ASC, expires_at ASC LIMIT ?)'
-        )
-          .bind(m.id, mover)
-          .run()
-      c.header('Set-Cookie', memberSessionCookie(token, isSecureRequest(c.req.raw)))
-      await awardPoints(c.env.DB, m.id, 'dailyLogin')
-      await bumpActiveDay(c.env.DB, m.id)
-      await c.env.DB.prepare('UPDATE members SET last_login_at = ? WHERE id = ?').bind(Date.now(), m.id).run()
-      return c.json({ ok: true, member: memberView(cur, true) })
-    }
-  } else {
-    // 用户不存在也跑一次等开销哈希：响应耗时对齐，防时序侧信道枚举用户名（同 /auth/login 口径）
-    await hashPassword(password, 'timing-equalizer-salt-0000')
-  }
-  return jsonError('用户名或密码错误', 401)
-})
-
-api.post('/member/logout', async (c) => {
-  await destroyMemberSession(c.env.DB, c.req.raw)
-  c.header('Set-Cookie', clearMemberSessionCookie())
-  return c.json({ ok: true })
-})
-
-api.get('/member/me', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  const session = await getMemberUser(c.env.DB, c.req.raw)
-  if (!session) return c.json({ member: null })
-  const row = await getMemberById(c.env.DB, session.id)
-  return c.json({
-    member: row
-      ? memberView(row, true, parseMemberTiers(settings.memberTiers), {
-          redeemCost: Math.trunc(Number(settings.premiumPointsCost || 0)),
-          paidNote: settings.premiumPaidNote?.trim() || undefined,
-        })
-      : null,
-  })
-})
-
-/* 会员个人资料（/member 页会员卡，契约见 docs/archive/DEVPLAN-2026-10-07.md）：改昵称（30 天一次）与改密码 */
-
-/** 抓取 QQ 头像并转存进站内图床，返回站内地址；失败返回 null（调用方容忍只存 qq 号，
- *  会员中心「重试头像」重跑同一请求补抓）。q1 主端点、q2 备用镜像，s=140 档（100 略糊、
- *  640 浪费流量）；只认文件魔数（同 collect 转存口径），落库统一走 saveUpload（EXIF 剥离同款兜底） */
-async function fetchQQAvatar(env: Env, qq: string): Promise<string | null> {
-  for (const host of ['q1.qlogo.cn', 'q2.qlogo.cn']) {
-    try {
-      const res = await fetch(`https://${host}/g?b=qq&nk=${encodeURIComponent(qq)}&s=140`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', Referer: 'https://q.qlogo.cn/' },
-        signal: AbortSignal.timeout(6_000),
-      })
-      if (!res.ok) continue
-      if (Number(res.headers.get('content-length') || 0) > 1024 * 1024) continue
-      const buf = await res.arrayBuffer()
-      if (buf.byteLength === 0 || buf.byteLength > 1024 * 1024) continue
-      const ext = sniffImageExt(buf)
-      if (!ext || ext === 'gif') continue // 头像只收 jpg/png/webp
-      return await saveUpload(env, buf, `image/${ext === 'jpg' ? 'jpeg' : ext}`, `qq-${qq}.${ext}`, ext)
-    } catch {
-      /* 单镜像失败换下一个，最终失败由调用方容忍 */
-    }
-  }
-  return null
-}
-
-/** 每日签到（铁粉体系 3.0-M1）：+2 分、连续 ≥7 天当天额外 +1（streakBonus）、活跃天数同步累计。
- *  幂等三道：前置查 last_checkin_day、ref_id 北京日序号唯一索引、日上限 cap=1——连点/并发都只记一次 */
-api.post('/member/checkin', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  if (!rateLimit(c.env, `mcheckin:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
-  const m = await getMemberUser(c.env.DB, c.req.raw)
-  if (!m) return jsonError('请先登录', 401)
-  const row = await getMemberById(c.env.DB, m.id)
-  if (!row || row.status === 'banned') return jsonError('账号不可用', 403)
-  const today = fanDay()
-  if (row.last_checkin_day === today) return jsonError('今天已经签到过啦，明天再来', 400)
-  const streak = nextStreak(row.last_checkin_day || '', today, fanDay(Date.now() - 86_400_000), row.checkin_streak ?? 0)
-  const res = await awardPoints(c.env.DB, m.id, 'checkin')
-  let bonus = 0
-  if (streak >= 7) bonus = (await awardPoints(c.env.DB, m.id, 'streakBonus')).delta
-  await c.env.DB.prepare('UPDATE members SET checkin_streak = ?, last_checkin_day = ? WHERE id = ?').bind(streak, today, m.id).run()
-  await bumpActiveDay(c.env.DB, m.id)
-  const after = await getMemberById(c.env.DB, m.id)
-  const fan = fanLevel(after?.points ?? 0, after?.active_days ?? 0)
-  return c.json({ ok: true, delta: res.delta, bonus, points: after?.points ?? 0, streak, level: fan.level, levelName: fan.name })
-})
-
-api.post('/member/redeem-premium', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  // 价格 0 = 未开放（默认）。站长在「会员 → 会员设置」填个数就开通，不需要额外的启用开关
-  const cost = Math.trunc(Number(settings.premiumPointsCost || 0))
-  if (!Number.isFinite(cost) || cost <= 0) return jsonError('积分兑换暂未开放')
-  if (!rateLimit(c.env, `mredeem:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
-  const m = await getMemberUser(c.env.DB, c.req.raw)
-  if (!m) return jsonError('请先登录', 401)
-  const row = await getMemberById(c.env.DB, m.id)
-  if (!row || row.status === 'banned') return jsonError('账号不可用', 403)
-  const defs = parseMemberTiers(settings.memberTiers)
-  // 目标档固定是 premium（优质会员）；站长把这档删掉/改名时兜底到第二档——
-  // 「积分兑换」的语义是「升到优质这一层」，不该被自定义 key 绑死
-  const target = tierByKey(defs, 'premium') ?? defs[1] ?? null
-  if (!target) return jsonError('当前档位体系里没有可兑换的档位')
-  const eff = effectiveTier(defs, row.tier, row.tier_expires_at)
-  if (eff.rank >= (target.rank ?? 1)) return jsonError(`你已经是「${eff.name}」，无需兑换`)
-  // ref_id = 1：一辈子只能兑换一次（幂等键落在积分账本的部分唯一索引上）
-  const pay = await spendPoints(c.env.DB, m.id, cost, 'redeemTier', `兑换「${target.name}」`, 1)
-  if (!pay.ok) {
-    if (pay.reason === 'dup') return jsonError('你已经兑换过了，无需重复兑换')
-    return jsonError(`积分不够，还差 ${Math.max(0, cost - pay.balance)} 分`)
-  }
-  const now = Date.now()
-  const expiresAt = target.permanent ? null : now + (target.days || 365) * 86_400_000
-  await c.env.DB.prepare('UPDATE members SET tier = ?, tier_expires_at = ?, tier_source = ?, updated_at = ? WHERE id = ?')
-    .bind(target.key, expiresAt, 'points', now, m.id)
-    .run()
-  const after = await getMemberById(c.env.DB, m.id)
-  return c.json({ ok: true, points: after?.points ?? 0, tier: target.key, tierName: target.name, tierExpiresAt: expiresAt })
-})
-
-api.post('/member/profile', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  const session = await getMemberUser(c.env.DB, c.req.raw)
-  if (!session) return jsonError('请先登录', 401)
-  const body = await c.req.json<{ nickname?: string; qq?: string }>().catch(() => null)
-  const hasNickname = !!body && typeof body.nickname === 'string'
-  const nickname = hasNickname ? cleanNickname(body?.nickname) : ''
-  // qq 只在显式携带时处理：带键即意图（绑定/重试头像），不带键不碰
-  const qq = body && typeof body.qq === 'string' ? body.qq.trim() : undefined
-  if (!hasNickname && qq === undefined) return jsonError('没有要修改的内容')
-  if (hasNickname && !nickname) return jsonError('昵称不能为空')
-  const res: Record<string, unknown> = { ok: true }
-  const now = Date.now()
-
-  if (hasNickname) {
-    const row = await getMemberById(c.env.DB, session.id)
-    if (!row) return jsonError('请先登录', 401)
-    const cd = nicknameCooldown(row.display_name_changed_at)
-    if (!cd.allowed) return jsonError(`昵称每 30 天只能修改一次，${fmtDateCN(cd.nextAt)}后可再改`, 403)
-    // 条件更新把窗口判定下沉进 SQL：并发双开同时过上面的前置检查时，只有一动能落库
-    if (!(await updateMemberNickname(c.env.DB, session.id, nickname, now))) {
-      return jsonError(`昵称每 30 天只能修改一次，${fmtDateCN(nicknameCooldown(now).nextAt)}后可再改`, 403)
-    }
-    res.nickname = nickname
-    res.displayNameChangedAt = now
-  }
-
-  if (qq !== undefined) {
-    // 评论头像（C2）：qq 号仅作头像抓取记账位，任何公开出参不携带；绑过再绑 = 幂等重试头像
-    if (!isValidQQ(qq)) return jsonError('QQ 号格式不对（5-11 位数字，不以 0 开头）')
-    if (!rateLimit(c.env, `qqbind:${session.id}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
-    const avatarUrl = await fetchQQAvatar(c.env, qq)
-    await updateMemberQQ(c.env.DB, session.id, qq, avatarUrl, now)
-    res.qq = qq
-    if (avatarUrl) res.avatarUrl = avatarUrl
-    else res.avatarFailed = true
-  }
-
-  return c.json(res)
-})
-
-api.post('/member/password', async (c) => {
-  const settings = c.get('memberSettings') ?? (await getSettings(c.env.DB))
-  const session = await getMemberUser(c.env.DB, c.req.raw)
-  if (!session) return jsonError('请先登录', 401)
-  // PBKDF2 是慢操作：按 IP 限流防滥用（口径同 /member/login）
-  if (!rateLimit(c.env, `mpwd:${clientIp(c.req.raw)}`, 10, 10 * 60_000)) return jsonError('尝试次数过多，请 10 分钟后再试', 429)
-  const body = await c.req.json<{ currentPassword?: string; newPassword?: string }>().catch(() => null)
-  const current = String(body?.currentPassword || '')
-  const next = String(body?.newPassword || '')
-  if (next.length < 8 || next.length > 64) return jsonError('新密码长度需为 8-64 位')
-  const row = await getMemberById(c.env.DB, session.id)
-  if (!row) return jsonError('请先登录', 401)
-  const { hash } = await hashPassword(current, row.salt)
-  if (!safeEqual(hash, row.password_hash)) return jsonError('当前密码不正确')
-  const { hash: newHash, salt: newSalt } = await hashPassword(next)
-  await c.env.DB
-    .prepare('UPDATE members SET password_hash = ?, salt = ?, updated_at = ? WHERE id = ?')
-    .bind(newHash, newSalt, Date.now(), row.id)
-    .run()
-  // 改密即其他设备全部下线（当前会话保留——改密码的人自己不能被登出去）
-  const token = getCookie(c.req.raw, MEMBER_SESSION_COOKIE) || ''
-  await destroyOtherMemberSessions(c.env.DB, row.id, token)
-  return c.json({ ok: true })
-})
-
 /* ---------------- 需要登录的 /admin/* ---------------- */
 /* 注意：本中间件必须注册在所有 /admin/* 路由之前（hono 按注册顺序执行，路由先命中即终止链条） */
 api.use('/admin/*', async (c, next) => {
@@ -755,229 +336,6 @@ api.use('/admin/*', async (c, next) => {
   if (!user) return jsonError('请先登录', 401)
   c.set('user', user)
   await next()
-})
-
-/* 多作者权限门槛（3.0-M1）：author 角色在管理面 403，内容面（posts/weibo/comments/uploads/pages/links 等）放行。
- * 白名单用前缀常量写死——权限面越少越安全，别做成可配置。admin 角色不受限。 */
-const AUTHOR_ALLOWED_PREFIXES = [
-  '/admin/posts',
-  '/admin/weibo',
-  '/admin/comments',
-  '/admin/uploads',
-  '/admin/media',
-  '/admin/pages',
-  '/admin/categories',
-  '/admin/tags',
-  '/admin/links',
-  '/admin/upload',
-  '/admin/og-image',
-  // 编辑器内容辅助（MD 预览 / 粘贴净化 / 链接卡片 / 媒体搜索）：作者写文要用的同一批工具，
-  // 全是内容面助手（无站点配置语义），不放行会让作者的编辑器预览与插卡静默 403
-  '/admin/tools',
-]
-api.use('/admin/*', async (c, next) => {
-  const user = c.get('user')
-  if (user && user.role === 'author') {
-    // c.req.path 在测试薄壳（api 子应用直调）与生产挂载（/api 前缀）下形态不同——规范化后再匹配
-    const norm = c.req.path.startsWith('/api/') ? c.req.path.slice(4) : c.req.path
-    const allowed = AUTHOR_ALLOWED_PREFIXES.some((p) => norm === p || norm.startsWith(p + '/'))
-    if (!allowed) return jsonError('作者账号没有该管理面的权限（多作者权限矩阵见 docs/DEVPLAN-3.0.md）', 403)
-  }
-  await next()
-})
-
-/* 后台会员管理（PUT 缺键即保留，同 posts PUT 语义） */
-
-/** 生成「某日期当天结束」的毫秒时间戳（北京时间口径）：后台日期输入 YYYY-MM-DD → 到期时刻。
- *  非法输入返回 null（调用方按「清除有效期」处理） */
-function expiryDateToMs(date: string): number | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim())
-  if (!m) return null
-  const ms = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 23, 59, 59) - 8 * 3600_000
-  return Number.isFinite(ms) && ms > 0 ? ms : null
-}
-
-api.get('/admin/members', async (c) => {
-  const page = clampInt(c.req.query('page'), 1, 1_000_000, 1)
-  const q = (c.req.query('q') || '').trim().slice(0, 50)
-  const [list, settings] = await Promise.all([listMembersAdmin(c.env.DB, q, page), getSettings(c.env.DB)])
-  // tiers 随列表下发：后台「分配档位」弹窗与档位角标直接用（自定义档位的事实源是 settings.memberTiers）
-  return c.json({ ...list, tiers: parseMemberTiers(settings.memberTiers) })
-})
-
-api.put('/admin/members/:id', async (c) => {
-  const id = parseId(c.req.param('id'))
-  if (!id) return jsonError('会员不存在', 404)
-  const body = await c.req.json<{ tier?: string; status?: string; tierExpiresAt?: unknown; tierSource?: unknown }>().catch(() => null)
-  if (!body || typeof body !== 'object') return jsonError('请求格式错误')
-  const settings = await getSettings(c.env.DB)
-  const defs = parseMemberTiers(settings.memberTiers)
-  const patch: { tier?: string; status?: string; tierExpiresAt?: number | null; tierSource?: string } = {}
-  if ('tier' in body) {
-    // 档位必须是自定义定义里的 key（脏值 400 不静默降级——与 contentVisibleRange 同口径）
-    if (!tierByKey(defs, String(body.tier || ''))) return jsonError('未知档位')
-    patch.tier = String(body.tier)
-    // 分配永久档 = 清除有效期；分配限时档且未显式给有效期 = 保持旧值（缺键即保留语义）
-    if (tierByKey(defs, patch.tier)?.permanent) patch.tierExpiresAt = null
-  }
-  if ('tierSource' in body) {
-    // 档位来源标注（paid = 线下付费、manual = 手动授予…）：只做运营展示，白名单外一律按 manual
-    const v = String(body.tierSource || '').trim()
-    patch.tierSource = (['register', 'invite', 'points', 'paid', 'manual'] as const).includes(v as 'manual') ? v : 'manual'
-  }
-  if ('tierExpiresAt' in body) {
-    // null = 清除（转永久）；数字 = 到期毫秒；'YYYY-MM-DD' 字符串 = 当天结束（北京时间）
-    const v = body.tierExpiresAt
-    if (v === null) patch.tierExpiresAt = null
-    else if (typeof v === 'number' && Number.isFinite(v) && v > 0) patch.tierExpiresAt = Math.trunc(v)
-    else if (typeof v === 'string' && v.trim()) {
-      const ms = expiryDateToMs(v)
-      if (!ms) return jsonError('有效期格式不对')
-      patch.tierExpiresAt = ms
-    } else return jsonError('有效期格式不对')
-  }
-  if ('status' in body) {
-    if (body.status !== 'active' && body.status !== 'banned') return jsonError('未知状态')
-    patch.status = body.status
-  }
-  if (!(await updateMemberAdmin(c.env.DB, id, patch))) return jsonError('会员不存在', 404)
-  // 拉黑即踢下线（getMemberUser 查询层已挡 banned，这里把会话 token 一并清掉）
-  if (patch.status === 'banned') await destroyMemberSessionsByMember(c.env.DB, id)
-  // 跨站会员继承（src/partner.ts）：本次分配的是**永久档**且本站配了推送目标时，
-  // 顺手把「这个人是付费会员」推给另一站。只在改档位这一刻推——会员数量级下这是唯一有意义的触发点，
-  // 不需要定时对账。推送失败不回滚本地授予（会员已经付过费，通道抖动最多让对方晚一步认领）
-  let partner: string | undefined
-  if (patch.tier) {
-    const def = tierByKey(defs, patch.tier)
-    const url = String(settings.partnerPushUrl || '').trim()
-    const secret = String(settings.partnerPushSecret || '').trim()
-    const selfId = String(settings.partnerSelfId || '').trim()
-    if (def?.permanent && url && secret && selfId) {
-      const row = await getMemberById(c.env.DB, id)
-      if (row?.email) {
-        const r = await pushPartnerGrant(url, secret, {
-          issuer: selfId,
-          subject: String(id),
-          email: normalizeEmail(row.email),
-          tier: def.key,
-          note: `${settings.siteName || ''} 永久档`.trim().slice(0, 60),
-          exp: Date.now(),
-        })
-        partner = r.ok ? `ok:${r.result ?? ''}` : `failed:${r.error ?? ''}`
-      } else partner = 'no-email'
-    }
-  }
-  return c.json({ ok: true, partner })
-})
-
-/** 档位定义只读出口（编辑器「谁能看」等管理面用）：定义本体走设置 PUT 的 memberTiers 键 */
-api.get('/admin/member-tiers', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  return c.json({ tiers: parseMemberTiers(settings.memberTiers) })
-})
-
-/* ---------------- 跨站继承（src/partner.ts）：后台列表与撤销 ---------------- */
-
-/**
- * 「跨站继承」页的数据源。member_id 的三种取值直接映射成三种状态：
- * 0 待认领（目标站还没有这个邮箱的会员）/ -1 认领冲突（该来源会员已绑了别的账号）/ 正数 已授予。
- * 列表按 id 倒序取 200 条：这是审计流水，不是分页表格，几十人的盘子够看很久。
- */
-api.get('/admin/partner-grants', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  const { results } = await c.env.DB.prepare(
-    `SELECT g.id, g.issuer, g.subject, g.email, g.member_id, g.tier, g.note, g.created_at, g.claimed_at,
-            m.username, m.tier AS member_tier
-     FROM partner_grants g LEFT JOIN members m ON m.id = g.member_id
-     ORDER BY g.id DESC LIMIT 200`
-  ).all()
-  return c.json({
-    grants: results ?? [],
-    tiers: parseMemberTiers(settings.memberTiers),
-    selfId: String(settings.partnerSelfId || ''),
-    pushUrl: String(settings.partnerPushUrl || ''),
-  })
-})
-
-/** 撤销继承：解除绑定 + 降回基础档。冒领争议、退款、误绑都靠这一下收场 */
-api.delete('/admin/partner-grants/:memberId', async (c) => {
-  const id = parseId(c.req.param('memberId'))
-  if (!id) return jsonError('会员不存在', 404)
-  const settings = await getSettings(c.env.DB)
-  const defs = parseMemberTiers(settings.memberTiers)
-  await revokePartnerGrant(c.env.DB, id, defs[0].key)
-  // 本地档位变了，页面缓存里的会员态可能过期
-  await purgePageCache(c.env.DB)
-  return c.json({ ok: true })
-})
-
-/* ---------------- 注册邀请码（src/invite.ts） ---------------- */
-
-/**
- * 可核销次数（max_uses）取值口径：1 = 一码一人（默认）；0 = 不限次数；2-1000 = 限量 N 次。
- * 与有效期是两个正交维度：`发 10 个一码一人的` 和 `发 1 个限 10 次的` 都能表达，站长按场合选。
- * 「一人一次」不在码上做——那由注册本身保证（用户名唯一，一个账号只能注册一次）。
- */
-api.get('/admin/invites', async (c) => {
-  const q = c.req.query('status')
-  const status = q === 'usable' || q === 'usedup' || q === 'expired' ? q : 'all'
-  const page = clampInt(c.req.query('page'), 1, 1_000_000, 1)
-  const [list, settings] = await Promise.all([listInvitesAdmin(c.env.DB, status, page), getSettings(c.env.DB)])
-  // tiers 随列表下发：生成表单的档位下拉直接用它（自定义档位的事实源是 settings.memberTiers）
-  return c.json({ ...list, tiers: parseMemberTiers(settings.memberTiers) })
-})
-
-api.post('/admin/invites', async (c) => {
-  const body = await c.req
-    .json<{ count?: unknown; tier?: unknown; note?: unknown; days?: unknown; maxUses?: unknown }>()
-    .catch(() => null)
-  if (!body) return jsonError('请求格式错误')
-  const settings = await getSettings(c.env.DB)
-  const defs = parseMemberTiers(settings.memberTiers)
-  const count = Math.trunc(Number(body.count ?? 1))
-  if (!Number.isFinite(count) || count < 1 || count > 50) return jsonError('一次生成 1-50 个')
-  // 档位必须成立：码是「直接发放身份」的凭据，脏档位会让持码人注册后落到基础档（体验事故）
-  const def = tierByKey(defs, String(body.tier || ''))
-  if (!def) return jsonError('请选择有效的档位')
-  const note = String(body.note || '').replace(/\s+/g, ' ').trim().slice(0, 60)
-  const days = Math.trunc(Number(body.days ?? 0))
-  if (!Number.isFinite(days) || days < 0 || days > 3650) return jsonError('有效期需为 0-3650 天（0 = 不过期）')
-  const maxUses = normalizeMaxUses(body.maxUses ?? 1)
-  if (maxUses === null) return jsonError('可核销次数需为 0（不限）或 1-1000')
-  const now = Date.now()
-  const expiresAt = days > 0 ? now + days * 86_400_000 : null
-  const codes: string[] = []
-  // 撞 UNIQUE 就换一个再试；50 个码的碰撞概率约 5e-8，重试 5 次仍失败说明随机源出了问题，直接停手
-  for (let i = 0; i < count; i++) {
-    let inserted = false
-    for (let attempt = 0; attempt < 5 && !inserted; attempt++) {
-      const code = genInviteCode()
-      inserted = await insertInviteCode(c.env.DB, { code, tier: def.key, note, maxUses, createdAt: now, expiresAt })
-      if (inserted) codes.push(code)
-    }
-    if (!inserted) break
-  }
-  if (!codes.length) return jsonError('生成失败，请重试', 500)
-  return c.json({ ok: true, codes, count: codes.length, tier: def.key, tierName: def.name, expiresAt, maxUses })
-})
-
-/** 核销明细（后台「谁凭这个码进来的」）：一码多人时必须能逐条回查 */
-api.get('/admin/invites/:id/uses', async (c) => {
-  const id = parseId(c.req.param('id'))
-  if (!id) return jsonError('邀请码不存在', 404)
-  const invite = await getInviteById(c.env.DB, id)
-  if (!invite) return jsonError('邀请码不存在', 404)
-  const [uses, settings] = await Promise.all([listInviteUses(c.env.DB, id), getSettings(c.env.DB)])
-  // tiers 随明细下发：弹窗里把档位 key 翻成站长起的名字
-  return c.json({ invite, uses, tiers: parseMemberTiers(settings.memberTiers) })
-})
-
-api.delete('/admin/invites/:id', async (c) => {
-  const id = parseId(c.req.param('id'))
-  if (!id) return jsonError('邀请码不存在', 404)
-  // 用过一次的删不掉：那是「谁凭哪个码进来的」的账，会员面出问题时得能回查（没用过的随便撤）
-  if (!(await deleteInvite(c.env.DB, id))) return jsonError('已有人使用的邀请码不能撤销', 409)
-  return c.json({ ok: true })
 })
 
 /* 采集插件（公众号文章 → 草稿），见 src/collect.ts */
@@ -1055,54 +413,9 @@ api.delete('/admin/sessions', async (c) => {
   return c.json({ ok: true })
 })
 
-/* ---------------- 多作者（3.0-M1）：管理员创建作者账号 ---------------- */
-
-api.post('/admin/authors', async (c) => {
-  const user = c.get('user')
-  if (user.role !== 'admin') return jsonError('只有站长（admin）可以创建作者账号', 403)
-  if (!rateLimit(c.env, `authors:${clientIp(c.req.raw)}`, 10, 60_000)) return jsonError('操作太频繁，请稍后再试', 429)
-  const body = await c.req.json<{ username?: string; password?: string; displayName?: string }>().catch(() => null)
-  const username = String(body?.username || '').trim()
-  const password = String(body?.password || '')
-  const displayName = String(body?.displayName || '').trim().slice(0, 24)
-  if (!/^[a-zA-Z0-9_-]{2,24}$/.test(username)) return jsonError('用户名需 2-24 位字母、数字、_ 或 -')
-  if (password.length < 8 || password.length > 64) return jsonError('密码 8-64 位')
-  const dup = await c.env.DB.prepare('SELECT id FROM users WHERE username = ?').bind(username).first()
-  if (dup) return jsonError('用户名已被占用')
-  const { hash, salt } = await hashPassword(password)
-  const now = Date.now()
-  let res
-  try {
-    res = await c.env.DB
-      .prepare(
-        "INSERT INTO users (username, password_hash, salt, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, 'author', ?, ?)"
-      )
-      .bind(username, hash, salt, displayName || username, now, now)
-      .run()
-  } catch (e) {
-    // 前置查与写入之间有并发窗口，同名作者撞 users.username UNIQUE 回可读的 400 而不是 500
-    if (e instanceof Error && /UNIQUE/i.test(e.message)) return jsonError('用户名已被占用')
-    throw e
-  }
-  return c.json({ ok: true, author: { id: Number(res.meta.last_row_id), username, displayName: displayName || username, role: 'author' } })
-})
-
-api.get('/admin/authors', async (c) => {
-  const user = c.get('user')
-  if (user.role !== 'admin') return jsonError('只有站长（admin）可以查看作者列表', 403)
-  const rows = await c.env.DB.prepare("SELECT id, username, display_name, role, created_at FROM users WHERE role = 'author' ORDER BY created_at DESC").all<{
-    id: number
-    username: string
-    display_name: string
-    role: string
-    created_at: number
-  }>()
-  return c.json({ ok: true, authors: rows.results ?? [] })
-})
-
 api.get('/admin/stats', async (c) => {
   const db = c.env.DB
-  const [pub, drafts, pending, uploads, recent, pendingLinks, weibo, pages, comments, members, settings] = await Promise.all([
+  const [pub, drafts, pending, uploads, recent, pendingLinks, weibo, pages, comments, settings] = await Promise.all([
     db
       .prepare("SELECT COUNT(*) AS n, COALESCE(SUM(views),0) AS v, COALESCE(SUM(likes),0) AS l FROM posts WHERE status = 'published' AND deleted_at IS NULL")
       .first<{ n: number; v: number; l: number }>(),
@@ -1116,7 +429,6 @@ api.get('/admin/stats', async (c) => {
     db.prepare('SELECT COUNT(*) AS n FROM weibo WHERE deleted_at IS NULL').first<{ n: number }>(),
     db.prepare('SELECT COUNT(*) AS n FROM pages WHERE deleted_at IS NULL').first<{ n: number }>(),
     db.prepare('SELECT COUNT(*) AS n FROM comments').first<{ n: number }>(),
-    db.prepare('SELECT COUNT(*) AS n FROM members').first<{ n: number }>(),
     getSettings(db),
   ])
   return c.json({
@@ -1129,7 +441,7 @@ api.get('/admin/stats', async (c) => {
     pendingComments: pending?.n ?? 0,
     pendingLinks: pendingLinks?.n ?? 0,
     uploads: { count: uploads?.n ?? 0, bytes: uploads?.s ?? 0 },
-    db: { weibo: weibo?.n ?? 0, pages: pages?.n ?? 0, comments: comments?.n ?? 0, members: members?.n ?? 0 },
+    db: { weibo: weibo?.n ?? 0, pages: pages?.n ?? 0, comments: comments?.n ?? 0 },
     // 备份状态由 backup.ts 每晚回写（lastBackupAt/lastBackupBytes），这里只读不查
     backup: {
       enabled: settings.backupEnabled !== '0',
@@ -2540,23 +1852,13 @@ api.put('/admin/comments/:id', async (c) => {
   const body = await c.req.json<{ status?: string }>().catch(() => null)
   // status 白名单：拼错值/空 body 不得隐式过审（同 theme/siteMode 枚举口径）
   if (body?.status !== 'approved' && body?.status !== 'pending') return jsonError('status 只允许 approved / pending')
-  // 先查后改：目标不存在回 404（同 pin/restore 口径），顺带带出 member_id 供计分
-  const target = await c.env.DB.prepare('SELECT member_id FROM comments WHERE id = ?').bind(id).first<{ member_id: number | null }>()
+  // 目标不存在回 404（同 pin/restore 口径）
+  const target = await c.env.DB.prepare('SELECT id FROM comments WHERE id = ?').bind(id).first<{ id: number }>()
   if (!target) return jsonError('评论不存在', 404)
   const status = body.status
-  // 会员评论过审才计积分（awardCommentPoints 按 ref_id 去重，反复 通过↔待审 不重复记）
   await c.env.DB.prepare('UPDATE comments SET status = ? WHERE id = ?').bind(status, id).run()
   // 审核（通过/退回待审）改变评论在公开页面的可见性 → 页面边缘缓存整代作废
   c.executionCtx.waitUntil(purgePageCache(c.env.DB))
-  if (status === 'approved' && target.member_id) {
-    // 封禁会员不记分：批量清理待审时会「通过」违规会员的评论，拉黑后再计分等于违规所得
-    // 入账（解封后完整回到排行榜）；计分前核会员仍是 active
-    const active = await c.env.DB
-      .prepare("SELECT 1 AS x FROM members WHERE id = ? AND status = 'active'")
-      .bind(target.member_id)
-      .first()
-    if (active) c.executionCtx.waitUntil(awardCommentPoints(c.env.DB, target.member_id, id))
-  }
   return c.json({ ok: true })
 })
 
@@ -2587,11 +1889,6 @@ const BOOL_SETTINGS = [
   'siteGrayscale',
   'siteClosed',
   'siteNoindex',
-  'membersEnabled',
-  // 会员 3.0 预备：注册开关 / 排行榜开关 / 评论区认证徽标开关
-  'memberRegOpen',
-  'rankEnabled',
-  'showMemberBadge',
   // 新手引导记账位（db.ts DEFAULT_SETTINGS 同注释）：onboarding='1' 引导激活；
   // onboardingManual='1' 手册已打开。后台设置页「保存全部」不含这两键，别加进去——
   // 整表提交会把引导态重置
@@ -2653,77 +1950,6 @@ api.put('/admin/settings', async (c) => {
       const pw = v.slice(0, 64)
       if (pw && pw.length < 4) return jsonError('访问密码至少 4 位')
       patch[key] = pw ? await hashGatePassword(pw) : ''
-      continue
-    }
-    if (key === 'memberTiers') {
-      // 会员档位定义（src/tiers.ts）：JSON 净化成规范化数组存库；非法整体 400（读侧脏 JSON
-      // 会兜底默认三档，但写路径必须让站长当场知道存坏了——与 appearance / customCss 同口径）
-      let raw: unknown = null
-      try {
-        raw = v.trim() ? JSON.parse(v) : null
-      } catch {
-        return jsonError('会员档位定义不是合法 JSON')
-      }
-      if (raw === null) {
-        patch[key] = ''
-        continue
-      }
-      const defs = cleanMemberTiers(raw)
-      if (!defs)
-        return jsonError('会员档位定义不合法：1-10 档、key 唯一（小写字母开头，all/member 保留）、第一档需为永久档、名称 1-12 字')
-      patch[key] = JSON.stringify(defs)
-      continue
-    }
-    if (key === 'memberNotice') {
-      // 会员中心公告：纯文本单行（换行折叠成空格），长度 200 封顶——渲染层 esc 后直出
-      patch[key] = v.replace(/\s+/g, ' ').trim().slice(0, 200)
-      continue
-    }
-    if (key === 'premiumPointsCost') {
-      // 积分兑换优质会员的价格（2026-11 会员第五批）：0 = 未开放（默认，前台不出现兑换入口）。
-      // 站长先填个数就生效——不需要开开关，0 与正数本身即是开关
-      patch[key] = String(clampInt(v, 0, 1_000_000, 0))
-      continue
-    }
-    if (key === 'premiumPaidNote') {
-      // 付费获取优质会员的说明文案（没有在线支付通道，站长线下收款后手动改档位；这段文案告诉读者怎么找你）
-      patch[key] = v.replace(/\s+/g, ' ').trim().slice(0, 200)
-      continue
-    }
-    if (key === 'partnerSelfId') {
-      // 跨站继承（src/partner.ts）：本站标识会落库进 partner_grants.issuer 并参与签名原文，
-      // 形态必须收敛——脏值 400，不静默降级（改标识等于把已有继承记录全变成「另一个来源」）
-      if (v && !PARTNER_ID_RE.test(v)) return jsonError('本站标识需为小写字母开头、24 位以内字母数字_-')
-      patch[key] = v
-      continue
-    }
-    if (key === 'partnerPushUrl') {
-      // 推送目标会成为服务端 fetch 的地址：只收 http(s) 绝对地址，末尾斜杠归一掉
-      // （拼接处统一是 `${base}/api/partner/grant`，多一个斜杠就是双斜杠路径）
-      if (v) {
-        let u: URL
-        try {
-          u = new URL(v)
-        } catch {
-          return jsonError('推送地址不是合法 URL')
-        }
-        if (u.protocol !== 'https:' && u.protocol !== 'http:') return jsonError('推送地址必须是 http(s) 地址')
-      }
-      patch[key] = v.trim().replace(/\/+$/, '')
-      continue
-    }
-    if (key === 'commentGateTier') {
-      // 评论圈层可见（src/commentgate.ts）：'' / '0' = 关闭；其余必须是合法档位 key 形态。
-      // 写路径只校验形态，不校验「档位此刻存在」——站长可能先选档再改档位定义；
-      // 读侧对失效 key 有最严兜底（见 commentGateRank）
-      if (v !== '' && v !== '0' && !TIER_KEY_RE.test(v)) return jsonError('评论可见档位不正确')
-      patch[key] = v
-      continue
-    }
-    if (key === 'contentVisibleForMembers') {
-      // 会员是否同样受可见窗口限制：只认 '0' / '1'，脏值 400
-      if (v !== '0' && v !== '1') return jsonError('会员可见范围档位不正确')
-      patch[key] = v
       continue
     }
     if (key === 'appearance') {
@@ -2863,14 +2089,6 @@ api.put('/admin/settings', async (c) => {
       continue
     }
     patch[key] = v.slice(0, 500)
-  }
-  // Turnstile 两键成对（注册人机验证）：只填一个会造出「有锁无窗」（注册被拦且无验证组件可过）
-  // 或「有窗无锁」（组件白渲染）——整体拒绝。Secret 以打码占位符提交时不在 patch 里，回读现值兜底
-  if (patch.turnstileSiteKey !== undefined || patch.turnstileSecret !== undefined) {
-    const cur = await getSettings(c.env.DB)
-    const site = patch.turnstileSiteKey !== undefined ? patch.turnstileSiteKey : cur.turnstileSiteKey
-    const secret = patch.turnstileSecret !== undefined ? patch.turnstileSecret : cur.turnstileSecret
-    if (!!site !== !!secret) return jsonError('Turnstile 需同时填写 Site Key 与 Secret Key（或都留空关闭）')
   }
   // 可见窗口新键一旦提交，旧单键 contentVisibleRange 同步清空：旧键只服务「升级后没动过设置」的
   // 回落期（utils.visibleRangeOf），留着会让新键的 ''（全部可见）被旧值覆盖
@@ -3115,8 +2333,8 @@ api.post('/admin/import/wxr', async (c) => {
           if (!postId) return // 目标篇目被跳过（如超长文），评论随之丢弃
           const res = await db
             .prepare(
-              `INSERT INTO comments (post_id, weibo_id, parent_id, is_admin, member_id, nickname, email, website, content, status, created_at)
-               VALUES (?, 0, ?, 0, 0, ?, ?, ?, ?, ?, ?)`
+              `INSERT INTO comments (post_id, weibo_id, parent_id, is_admin, nickname, email, website, content, status, created_at)
+               VALUES (?, 0, ?, 0, ?, ?, ?, ?, ?, ?)`
             )
             .bind(
               postId,
@@ -3480,6 +2698,30 @@ api.get('/public/weibo', async (c) => {
   })
 })
 
+/** 抓取 QQ 头像并转存进站内图床，返回站内地址；失败返回 null（调用方容忍只存 qq 号，
+ *  评论提交时同一 qq 重跑即补抓）。q1 主端点、q2 备用镜像，s=140 档（100 略糊、
+ *  640 浪费流量）；只认文件魔数（同 collect 转存口径），落库统一走 saveUpload（EXIF 剥离同款兜底） */
+async function fetchQQAvatar(env: Env, qq: string): Promise<string | null> {
+  for (const host of ['q1.qlogo.cn', 'q2.qlogo.cn']) {
+    try {
+      const res = await fetch(`https://${host}/g?b=qq&nk=${encodeURIComponent(qq)}&s=140`, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)', Referer: 'https://q.qlogo.cn/' },
+        signal: AbortSignal.timeout(6_000),
+      })
+      if (!res.ok) continue
+      if (Number(res.headers.get('content-length') || 0) > 1024 * 1024) continue
+      const buf = await res.arrayBuffer()
+      if (buf.byteLength === 0 || buf.byteLength > 1024 * 1024) continue
+      const ext = sniffImageExt(buf)
+      if (!ext || ext === 'gif') continue // 头像只收 jpg/png/webp
+      return await saveUpload(env, buf, `image/${ext === 'jpg' ? 'jpeg' : ext}`, `qq-${qq}.${ext}`, ext)
+    } catch {
+      /* 单镜像失败换下一个，最终失败由调用方容忍 */
+    }
+  }
+  return null
+}
+
 /* ---------------- 公开留言公共核心（文章评论 / 留言板 / 微博评论三路共用） ----------------
  * 开关检查、限流、蜜罐、作者回复、先审后展入库、TG 通知与插件广播全在这里；
  * 三路的差异（称呼文案、归属列、是否收 email/website、通知上下文）由 opts 描述。
@@ -3516,20 +2758,12 @@ async function publicComment(
   const settings = await getSettings(db)
   const user = await getSessionUser(db, c.req.raw)
   if (!user && settings.allowComments !== '1') return jsonError(o.closedMessage, 403)
-  // 会员身份（与管理员互斥取一路；banned 已在 getMemberUser 查询层视为未登录）。
-  // 必须挂 membersEnabled 门控（与微博评论 GET / pages.ts 四处 SSR 同口径）：关闭会员功能
-  // 后残留的 xw_member_session 一律按游客发言、不计分（AGENTS「会员体系」防线，2026-11 审计 P1-3）
-  const member = user ? null : (settings.membersEnabled === '1' ? await getMemberUser(db, c.req.raw) : null)
   const ip = clientIp(c.req.raw)
   // IP 属地快照（src/ipregion.ts）：与 ip 同一请求瞬间定格，采集无条件（与 ip 本体同类的
   // 内部数据），展示与否由 settings.showCommentRegion 在出参端门控——开关不影响采集
   const ipRegion = regionSnapshot(c.req.raw)
-  // 管理员发言不受留言频率限制；会员是登录身份，放宽到 10 条/10 分钟（仍防滥用），游客维持 5 条
-  if (!user && !member && !rateLimit(c.env, `cmt:${ip}`, 5, 10 * 60_000)) return jsonError(o.freqMessage, 429)
-  if (member && !rateLimit(c.env, `mcmt:${member.id}`, 10, 10 * 60_000)) return jsonError(o.freqMessage, 429)
-  // 会员限流补 IP 桶：只按账号限不住「批量注册小号各发 10 条」的 Sybil 打法（注册零验证成本）；
-  // NAT 共享 IP 放宽到 20 条/10 分钟，正常家庭/办公网够用
-  if (member && !rateLimit(c.env, `mcmt-ip:${ip}`, 20, 10 * 60_000)) return jsonError(o.freqMessage, 429)
+  // 管理员发言不受留言频率限制；游客 5 条/10 分钟（IP 桶）
+  if (!user && !rateLimit(c.env, `cmt:${ip}`, 5, 10 * 60_000)) return jsonError(o.freqMessage, 429)
   const body = await c.req.json<CommentBody>().catch(() => null)
   // 蜜罐字段：正常用户不会填写，机器人会 —— 静默丢弃
   if (body?.link) return c.json({ ok: true })
@@ -3537,12 +2771,12 @@ async function publicComment(
   if (!content) return jsonError(`${o.noun}内容不能为空`)
 
   // 站点可见窗口（API 侧与页面同口径）：窗口外内容直链已 404，留言接口不得成为「存在性
-  // 探测旁路」——豁免规则单一来源 utils.pageWindowCutoff（管理员豁免仅文章、会员豁免按站点开关）。
-  // user / member 已在上面加载，这里直接复用，不再各查一次会话
+  // 探测旁路」——豁免规则单一来源 utils.pageWindowCutoff（管理员豁免仅文章）。
+  // user 已在上面加载，这里直接复用，不再各查一次会话
   const visCutoff =
     o.kind === 'guestbook'
       ? 0
-      : pageWindowCutoff(settings, o.kind === 'weibo' ? 'weibo' : 'posts', { admin: !!user, member: !!member })
+      : pageWindowCutoff(settings, o.kind === 'weibo' ? 'weibo' : 'posts', { admin: !!user })
 
   const t = await o.target(body, visCutoff)
   if (t instanceof Response) return t
@@ -3553,32 +2787,16 @@ async function publicComment(
   // 楼中楼扁平化沿用既有口径——回复一律挂线程根（parent.parent_id || parent.id）
   let parent: CommentRow | null = null
   if (parentId) {
-    // 会员 3.0 起放开会员回复；游客仍不可（匿名楼中楼是刷量面，也不利于「收到的回复」归账）
-    if (!user && !member) return jsonError(`登录后才能回复${o.noun}`, 403)
+    // 楼中楼只开放作者回复（游客匿名楼中楼是刷量面）——回复一律挂线程根（parent.parent_id || parent.id）
+    if (!user) return jsonError(`登录后才能回复${o.noun}`, 403)
     const scopeCond =
       o.kind === 'post' ? 'c.post_id = ?' : o.kind === 'weibo' ? 'c.weibo_id = ?' : 'c.post_id = 0 AND c.weibo_id = 0'
     const scopeBind = o.kind === 'guestbook' ? [] : [o.kind === 'post' ? t.postId : t.weiboId]
-    // 带出作者档位：评论圈层可见（src/commentgate.ts）的写侧判定需要它
-    const parentSql =
-      'SELECT c.*, m.tier AS member_tier, m.tier_expires_at AS member_tier_expires_at FROM comments c LEFT JOIN members m ON m.id = c.member_id'
-    parent = await db.prepare(`${parentSql} WHERE c.id = ? AND ${scopeCond}`).bind(parentId, ...scopeBind).first<CommentRow>()
+    parent = await db
+      .prepare(`SELECT c.* FROM comments c WHERE c.id = ? AND ${scopeCond}`)
+      .bind(parentId, ...scopeBind)
+      .first<CommentRow>()
     if (!parent) return jsonError(`要回复的${o.noun}不存在`, 404)
-    // 圈层门控：父线程属于高档位私密圈时，只有同档及以上会员与管理员能回复（游客本就走不到这里）。
-    // 圈层以**线程根**为准（回复一律挂根，见下方 parent.parent_id || parent.id）——被点的那条可能
-    // 是楼中楼里的高档回复，按它判会把同楼低档会员挡在自己楼外
-    const gateDefs = parseMemberTiers(settings.memberTiers)
-    const gateRank = commentGateRank(gateDefs, settings.commentGateTier)
-    if (gateRank > 0 && !user) {
-      let root: CommentRow = parent
-      if (parent.parent_id) {
-        const r = await db.prepare(`${parentSql} WHERE c.id = ?`).bind(parent.parent_id).first<CommentRow>()
-        if (r) root = r
-      }
-      const rootTier = threadRootTier(gateDefs, root, now)
-      const viewerRank = commentGateViewerRank(gateDefs, member, now)
-      if (!canReplyGatedComment(viewerRank, false, rootTier, gateRank))
-        return jsonError(`这条${o.noun}仅限${rootTier.name}及以上会员回复`, 403)
-    }
   }
   if (user) {
     // 作者发言（回复或自己留言）：直接展示，带「作者」徽标
@@ -3603,39 +2821,6 @@ async function publicComment(
   }
 
   const pending = settings.moderateComments === '1'
-  if (member) {
-    // 会员发言（评论或回复）：身份来自会话，表单昵称/邮箱/网站字段一律忽略（契约 A5）；先审后展口径与游客一致
-    const nickname = (member.display_name || member.username).slice(0, 24)
-    const ins = await db
-      .prepare(
-        'INSERT INTO comments (post_id, weibo_id, parent_id, member_id, is_admin, nickname, content, status, ip, ip_region, created_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)'
-      )
-      .bind(
-        t.postId,
-        t.weiboId,
-        parent ? parent.parent_id || parent.id : 0,
-        member.id,
-        nickname,
-        content,
-        pending ? 'pending' : 'approved',
-        ip,
-        ipRegion,
-        now
-      )
-      .run()
-    // 新留言推送 TG 与插件广播（与游客同路，见下方游客分支注释）
-    const base = siteBase(settings, new URL(c.req.url).origin)
-    c.executionCtx.waitUntil(
-      notifyAdminComment(c.env, { kind: o.kind, context: t.context, nickname, content, pending, siteBase: base, path: t.path })
-    )
-    c.executionCtx.waitUntil(
-      fireCommentCreated(c.env, { kind: o.kind, context: t.context, nickname, content, url: base + t.path, pending })
-    )
-    // 评论积分：过审才计（awardCommentPoints 内按 ref_id 去重，反复切换状态不重复记）
-    const commentId = Number(ins.meta.last_row_id)
-    if (!pending && commentId) c.executionCtx.waitUntil(awardCommentPoints(db, member.id, commentId))
-    return c.json({ ok: true, pending })
-  }
   const nickname = String(body?.nickname || '').trim().slice(0, 24)
   if (!nickname) return jsonError(`昵称和${o.noun}内容不能为空`)
   // 游客 QQ 头像（评论头像 C2 扩展）：选填，格式不对按「没填」处理——选填字段不拦评论。
@@ -3724,21 +2909,7 @@ async function pageVisibleCutoff(db: D1Database, req: Request, settings: Awaited
   const base = kind === 'weibo' ? weiboVisibleCutoff(settings) : siteVisibleCutoff(settings)
   if (!base) return 0
   const admin = kind === 'posts' ? !!(await getSessionUser(db, req)) : false
-  const member =
-    settings.membersEnabled === '1' && !visibleRangeAppliesToMembers(settings) ? !!(await getMemberUser(db, req)) : false
-  return pageWindowCutoff(settings, kind, { admin, member })
-}
-
-/** 会员点赞记账（会员 3.0 预备，会员中心「我的点赞」）：登录会员的赞落 member_likes、取消赞删行。
- *  异步不阻塞点赞响应；新增点赞的「目标存活」校验在调用点做（与 likeDelta 只对 published 行生效同口径） */
-async function trackMemberLike(c: Context<AppEnv>, targetType: 'post' | 'weibo', targetId: number, delta: number): Promise<void> {
-  const member = await getMemberUser(c.env.DB, c.req.raw)
-  if (!member) return
-  if (delta === -1) {
-    await removeMemberLike(c.env.DB, member.id, targetType, targetId)
-    return
-  }
-  await recordMemberLike(c.env.DB, member.id, targetType, targetId, Date.now())
+  return pageWindowCutoff(settings, kind, { admin })
 }
 
 api.post('/public/like/weibo/:id', async (c) => {
@@ -3752,14 +2923,6 @@ api.post('/public/like/weibo/:id', async (c) => {
   const settings = await getSettings(c.env.DB)
   const cutoff = await pageVisibleCutoff(c.env.DB, c.req.raw, settings, 'weibo')
   const likes = await likeDelta(c.env.DB, 'weibo', 'id', String(id), delta, cutoff)
-  // 会员点赞记账（member_likes 按微博 id 记，取消赞删行）；窗口外内容点赞未命中不落账
-  const wb = await getWeiboById(c.env.DB, id)
-  if (delta === 1) {
-    if (wb && wb.status === 'published' && (cutoff <= 0 || (wb.published_at ?? wb.created_at ?? 0) >= cutoff))
-      c.executionCtx.waitUntil(trackMemberLike(c, 'weibo', id, 1))
-  } else {
-    c.executionCtx.waitUntil(trackMemberLike(c, 'weibo', id, -1))
-  }
   return c.json({ ok: true, likes })
 })
 
@@ -3781,47 +2944,17 @@ api.get('/public/weibo/:id/comments', async (c) => {
     .prepare(
       `SELECT cm.id, cm.parent_id, cm.is_admin, cm.nickname, cm.content, cm.created_at, cm.avatar${
         showRegion ? ', cm.ip_region' : ''
-      }, m.display_name AS member_name, m.tier AS member_tier, m.tier_expires_at AS member_tier_expires_at, m.avatar AS member_avatar FROM comments cm INDEXED BY idx_comments_weibo LEFT JOIN members m ON m.id = cm.member_id WHERE cm.weibo_id = ? AND cm.status = 'approved' ORDER BY cm.created_at ASC LIMIT 200`
+      } FROM comments cm INDEXED BY idx_comments_weibo WHERE cm.weibo_id = ? AND cm.status = 'approved' ORDER BY cm.created_at ASC LIMIT 200`
     )
     .bind(id)
     .all()
-  // 认证徽标（src/tiers.ts）在服务端解析成展示串：生效档位非基础档才给 tier_name/tier_color
-  // （基础档回落「会员」普通徽标，客户端按 member_name 渲染）——客户端零判定逻辑，改口径只动这里。
-  // tier_expires_at 只在服务端参与过期判定，出参前剥掉（有效期是会员本人视角的数据，不随公开评论外发）
-  const badgeOn = settings.showMemberBadge !== '0'
-  const defs = parseMemberTiers(settings.memberTiers)
-  const now = Date.now()
-  // memberName 驱动微博评论的「回复」按钮（会员可回复，游客没有按钮）；匿名访客千人一面才配吃缓存，
-  // 会员 Cookie 在场时 pagecache 本就回源（pageCacheKeyFor 挡），不会串身份
-  const member = settings.membersEnabled === '1' ? await getMemberUser(c.env.DB, c.req.raw) : null
-  // 评论圈层可见（src/commentgate.ts）：管理员会话只在门控开启时才查（关闭 = 与历史版本同样的读放大）
-  const gateRank = commentGateRank(defs, settings.commentGateTier)
-  const isAdmin = gateRank > 0 ? !!(await getSessionUser(c.env.DB, c.req.raw)) : false
-  const gateCtx = {
-    defs,
-    gateRank,
-    viewerRank: commentGateViewerRank(defs, member, now),
-    admin: isAdmin,
-    now,
-  }
-  // 遮罩在出参前完成：content 被清空、带 gated/gate_tier_name/gate_hidden，客户端只画占位块
-  const comments = applyCommentGate(((results ?? []) as unknown as CommentRow[]), gateCtx).map((r) => {
-    const row = r as unknown as Record<string, unknown>
-    if (badgeOn && row.member_tier) {
-      const eff = effectiveTier(defs, String(row.member_tier), (row.member_tier_expires_at as number | null) ?? null, now)
-      row.member_tier_name = eff.isBase ? '' : eff.name
-      row.member_tier_color = eff.isBase ? '' : eff.color
-    }
-    delete row.member_tier_expires_at
-    return showRegion ? { ...row, ip_region: ipRegionLabel(String(row.ip_region || '')) } : row
-  })
+  const comments = (results ?? []).map((row) =>
+    showRegion ? { ...row, ip_region: ipRegionLabel(String((row as { ip_region?: string }).ip_region || '')) } : row
+  )
   return c.json({
     comments,
     allowComments: settings.allowComments === '1',
     adminAvatar: settings.avatarUrl || '',
-    memberName: member ? (member.display_name || member.username).slice(0, 24) : '',
-    // 遮罩占位块的第二行提示用（0 = 游客 → 提示登录）
-    viewerRank: gateCtx.viewerRank,
   })
 })
 
@@ -3851,14 +2984,6 @@ api.post('/public/like/:slug', async (c) => {
   const settings = await getSettings(c.env.DB)
   const cutoff = await pageVisibleCutoff(c.env.DB, c.req.raw, settings, 'posts')
   const likes = await likeDelta(c.env.DB, 'posts', 'slug', slug, delta, cutoff)
-  // 会员点赞记账（member_likes 按文章 id 记；取消赞删行）；窗口外内容点赞未命中不落账
-  const post = await getPostBySlug(c.env.DB, slug)
-  if (delta === 1) {
-    if (post && post.status === 'published' && (cutoff <= 0 || (post.published_at ?? post.created_at ?? 0) >= cutoff))
-      c.executionCtx.waitUntil(trackMemberLike(c, 'post', post.id, 1))
-  } else {
-    if (post) c.executionCtx.waitUntil(trackMemberLike(c, 'post', post.id, -1))
-  }
   return c.json({ ok: true, likes })
 })
 

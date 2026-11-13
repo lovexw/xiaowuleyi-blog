@@ -11,7 +11,6 @@ import { pageCacheKeyFor, purgePageCache } from '../src/pagecache.ts'
 // 同样是把错页发给访客；epoch 进键是失效机制的根。
 
 const SESSION = 'bloghao_session'
-const MEMBER = 'xw_member_session'
 const GATE = 'bloghao_gate'
 
 function keyOf(over: Partial<Parameters<typeof pageCacheKeyFor>[0]> = {}) {
@@ -26,7 +25,7 @@ function keyOf(over: Partial<Parameters<typeof pageCacheKeyFor>[0]> = {}) {
 }
 
 test('pageCacheKeyFor：可缓存页面返回带 epoch 的键', () => {
-  for (const p of ['/', '/post/hello', '/tag/abc', '/category/x', '/page/y', '/about', '/archives', '/guestbook', '/weibo', '/links', '/member', '/rank']) {
+  for (const p of ['/', '/post/hello', '/tag/abc', '/category/x', '/page/y', '/about', '/archives', '/guestbook', '/weibo', '/links']) {
     const k = keyOf({ url: `https://x.test${p}` })
     assert.ok(k, `公开页 ${p} 必须可缓存`)
     assert.ok(k!.includes('/100/'), '键必须带 epoch 段')
@@ -94,7 +93,6 @@ test('pageCacheKeyFor：键带 hostname（多域名形态不串副本）', () =>
 test('pageCacheKeyFor：任一登录/解锁 Cookie 在场绝不缓存（越权面）', () => {
   assert.equal(keyOf({ cookie: `${SESSION}=abc` }), null, '管理员会话在，页面里有管理按钮')
   assert.equal(keyOf({ cookie: `foo=1; ${SESSION}=abc` }), null, '多 Cookie 混合同样拦')
-  assert.equal(keyOf({ cookie: `${MEMBER}=xyz` }), null, '会员会话在，页面里有会员表单')
   assert.equal(keyOf({ cookie: `${GATE}=member.1.tok` }), null, '文章解锁令牌在，正文可能已解锁')
 })
 

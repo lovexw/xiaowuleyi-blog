@@ -1,4 +1,4 @@
-import type { MemberSessionUser, SessionUser } from './types'
+import type { SessionUser } from './types'
 import { sha256Hex } from './utils'
 
 const enc = new TextEncoder()
@@ -10,7 +10,7 @@ export function randomToken(bytes = 32): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 }
 
-/** 会话 token 落库一律存 SHA-256：D1 里的 sessions / member_sessions 不再有可直接
+/** 会话 token 落库一律存 SHA-256：D1 里的 sessions 不再有可直接
  *  重放的明文 token（库泄露 ≠ 会话被冒用）；查询时对 Cookie 里的 token 同样哈希后比对 */
 export function tokenHash(token: string): Promise<string> {
   return sha256Hex(enc.encode(token).buffer as ArrayBuffer)
@@ -87,7 +87,7 @@ export async function getSessionUser(db: D1Database, req: Request): Promise<Sess
   if (!token) return null
   return db
     .prepare(
-      'SELECT u.id, u.username, u.display_name, u.avatar, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
+      'SELECT u.id, u.username, u.display_name, u.avatar FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ? AND s.expires_at > ?'
     )
     .bind(await tokenHash(token), Date.now())
     .first<SessionUser>()
@@ -105,71 +105,12 @@ export async function purgeExpiredSessions(db: D1Database): Promise<void> {
 
 /** 改密码后踢掉其他设备：保留当前会话（改密码的人自己不能被登出去），其余全部失效。
  *  keepToken 是 Cookie 里的明文 token——落库存的是 SHA-256（tokenHash），比较前必须先哈希
- *  （与会员侧 destroyOtherMemberSessions 同口径；拿明文直比恒不相等，会把「保留当前会话」
- *  写成「删光全部会话」） */
+ *  （拿明文直比恒不相等，会把「保留当前会话」写成「删光全部会话」） */
 export async function destroyOtherSessions(db: D1Database, userId: number, keepToken: string): Promise<void> {
   await db
     .prepare('DELETE FROM sessions WHERE user_id = ? AND token <> ?')
     .bind(userId, await tokenHash(keepToken))
     .run()
-}
-
-/* ---------------- 会员会话（访客注册身份，与管理员 sessions 彻底分离，契约见 docs/archive/DEVPLAN-2026-10-07.md 附录 A） ---------------- */
-
-export const MEMBER_SESSION_COOKIE = 'xw_member_session'
-
-export async function createMemberSession(db: D1Database, memberId: number): Promise<string> {
-  const token = randomToken(32)
-  await db
-    .prepare('INSERT INTO member_sessions (token, member_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
-    .bind(await tokenHash(token), memberId, Date.now() + SESSION_TTL, Date.now())
-    .run()
-  return token
-}
-
-export function memberSessionCookie(token: string, secure = true): string {
-  return `${MEMBER_SESSION_COOKIE}=${token}; Path=/; HttpOnly;${secure ? ' Secure;' : ''} SameSite=Lax; Max-Age=${SESSION_TTL / 1000}`
-}
-
-export function clearMemberSessionCookie(): string {
-  return `${MEMBER_SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
-}
-
-/** 当前登录会员；banned 在查询层即视为未登录（封禁即刻失去会话能力，无需等后台清会话） */
-export async function getMemberUser(db: D1Database, req: Request): Promise<MemberSessionUser | null> {
-  const token = getCookie(req, MEMBER_SESSION_COOKIE)
-  if (!token) return null
-  return db
-    .prepare(
-      // tier_expires_at 必须随会话带出：付费墙 / 评论门槛走 canReadTiers → effectiveTier 在读侧
-      // 即时判过期，缺这一列时过期会员会一直按存档的高档位放行（直到后台手工改档）。
-      "SELECT m.id, m.username, m.display_name, m.avatar, m.tier, m.tier_expires_at, m.points FROM member_sessions s JOIN members m ON m.id = s.member_id WHERE s.token = ? AND s.expires_at > ? AND m.status = 'active'"
-    )
-    .bind(await tokenHash(token), Date.now())
-    .first<MemberSessionUser>()
-}
-
-export async function destroyMemberSession(db: D1Database, req: Request): Promise<void> {
-  const token = getCookie(req, MEMBER_SESSION_COOKIE)
-  if (token) await db.prepare('DELETE FROM member_sessions WHERE token = ?').bind(await tokenHash(token)).run()
-}
-
-/** 后台拉黑时清空该会员全部会话（双保险：查询层已挡 banned，这里把 token 也删掉） */
-export async function destroyMemberSessionsByMember(db: D1Database, memberId: number): Promise<void> {
-  await db.prepare('DELETE FROM member_sessions WHERE member_id = ?').bind(memberId).run()
-}
-
-/** 改密码后踢掉其他设备：保留当前会话（改密码的人自己不能被登出去），其余全部失效 */
-export async function destroyOtherMemberSessions(db: D1Database, memberId: number, keepToken: string): Promise<void> {
-  await db
-    .prepare('DELETE FROM member_sessions WHERE member_id = ? AND token <> ?')
-    .bind(memberId, await tokenHash(keepToken))
-    .run()
-}
-
-/** 清理过期会员会话（随每晚备份 cron，与 purgeExpiredSessions 并排） */
-export async function purgeExpiredMemberSessions(db: D1Database): Promise<void> {
-  await db.prepare('DELETE FROM member_sessions WHERE expires_at < ?').bind(Date.now()).run()
 }
 
 /**

@@ -4,14 +4,14 @@ import { runScheduledPublish } from './scheduler'
 import { api } from './api'
 import { cleanBotPath, identifyBot, purgeBots, recordBot, shouldRecordBot } from './bots'
 import { siteClosedResponse } from './closed'
-import { clientIp, getCookie, getMemberUser, getSessionUser, isSecureRequest, rateLimit } from './auth'
+import { clientIp, getCookie, getSessionUser, isSecureRequest, rateLimit } from './auth'
 import { ensureSchema, getPostBySlug, getSettings, listCategories, listPages, listPosts, listPublishedTags, listSitemapCategoryLastmod, listSitemapPages, listSitemapPosts, listWeiboLastmod } from './db'
 import { buildLlmsFullTxt, buildLlmsStub, buildLlmsTxt } from './llms'
 import { mcpRoutes } from './mcp'
 import { goPageHtml, isTrustedOutHost } from './outlink'
 import { htmlEtagMiddleware } from './html-etag'
 import { imageCacheMatch, imageCachePut, pageCacheMiddleware } from './pagecache'
-import { renderAbout, renderArchive, renderCategory, renderGuestbook, renderHome, renderLinks, renderMember, renderNotFound, renderPage, renderPost, renderRank, renderSearch, renderWeibo } from './pages'
+import { renderAbout, renderArchive, renderCategory, renderGuestbook, renderHome, renderLinks, renderNotFound, renderPage, renderPost, renderSearch, renderWeibo } from './pages'
 import { canEverUnlock, gateHashesOf, GATE_COOKIE, GATE_TTL_MS, mergeGateCookie, normalizeAccess, verifyGatePassword, type GateLevel } from './protect'
 import { installedManifest, pluginFileKey, readInstalled } from './pluginpkg'
 import { buildJsonFeed, buildRss, buildSitemap } from './rss'
@@ -21,9 +21,9 @@ import { pluginConfig } from './hooks'
 import { purgeVisits } from './stats'
 import { mimeOfKey, variantBaseKey } from './store'
 import { purgeTrash } from './trash'
-import { purgeMemberVisits, recountWeiboCount, refreshFootStats, refreshOnThisDay } from './db'
+import { recountWeiboCount, refreshFootStats, refreshOnThisDay } from './db'
 import type { Env, SessionUser } from './types'
-import { fmtDate, siteVisibleCutoff, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { fmtDate, siteVisibleCutoff, weiboVisibleCutoff } from './utils'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser | null } }>()
 
@@ -121,17 +121,13 @@ app.get('/archives', renderArchive)
 app.get('/guestbook', renderGuestbook)
 app.get('/weibo', (c) => renderWeibo(c))
 app.get('/links', renderLinks)
-app.get('/member', renderMember)
-app.get('/rank', renderRank)
 app.get('/search', renderSearch)
 
 // 随机来一篇：从已发布文章里随机挑一篇跳过去（加密文章不进随机池——落上去就是一堵密码墙）
 app.get('/random', async (c) => {
-  // 站点可见窗口：随机入口同样只在窗口内抽（抽到窗口外文章 = 直链 404 死链）；
-  // 站点选择「不限制会员」时，已登录会员从全量里抽（与页面口径一致）
+  // 站点可见窗口：随机入口同样只在窗口内抽（抽到窗口外文章 = 直链 404 死链）
   const settings = await getSettings(c.env.DB)
-  let cutoff = siteVisibleCutoff(settings)
-  if (cutoff && !visibleRangeAppliesToMembers(settings) && settings.membersEnabled === '1' && (await getMemberUser(c.env.DB, c.req.raw))) cutoff = 0
+  const cutoff = siteVisibleCutoff(settings)
   const vis = cutoff ? 'AND COALESCE(published_at, created_at) >= ?' : ''
   const row = await c.env.DB.prepare(
     `SELECT slug FROM posts WHERE status = 'published' AND deleted_at IS NULL ${vis} AND min_tier = 'all' ORDER BY RANDOM() LIMIT 1`
@@ -477,8 +473,6 @@ export default {
           await purgeVisits(env.DB).catch((e) => console.error('purgeVisits failed:', e))
           // 爬虫日志滚动清理：bot_log 同为日志类数据不进备份（src/bots.ts）
           await purgeBots(env.DB).catch((e) => console.error('purgeBots failed:', e))
-          // 会员浏览足迹滚动清理：保留 90 天（会员 3.0 预备，db.ts purgeMemberVisits）
-          await purgeMemberVisits(env.DB).catch((e) => console.error('purgeMemberVisits failed:', e))
           // 回收站滚动清理：到期（30 天）的软删行彻底删除并级联评论（src/trash.ts）
           await purgeTrash(env.DB).catch((e) => console.error('purgeTrash failed:', e))
           // 页脚「站点足迹」统计夜更（db.ts refreshFootStats，页脚名片读 settings.siteFoot）

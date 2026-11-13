@@ -7,7 +7,7 @@ import type { ThemeModule } from '../src/themes/registry.ts'
 import type { AboutData, ArchivesData, GuestbookData, HomeData, LinksData, MemberData, PageData, RankData, WeiboData } from '../src/themes/registry.ts'
 import type { HomePostView, MemberView, RankEntryView, WeiboItemView, ArchiveYearGroup, FriendLinkView, CategoryLink, TagCount } from '../src/render.ts'
 import type { CommentRow } from '../src/types.ts'
-import { commentsHtml, footCardHtml, friendLinkCards, headingAnchors, heatmapHtml, memberCardHtml, newSiteGuideHtml, postNeighborsHtml, rankListHtml } from '../src/render.ts'
+import { commentsHtml, footCardHtml, friendLinkCards, headingAnchors, heatmapHtml, newSiteGuideHtml, postNeighborsHtml } from '../src/render.ts'
 import { esc } from '../src/utils.ts'
 import { packMatrix, qrMatrix } from '../src/qrcode.ts'
 
@@ -108,15 +108,6 @@ const weiboData = (): WeiboData => ({
 })
 const linksData = (): LinksData => ({ settings, categories: [cat], pages, items: [friend], total: 1 })
 
-/* 会员 / 排行榜（B 序列 fixture：数据形状见 DEVPLAN-2026-10-07 附录 A） */
-const memberView: MemberView = { nickname: '小张', tier: 'coffee', points: 42, createdAt: TS }
-const rankEntries: RankEntryView[] = [
-  { rank: 1, nickname: '小张', tier: 'coffee', points: 42 },
-  { rank: 2, nickname: '阿李', tier: 'normal', points: 18, isMe: true },
-]
-const memberData = (): MemberData => ({ settings, categories: [cat], pages, navActive: 'member', member: null })
-const rankData = (): RankData => ({ settings, categories: [cat], pages, navActive: 'rank', entries: rankEntries, total: 2, me: rankEntries[1] })
-
 /** 每个页面函数的冒烟断言：能渲染 + 页脚 + 导航都在。
  *  页脚链接组按页面类型有变体（部分页面无 RSS），由各主题 foot() 公共件统一承载 */
 function checkPage(themeId: string, name: string, html: string): void {
@@ -214,23 +205,6 @@ for (const [themeId, theme] of Object.entries(THEMES as Record<string, ThemeModu
       }
   })
 
-  test(`${themeId}: post 渲染付费墙遮挡卡（locked）`, () => {
-    const d = postData()
-    d.post.locked = true
-    d.post.minTier = 'coffee'
-    const html = theme.post(d)
-    checkPage(themeId, 'post+locked', html)
-    assert.ok(html.includes('class="paywall"'), 'locked 时应渲染付费墙遮挡卡')
-    assert.ok(html.includes('咖啡会员专属内容'), '遮挡文案随档位')
-    assert.ok(html.includes('href="/member"'), 'CTA 指向会员中心')
-    assert.ok(html.includes('<p>正文</p>'), '试读段照常渲染')
-    const top = theme.post({ ...d, post: { ...d.post, minTier: 'top' } })
-    assert.ok(top.includes('付费会员专属内容'), 'top 档位切换文案（会员 3.0 预备：默认第三档更名付费会员）')
-    const mem = theme.post({ ...d, post: { ...d.post, minTier: 'member' } })
-    assert.ok(mem.includes('会员专属内容'), 'member 档位文案（契约 A0 四档）')
-    assert.ok(!theme.post(postData()).includes('class="paywall"'), '未锁定不出遮挡卡')
-  })
-
   test(`${themeId}: about 与 page 渲染（标题区分）`, () => {
     const about = theme.about(aboutData())
     const page = theme.page(pageData())
@@ -275,47 +249,11 @@ for (const [themeId, theme] of Object.entries(THEMES as Record<string, ThemeModu
     assert.ok(html.includes('example.com'))
   })
 
-  test(`${themeId}: rank 渲染（榜单行/名次标记/空态）`, () => {
-    const html = theme.rank!(rankData())
-    checkPage(themeId, 'rank', html)
-    assert.ok(html.includes('rk-list'), '应渲染榜单列表')
-    assert.ok(html.includes('小张'))
-    assert.ok(html.includes('咖啡会员'), '档位应转成中文标签')
-    assert.ok(html.includes('2 位'), '页头应带上榜总数（各主题文案措辞不同，只断数量片段）')
-    assert.ok(html.includes('is-top1'), '第一名应有 top1 标记')
-    assert.ok(html.includes('is-me'), '本人行应带 is-me 标记')
-    const empty = theme.rank!({ ...rankData(), entries: [], total: 0, me: null })
-    assert.ok(!empty.includes('rk-list'), '空榜不渲染列表，出空态文案')
-  })
-
-  test(`${themeId}: member 渲染（未登录表单/已登录会员卡）`, () => {
-    const anon = theme.member!(memberData())
-    checkPage(themeId, 'member(anon)', anon)
-    assert.ok(anon.includes('data-member-form="login"'), '未登录应有登录表单')
-    assert.ok(anon.includes('data-member-form="register"'), '未登录应有注册表单')
-    assert.ok(anon.includes('name="emailConfirm"'), '注册邮箱要二次输入（防手误，且它是跨站继承的凭据）')
-    assert.ok(/name="email"[^>]*required/.test(anon) && /name="emailConfirm"[^>]*required/.test(anon), '邮箱与确认框都是必填')
-    assert.ok((anon.match(/class="cmt-hp"/g) || []).length >= 2, '两个表单都要带蜜罐字段')
-    const loggedIn = theme.member!({ ...memberData(), member: memberView })
-    checkPage(themeId, 'member(logged)', loggedIn)
-    assert.ok(loggedIn.includes('data-member-card'), '已登录应渲染会员卡')
-    assert.ok(loggedIn.includes('小张'))
-    assert.ok(loggedIn.includes('data-member-logout'), '会员卡应有退出按钮')
-    assert.ok(!loggedIn.includes('data-member-form'), '已登录不再渲染登录/注册表单')
-  })
-
   test(`${themeId}: home 无排行挂件（榜单收敛到 /rank 页，不再占首页卡片位）`, () => {
     const html = theme.home(homeData())
     assert.ok(!html.includes('rk-card'), '首页不渲染排行挂件')
     assert.ok(!html.includes('rk-list'), '首页无榜单列表')
     assert.ok(!html.includes('完整榜单'), '首页无榜单入口')
-  })
-
-  test(`${themeId}: weibo 评论表单带会员身份（memberName 免填昵称）`, () => {
-    const html = theme.weibo({ ...weiboData(), adminName: undefined, memberName: '小张' })
-    checkPage(themeId, 'weibo(member)', html)
-    assert.ok(html.includes('以会员 <b>小张</b>'), '会员身份行应渲染')
-    assert.ok(!html.includes('name="nickname"'), '会员表单免填昵称')
   })
 
   test(`${themeId}: page 未实现时运行时兜底由 pages.ts 负责（本主题已实现）`, () => {
@@ -347,20 +285,18 @@ const cmt = (over: Partial<CommentRow>): CommentRow => ({
   ...over,
 })
 
-test('评论头像位：会员出站内头像图，游客与未绑头像的会员退回昵称首字块', () => {
+test('评论头像位：游客站内头像出图，无头像退回昵称首字块', () => {
   const html = commentsHtml({
     comments: [
-      cmt({ id: 1, member_avatar: '/images/u/202610/a.png' }),
+      cmt({ id: 1, avatar: '/images/u/202610/a.png' }),
       cmt({ id: 2, nickname: '游客甲' }),
-      cmt({ id: 3, nickname: '小明', member_name: '小明', member_tier: 'normal' }),
     ],
     slug: 'hello',
     allowComments: true,
-    count: 3,
+    count: 2,
   })
   assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/202610\/a\.png@192\.webp"/)
   assert.match(html, /<span class="cmt-avatar" aria-hidden="true">游<\/span>/)
-  assert.match(html, /<span class="cmt-avatar" aria-hidden="true">小<\/span>/)
 })
 
 test('评论头像位：作者（管理员）评论用站点头像，未设置站点头像退回首字块', () => {
@@ -373,15 +309,6 @@ test('评论头像位：作者（管理员）评论用站点头像，未设置�
   })
   assert.match(withAvatar, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/site\.png@192\.webp"/)
   assert.doesNotMatch(withAvatar, /<span class="cmt-avatar" aria-hidden="true">站<\/span>/, '有站点头像不再落首字块')
-  // 会员头像优先于站点头像（is_admin 评论不会有 member_avatar，此条守优先级不回归）
-  const both = commentsHtml({
-    comments: [cmt({ id: 1, is_admin: 1, nickname: '站长', member_avatar: '/images/u/m.png' })],
-    slug: 'hello',
-    allowComments: true,
-    count: 1,
-    adminAvatar: '/images/u/site.png',
-  })
-  assert.match(both, /src="\/images\/u\/m\.png@192\.webp"/)
   const noAvatar = commentsHtml({
     comments: [cmt({ id: 1, is_admin: 1, nickname: '站长' })],
     slug: 'hello',
@@ -442,66 +369,41 @@ test('site.js 微博评论头像镜像：会员图 / 作者站点头像 / 游客
   const render = factory(esc, (t: number) => String(t), (s: string) => s)
   const listEl = { innerHTML: '' }
   const rows = [
-    { id: 1, parent_id: 0, is_admin: 0, nickname: '会员甲', content: '内容', created_at: TS, member_avatar: '/images/u/202610/a.png' },
-    { id: 2, parent_id: 0, is_admin: 0, nickname: '游客甲', content: '内容', created_at: TS, ip_region: '广东' },
-    { id: 3, parent_id: 0, is_admin: 1, nickname: '站长', content: '内容', created_at: TS },
-    { id: 4, parent_id: 0, is_admin: 0, nickname: '游客乙', content: '内容', created_at: TS, avatar: '/images/u/guest.png' },
+    { id: 1, parent_id: 0, is_admin: 0, nickname: '游客甲', content: '内容', created_at: TS, ip_region: '广东' },
+    { id: 2, parent_id: 0, is_admin: 1, nickname: '站长', content: '内容', created_at: TS },
+    { id: 3, parent_id: 0, is_admin: 0, nickname: '游客乙', content: '内容', created_at: TS, avatar: '/images/u/guest.png' },
   ]
   render({ querySelector: () => listEl }, rows, false, '/images/u/site.png')
-  assert.match(listEl.innerHTML, /<img class="wb-cmt-avatar wb-cmt-avatar-img" src="\/images\/u\/202610\/a\.png"/, '会员头像位')
   assert.match(listEl.innerHTML, /<img class="wb-cmt-avatar wb-cmt-avatar-img" src="\/images\/u\/site\.png"/, '作者评论用站点头像')
   assert.match(listEl.innerHTML, /<img class="wb-cmt-avatar wb-cmt-avatar-img" src="\/images\/u\/guest\.png"/, '游客自填 QQ 的站内转存头像位')
   assert.match(listEl.innerHTML, /<span class="wb-cmt-avatar" aria-hidden="true">游<\/span>/, '没填 QQ 的游客退首字块')
   // 楼层号与楼主徽标：与 SSR commentsHtml 同构（顶层 #1 起编、作者徽标微博语境叫楼主）
   assert.match(listEl.innerHTML, /wb-cmt-floor"[^>]*>#1</, '楼层号从 #1 起编')
-  assert.match(listEl.innerHTML, /wb-cmt-floor"[^>]*>#4</, '四条顶层编到 #4')
+  assert.match(listEl.innerHTML, /wb-cmt-floor"[^>]*>#3</, '三条顶层编到 #3')
   assert.match(listEl.innerHTML, /wb-cmt-badge">楼主</, '作者徽标微博语境 = 楼主')
   // IP 属地：接口带 ip_region（服务端已换算成标签）才渲染，没带的行不占位
   assert.match(listEl.innerHTML, /wb-cmt-region"[^>]*>广东</, '属地小灰字与 SSR cmt-region 同构')
   assert.equal((listEl.innerHTML.match(/wb-cmt-region/g) || []).length, 1, '没属地的行不渲染占位')
   // 接口没带 adminAvatar（站点未设头像）时，作者评论退回首字块，与 SSR 同态
   listEl.innerHTML = ''
-  render({ querySelector: () => listEl }, [rows[2]], false, '')
+  render({ querySelector: () => listEl }, [rows[1]], false, '')
   assert.match(listEl.innerHTML, /<span class="wb-cmt-avatar" aria-hidden="true">站<\/span>/)
-})
-
-test('排行榜头像位：有 avatarUrl 出图，否则首字块', () => {
-  const html = rankListHtml([
-    { rank: 1, nickname: '小明', tier: 'top', points: 30, avatarUrl: '/images/u/a.png' },
-    { rank: 2, nickname: '小红', tier: 'normal', points: 10 },
-  ])
-  assert.match(html, /<img class="rk-avatar rk-avatar-img" src="\/images\/u\/a\.png@192\.webp"/)
-  assert.match(html, /<span class="rk-avatar" aria-hidden="true">小<\/span>/)
-})
-
-test('会员中心 QQ 绑定卡：本人视角出 value；绑了 qq 没抓到头像出重试态', () => {
-  const bound = memberCardHtml({ nickname: '小明', tier: 'normal', points: 3, qq: '12345' })
-  assert.match(bound, /data-member-qq-form/)
-  assert.match(bound, /value="12345"/)
-  assert.match(bound, /重试头像/, '有 qq 没头像 = 重试态')
-  assert.match(bound, /头像还没抓到/, '绑定态提示与重试入口呼应')
-  const withAvatar = memberCardHtml({ nickname: '小明', tier: 'normal', points: 3, qq: '12345', avatarUrl: '/images/u/a.png' })
-  assert.match(withAvatar, /已绑定，头像会显示在评论区与排行榜/)
-  assert.ok(!withAvatar.includes('重试头像'))
-  const unbound = memberCardHtml({ nickname: '小明', tier: 'normal', points: 3 })
-  assert.match(unbound, /不会公开展示/)
 })
 
 // ── 游客 QQ 头像（C2 扩展）：SSR 评论头像位认游客行内 avatar（站内转存地址），qq 本体不出参 ──
 
-test('SSR 评论头像位：游客自填 QQ 的站内头像出图；与会员头像同现时会员优先', () => {
+test('SSR 评论头像位：游客自填 QQ 的站内头像出图，qq 本体不出参', () => {
   const html = commentsHtml({
     comments: [
       cmt({ id: 11, nickname: '游客丙', avatar: '/images/u/202610/guest.png' }),
-      cmt({ id: 12, nickname: '小明', member_name: '小明', member_tier: 'normal', member_avatar: '/images/u/m.png', avatar: '/images/u/old.png' }),
+      cmt({ id: 12, nickname: '小明', avatar: '/images/u/m.png' }),
     ],
     slug: 'hello',
     allowComments: true,
     count: 2,
   })
   assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/202610\/guest\.png@192\.webp"/, '游客头像位')
-  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/m\.png@192\.webp"/, '会员头像优先于行内 avatar')
-  assert.ok(!html.includes('/images/u/old.png@192'), '行内 avatar 被会员头像遮蔽时不输出')
+  assert.match(html, /<img class="cmt-avatar cmt-avatar-img" src="\/images\/u\/m\.png@192\.webp"/, '站内转存头像位')
   assert.ok(!/<img[^>]*src="12345"/.test(html), 'qq 本体永不进公开 HTML')
 })
 

@@ -116,10 +116,10 @@ test('P1-1：全新库走「exec 先行快速路」成功，且 ensureSchema 兜
   db.exec(SCHEMA_SQL) // 幂等重放不抛
   const tables = db
     .prepare(
-      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('posts','weibo','pages','settings','members','posts_fts')"
+      "SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name IN ('posts','weibo','pages','settings','posts_fts')"
     )
     .get() as { n: number }
-  assert.equal(tables.n, 6, '关键表（含 FTS 虚表）全部就位——核心九表来自 schema.sql、后加表来自 SCHEMA_TABLES')
+  assert.equal(tables.n, 5, '关键表（含 FTS 虚表）全部就位——核心九表来自 schema.sql、后加表来自 SCHEMA_TABLES')
 })
 
 test('P1-1：现代库（已含全部列）重放幂等，不误触发补列路', async () => {

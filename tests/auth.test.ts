@@ -8,17 +8,12 @@ import {
   clearSessionCookie,
   clientIp,
   createSession,
-  createMemberSession,
-  destroyOtherMemberSessions,
   destroyOtherSessions,
   destroySession,
   getCookie,
-  getMemberUser,
   getSessionUser,
   hashPassword,
   isSecureRequest,
-  MEMBER_SESSION_COOKIE,
-  memberSessionCookie,
   purgeExpiredSessions,
   randomToken,
   rateLimit,
@@ -152,31 +147,6 @@ test('destroySession / purgeExpiredSessions：删除也先过 tokenHash', async 
   assert.equal(calls[0].binds[0], await sha256Of(token))
   await purgeExpiredSessions(db)
   assert.match(calls[1].sql, /DELETE FROM sessions WHERE expires_at < \?/)
-})
-
-test('会员会话：独立 Cookie、SQL 带 banned 过滤、改密踢其他设备保留当前会话', async () => {
-  const token = randomToken()
-  const { db, calls } = fakeDb(() => ({ id: 3, username: 'm', display_name: '会员', avatar: '', tier: 'normal', points: 0 }))
-  assert.equal(MEMBER_SESSION_COOKIE, 'xw_member_session')
-  assert.match(memberSessionCookie(token), /^xw_member_session=/)
-  assert.match(clearSessionCookie(), /^bloghao_session=;/)
-
-  const memberRow = await getMemberUser(db, reqWithCookie(`${MEMBER_SESSION_COOKIE}=${token}`))
-  assert.ok(memberRow)
-  const memberSql = calls[0].sql
-  assert.match(memberSql, /JOIN members m ON m\.id = s\.member_id/)
-  assert.match(memberSql, /s\.expires_at > \?/)
-  assert.match(memberSql, /m\.status = 'active'/) // banned 查询层即未登录
-  assert.equal(calls[0].binds[0], await sha256Of(token))
-
-  await createMemberSession(db, 3)
-  assert.match(calls[1].sql, /INSERT INTO member_sessions/)
-  assert.notEqual(calls[1].binds[0], token)
-
-  await destroyOtherMemberSessions(db, 3, token)
-  assert.match(calls[2].sql, /DELETE FROM member_sessions WHERE member_id = \? AND token <> \?/)
-  assert.equal(calls[2].binds[0], 3)
-  assert.equal(calls[2].binds[1], await sha256Of(token)) // 被保留的当前会话同样按哈希比对
 })
 
 test('sessionCookie：HttpOnly + Secure + SameSite=Lax 属性齐全', () => {

@@ -20,7 +20,7 @@ import {
   yearArchiveStats,
 } from '../src/db.ts'
 import { searchPosts, searchWeibo } from '../src/fts.ts'
-import { listRangeCutoff, pageWindowCutoff, siteVisibleCutoff, weiboVisibleCutoff, visibleRangeOf, visibleRangeAppliesToMembers, LIST_RANGES } from '../src/utils.ts'
+import { listRangeCutoff, pageWindowCutoff, siteVisibleCutoff, weiboVisibleCutoff, visibleRangeOf, LIST_RANGES } from '../src/utils.ts'
 
 // ── 后台列表时间范围筛选（文章 / 微博共用）──
 // 防线核心：客户端只传白名单语义值（3d/1m/6m/1y），真实 cutoff 由服务端
@@ -56,6 +56,31 @@ function d1FromSqlite(db: DatabaseSync): D1Database {
       return []
     },
   } as unknown as D1Database
+}
+
+function seedRangeDb(): { db: D1Database; raw: DatabaseSync; now: number } {
+  const raw = new DatabaseSync(':memory:')
+  raw.exec(SCHEMA_SQL)
+  const now = 1_750_000_000_000
+  const DAY = 86_400_000
+  const post = raw.prepare(
+    'INSERT INTO posts (slug, title, content, status, pinned, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  )
+  // 4 篇文章覆盖四象限：新/旧 × 已发布/草稿（草稿无 published_at，走 COALESCE 的 created_at 分支）
+  post.run('new-pub', '新发布', 'x', 'published', 0, now - 1 * DAY, now - 1 * DAY, now - 1 * DAY)
+  post.run('old-pub', '旧发布', 'x', 'published', 0, now - 400 * DAY, now - 400 * DAY, now - 400 * DAY)
+  post.run('new-draft', '新草稿', 'x', 'draft', 0, null, now - 2 * 3600_000, now - 2 * 3600_000)
+  post.run('old-draft', '旧草稿', 'x', 'draft', 0, null, now - 200 * DAY, now - 200 * DAY)
+  const wb = raw.prepare(
+    'INSERT INTO weibo (content, status, pinned, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+  )
+  // 微博：新（2 小时前，窗口内最新）/ 旧（400 天）/ 旧但置顶（范围筛选按时间说话，置顶不豁免）/ 半年内（100 天）/ 新草稿（1 天前）
+  wb.run('新微博', 'published', 0, now - 2 * 3600_000, now - 2 * 3600_000, now - 2 * 3600_000)
+  wb.run('旧微博', 'published', 0, now - 400 * DAY, now - 400 * DAY, now - 400 * DAY)
+  wb.run('旧置顶微博', 'published', 1, now - 400 * DAY, now - 400 * DAY, now - 400 * DAY)
+  wb.run('百日微博', 'published', 0, now - 100 * DAY, now - 100 * DAY, now - 100 * DAY)
+  wb.run('新草稿微博', 'draft', 0, null, now - 1 * DAY, now - 1 * DAY)
+  return { db: d1FromSqlite(raw), raw, now }
 }
 
 test('listRangeCutoff：白名单四档换算成滚动窗口 cutoff', () => {
@@ -110,39 +135,6 @@ test('可见窗口：旧单键 contentVisibleRange 只在新键为空时回落�
   assert.equal(siteVisibleCutoff({ contentVisibleRangePosts: 'constructor' }, NOW), 0)
   assert.equal(weiboVisibleCutoff({ contentVisibleRangeWeibo: '10y' }, NOW), 0)
 })
-
-test('可见窗口：会员默认同样受限，唯一豁免档是 contentVisibleForMembers=0', () => {
-  assert.equal(visibleRangeAppliesToMembers({}), true)
-  assert.equal(visibleRangeAppliesToMembers({ contentVisibleForMembers: '1' }), true)
-  assert.equal(visibleRangeAppliesToMembers({ contentVisibleForMembers: '0' }), false)
-  // 脏值按默认「受限」处理（宁严勿漏）
-  assert.equal(visibleRangeAppliesToMembers({ contentVisibleForMembers: 'false' }), true)
-})
-
-function seedRangeDb(): { db: D1Database; raw: DatabaseSync; now: number } {
-  const raw = new DatabaseSync(':memory:')
-  raw.exec(SCHEMA_SQL)
-  const now = 1_750_000_000_000
-  const DAY = 86_400_000
-  const post = raw.prepare(
-    'INSERT INTO posts (slug, title, content, status, pinned, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-  )
-  // 4 篇文章覆盖四象限：新/旧 × 已发布/草稿（草稿无 published_at，走 COALESCE 的 created_at 分支）
-  post.run('new-pub', '新发布', 'x', 'published', 0, now - 1 * DAY, now - 1 * DAY, now - 1 * DAY)
-  post.run('old-pub', '旧发布', 'x', 'published', 0, now - 400 * DAY, now - 400 * DAY, now - 400 * DAY)
-  post.run('new-draft', '新草稿', 'x', 'draft', 0, null, now - 2 * 3600_000, now - 2 * 3600_000)
-  post.run('old-draft', '旧草稿', 'x', 'draft', 0, null, now - 200 * DAY, now - 200 * DAY)
-  const wb = raw.prepare(
-    'INSERT INTO weibo (content, status, pinned, published_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-  )
-  // 微博：新（2 小时前，窗口内最新）/ 旧（400 天）/ 旧但置顶（范围筛选按时间说话，置顶不豁免）/ 半年内（100 天）/ 新草稿（1 天前）
-  wb.run('新微博', 'published', 0, now - 2 * 3600_000, now - 2 * 3600_000, now - 2 * 3600_000)
-  wb.run('旧微博', 'published', 0, now - 400 * DAY, now - 400 * DAY, now - 400 * DAY)
-  wb.run('旧置顶微博', 'published', 1, now - 400 * DAY, now - 400 * DAY, now - 400 * DAY)
-  wb.run('百日微博', 'published', 0, now - 100 * DAY, now - 100 * DAY, now - 100 * DAY)
-  wb.run('新草稿微博', 'draft', 0, null, now - 1 * DAY, now - 1 * DAY)
-  return { db: d1FromSqlite(raw), raw, now }
-}
 
 test('listPosts：afterTs 只留窗口内行，草稿按 created_at 参与 COALESCE，计数同步', async () => {
   const { db, now } = seedRangeDb()
@@ -295,23 +287,6 @@ test('pageWindowCutoff：窗口关闭恒 0；管理员豁免仅文章（微博�
   assert.equal(pageWindowCutoff(both, 'posts', { admin: true }, now), 0)
   assert.equal(pageWindowCutoff(both, 'posts', {}, now), now - 3 * DAY)
   assert.equal(pageWindowCutoff(both, 'weibo', { admin: true }, now), now - 3 * DAY)
-})
-
-test('pageWindowCutoff：会员豁免只在「membersEnabled 开启 + 不限制会员 + 会员在登录态」三者为当时生效', () => {
-  const DAY = 86_400_000
-  const now = 1_750_000_000_000
-  const base = { contentVisibleRangePosts: '3d', contentVisibleRangeWeibo: '3d' }
-  // 默认（会员同样受限）：登录会员也不豁免
-  assert.equal(pageWindowCutoff(base, 'posts', { member: true }, now), now - 3 * DAY)
-  // 站点不限会员，但 membersEnabled 没开（游客站）：会员身份无从谈起，照旧受限
-  const noMembers = { ...base, contentVisibleForMembers: '0' }
-  assert.equal(pageWindowCutoff(noMembers, 'posts', { member: true }, now), now - 3 * DAY)
-  // 三者为当时：豁免生效
-  const exempt = { ...base, contentVisibleForMembers: '0', membersEnabled: '1' }
-  assert.equal(pageWindowCutoff(exempt, 'posts', { member: true }, now), 0)
-  assert.equal(pageWindowCutoff(exempt, 'weibo', { member: true }, now), 0)
-  // 豁免只对登录会员：游客仍受限
-  assert.equal(pageWindowCutoff(exempt, 'posts', {}, now), now - 3 * DAY)
 })
 
 test('likeDelta：窗口外内容点赞不出（回 0 与「不存在」同响应），库内计数分毫不动', async () => {

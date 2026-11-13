@@ -3,9 +3,7 @@ import type { PostSort, WeiboVideoView } from './db'
 import { assetUrl, assetVersion } from './assets'
 import { renderFooterHtml } from './hooks'
 import { outHref } from './outlink'
-import { cstDate, esc, excerpt, extractWeiboTopics, fmtDate, fmtDateCN, fmtDateTime, isoDate, NICKNAME_CHANGE_COOLDOWN_MS, nicknameCooldown, plainText } from './utils'
-import { effectiveTier, parseMemberTiers, tierByKey, type MemberTierDef } from './tiers'
-import { commentGateMoreText, commentGateText } from './commentgate'
+import { cstDate, esc, excerpt, extractWeiboTopics, fmtDate, fmtDateCN, fmtDateTime, isoDate, plainText } from './utils'
 import { replaceEmoji } from './emoji'
 import { appearanceHeadStyle } from './appearance'
 import { customCssHeadStyle } from './skinpack'
@@ -93,10 +91,7 @@ export function page(o: ThemePageOptions): string {
         .join('\n')
     : ''
   return `<!DOCTYPE html>
-<html lang="zh-CN"${
-    // 注册人机验证（Turnstile）：sitekey 是公开值，仅 /member 页下发给 site.js 懒挂载组件
-    o.path === '/member' && o.settings.turnstileSiteKey ? ` data-turnstile="${esc(o.settings.turnstileSiteKey)}"` : ''
-  }${assetVersion() ? ` data-av="${assetVersion()}"` : ''}>
+<html lang="zh-CN"${assetVersion() ? ` data-av="${assetVersion()}"` : ''}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -288,8 +283,7 @@ export interface NavPage {
  * mode 传站点模式（siteMode(settings)）：纯博客隐藏「微博」，纯微博把「微博」提为首位并隐藏
  * 归档/分类话题/随机等博客专属模块（未传按博客+微博处理，兼容第三方主题）。
  * 分类与标签收进同一折叠菜单（标签可能很多，菜单内部滚动），
- * active 传 'home' / 'weibo' / 'archives' / 'guestbook' / 'links' / 'member' / 'rank' / 'about' / 分类 slug / 'tag:标签名' / 'p:页面slug'。
- * memberEnabled 传 settings.membersEnabled === '1'：true 时在「关于我」前渲染会员中心与排行榜入口。
+ * active 传 'home' / 'weibo' / 'archives' / 'guestbook' / 'links' / 'about' / 分类 slug / 'tag:标签名' / 'p:页面slug'。
  */
 export function siteNav(o: {
   cls: string
@@ -298,8 +292,7 @@ export function siteNav(o: {
   tags?: TagCount[]
   pages?: NavPage[]
   active?: string
-  memberEnabled?: boolean
-  /** compact 布局（主题逐个试点）：主条去微博（首页微博流自带「全部 →」入口）+ 会员药丸压轴，排行榜/随机降级到主题页脚 */
+  /** compact 布局（主题逐个试点）：主条去微博（首页微博流自带「全部 →」入口），随机降级到主题页脚 */
   compact?: boolean
   /** 吸顶导航（wechat 先行）：输出 data-xw-nav-sticky 标记，site.js 据此做下滚收起/上滑浮现（阅读工具条联动） */
   sticky?: boolean
@@ -333,10 +326,6 @@ export function siteNav(o: {
   const weiboItem = m === 'blog' ? '' : item('/weibo', ('微博'), o.active === 'weibo' || (m === 'weibo' && o.active === 'home'))
   const homeItem = m === 'weibo' ? '' : item('/', ('首页'), o.active === 'home')
   if (o.compact) {
-    // 会员走 accent 药丸（主题 CSS 塑形），与普通链接拉开视觉层级；is-active 口径与普通链接一致
-    const memberPill = o.memberEnabled
-      ? `<a class="${o.cls}-member${o.active === 'member' ? ' is-active' : ''}" href="/member">会员</a>`
-      : ''
     // 微博不单独进顶栏：混合模式首页已展示微博流（头部「全部 →」指向 /weibo），
     // 纯微博模式的「首页」本身就是微博（homeItem || weiboItem 兜底）
     return `<nav class="${o.cls}"${o.sticky ? ' data-xw-nav-sticky' : ''} aria-label="站点导航">
@@ -348,7 +337,6 @@ export function siteNav(o: {
   ${item('/guestbook', ('留言板'), o.active === 'guestbook')}
   ${item('/links', ('友情链接'), o.active === 'links')}
   ${rssIcon}
-  ${memberPill}
 </nav>`
   }
   return `<nav class="${o.cls}"${o.sticky ? ' data-xw-nav-sticky' : ''} aria-label="站点导航">
@@ -359,8 +347,6 @@ export function siteNav(o: {
   ${m === 'weibo' ? '' : drop}
   ${item('/links', ('友情链接'), o.active === 'links')}
   ${(o.pages || []).map((p) => item(p.href, p.title, o.active === p.key)).join('')}
-  ${o.memberEnabled ? item('/member', ('会员'), o.active === 'member') : ''}
-  ${o.memberEnabled ? item('/rank', ('排行榜'), o.active === 'rank') : ''}
   ${item('/about', ('关于我'), o.active === 'about')}
   ${m === 'weibo' ? '' : item('/random', ('随机'))}
   ${rssIcon}
@@ -877,17 +863,12 @@ function adminIdentity(name: string): string {
 }
 
 /** 会员登录时的发言身份行：结构与 adminIdentity 同构（蜜罐字段随行带上），徽标文案区分身份 */
-function memberIdentity(name: string): string {
-  return `<p class="cmt-as">以会员 <b>${esc(name)}</b> 的身份发言</p><input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">`
-}
-
-/** 卡片内折叠评论区骨架：列表与表单内容由 site.js 按需填充；adminName / memberName 传入时表单免填昵称（管理员优先）。
+/** 卡片内折叠评论区骨架：列表与表单内容由 site.js 按需填充；adminName 传入时表单免填昵称。
  *  showRegion 开启时在提示位预置「IP 属地」披露文案（site.js 提交/回复会覆盖提示位，属预期） */
 export function weiboCommentPanel(
   w: WeiboItemView,
   allowComments: boolean,
   adminName?: string,
-  memberName?: string,
 
   showRegion = false
 ): string {
@@ -899,9 +880,7 @@ export function weiboCommentPanel(
   ${
     adminName
       ? adminIdentity(adminName)
-      : memberName
-        ? memberIdentity(memberName)
-        : `<div class="wb-cmt-row">
+      : `<div class="wb-cmt-row">
     <input class="wb-cmt-input" name="nickname" maxlength="24" placeholder="昵称" required>
     <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
   </div>
@@ -925,7 +904,6 @@ export function weiboCards(o: {
   /** 登录管理员昵称：评论表单免填昵称，以作者身份发言；传入即在卡片上渲染管理操作（编辑/置顶/删除） */
   adminName?: string
   /** 登录会员昵称（管理员未登录时生效）：评论表单免填昵称，以会员身份发言 */
-  memberName?: string
 }): string {
   const name = o.settings.siteName || '微博'
   const allowComments = o.allowComments !== false
@@ -933,7 +911,7 @@ export function weiboCards(o: {
   return o.items
     .map((w) => {
       const foot = weiboCardFoot(w, isAdmin)
-      const panel = weiboCommentPanel(w, allowComments, o.adminName, o.memberName,  o.settings.showCommentRegion === '1')
+      const panel = weiboCommentPanel(w, allowComments, o.adminName, o.settings.showCommentRegion === '1')
       return `<article class="wb-card${w.pinned ? ' is-pinned' : ''}" id="wb-${w.id}">
   <header class="wb-head">
     <span class="wb-avatar">${o.avatarHtml}</span>
@@ -1005,7 +983,6 @@ export function weiboHomeFeed(o: {
   avatarHtml: string
   allowComments?: boolean
   adminName?: string
-  memberName?: string
 }): string {
   if (!o.items.length) return ''
   const cards = weiboCards({
@@ -1014,7 +991,6 @@ export function weiboHomeFeed(o: {
     avatarHtml: o.avatarHtml,
     allowComments: o.allowComments,
     adminName: o.adminName,
-    memberName: o.memberName,
   })
   return `<section class="wb-home-feed" aria-label="微博随手记">
   ${weiboHomeHead(o.total)}
@@ -1108,127 +1084,10 @@ export function searchFallbackHtml(o: {
   return parts.join('\n')
 }
 
-/* ---------------- 会员 / 排行榜（共享构建器） ----------------
- * 结构全主题共用（语义化 .mem-* / .rk-* class），视觉由主题 CSS 塑形。
- * 数据由会员服务端产出（members 表 / points，见 DEVPLAN-2026-10-07 附录 A 契约）；
- * 档位枚举 'all'|'coffee'|'top' / 'normal'|'coffee'|'top'，标签集中在这里，主题不手写文案。
- */
-
-export type MemberTier = 'normal' | 'coffee' | 'top'
-
-export const TIER_LABELS: Record<MemberTier, string> = {
-  normal: '普通会员',
-  coffee: '咖啡会员',
-  top: '付费会员',
-}
-
-/** 档位 → 展示文案：脏值/缺省一律按普通会员兜底（hasOwnProperty 防原型链穿透）；en 换英文档位名。
- *  自定义档位（会员 3.0 预备）的展示名不在枚举里，调用方直接传 tierName，此函数只兜历史三档 */
-export function tierLabel(tier: string | undefined | null): string {
-  const key = tier && Object.prototype.hasOwnProperty.call(TIER_LABELS, tier) ? (tier as MemberTier) : 'normal'
-  return TIER_LABELS[key]
-}
-
-/** 认证徽标（会员 3.0 预备，微博认证 V 风格）：带 ✓ 与档位色的小徽标，色值来自 tiers.ts
- *  白名单（#rgb/#rrggbb，非法已清空），进 style 属性安全。color 为空 = 用主题默认色（不加 style）。
- *  基础档（普通会员）不渲染本徽标——由调用方回落到既有的「会员」普通徽标 */
-export function tierBadgeHtml(name: string, color: string, cls: string): string {
-  const style = color ? ` style="color:${esc(color)};border-color:${esc(color)}"` : ''
-  return `<span class="${cls}"${style}>✓ ${esc(name)}</span>`
-}
-
-/** 会员中心「我的足迹 / 点赞 / 评论 / 回复」的统一条目：href 为空 = 目标已删，只出文字不出链接 */
-export interface MemberActivityItem {
-  title: string
-  href: string
-  /** 第二行摘要：评论/回复内容节选、点赞对象类型等 */
-  sub: string
-  ts: number
-  /** true = 待审（我的评论用） */
-  pending?: boolean
-}
-
-export interface MemberActivityView {
-  visits: MemberActivityItem[]
-  likes: MemberActivityItem[]
-  comments: MemberActivityItem[]
-  replies: MemberActivityItem[]
-}
-
-/** 会员身份视图（/member 页、评论表单、排行挂件共用）；服务端产出，渲染层只读。
- *  档位字段是**生效档位**（src/tiers.ts effectiveTier：过期即时降级基础档）的展示数据 */
-export interface MemberView {
-  nickname: string
-  tier: MemberTier | string
-  points: number
-  email?: string
-  /** P1 预留：会员自定义头像（无则退回昵称首字，与站点头像同款降级） */
-  avatarUrl?: string
-  /** 绑定的 QQ 号（本人视角才有——评论 / 榜单等公开面一律不携带，红线见 DEVPLAN） */
-  qq?: string
-  createdAt?: number
-  /** 上次改昵称时间（本人视角才有；null/缺省 = 从未改过，首次修改不受 30 天窗口限制） */
-  displayNameChangedAt?: number | null
-  /** 铁粉等级（3.0-M1，本人视角）：fanLevel 纯函数判定的名号与签到状态 */
-  fanName?: string
-  fanLevel?: number
-  activeDays?: number
-  checkinStreak?: number
-  checkedToday?: boolean
-  /** 生效档位展示名（普通会员 = 基础档名）；自定义档位时 ≠ tierLabel(tier) */
-  tierName?: string
-  /** 认证徽标色（#rgb/#rrggbb，基础档为空） */
-  tierColor?: string
-  /** true = 基础档（不渲染认证徽标，回落「会员」普通徽标） */
-  tierIsBase?: boolean
-  /** 档位有效期（毫秒，本人视角展示「有效期至」；null/缺省 = 永久） */
-  tierExpiresAt?: number | null
-  /** true = 档位已过有效期（能力已按降级后的档位生效，卡上出「已到期」提示） */
-  tierExpired?: boolean
-  /** 到期降级前的原档位名（如「咖啡会员」）：已过期时出「已到期，现按 X 生效」 */
-  tierDowngradedFrom?: string
-  /** 可升级的目标档名（优质会员 / 站长改过名的同类）：与 upgradeCost / paidNote 同时为空 = 不出升级卡 */
-  upgradeTargetName?: string
-  /** 积分兑换价格（0 / 缺省 = 积分兑换未开放） */
-  upgradeCost?: number
-  /** 付费获取的说明文案（缺省 = 不出付费一行）：本站无在线支付，读者线下付款后站长手动授予 */
-  paidNote?: string
-  /** 会员中心公告（settings.memberNotice，服务端已清洗，渲染层 esc） */
-  notice?: string
-  /** 会员活动中心（会员 3.0 预备）：足迹/点赞/评论/回复，服务端组好数据 */
-  activity?: MemberActivityView
-}
-
-/** 排行榜条目：rank 为服务端排好的名次（1 起）；选择隐藏自己的会员不出现在数据里 */
-export interface RankEntryView {
-  rank: number
-  nickname: string
-  tier: MemberTier | string
-  points: number
-  /** 会员头像（站内 /images/ 转存地址），空 = 首字图标 */
-  avatarUrl?: string
-  /** 当前访客本人行（榜单页高亮用） */
-  isMe?: boolean
-  /** 铁粉等级名（3.0-M1）：fanLevel 纯函数判定，缺省不出徽标 */
-  fanName?: string
-  /** 生效档位展示名与徽标色（自定义档位，服务端按 effectiveTier 解析好）；isBase 缺省按历史三档渲染 */
-  tierName?: string
-  tierColor?: string
-  tierIsBase?: boolean
-}
-
-/** 会员头像位：有 avatarUrl 用图片，否则退回昵称首字；cls 传主题侧样式类（如 mem-avatar） */
-export function memberAvatarHtml(m: MemberView, cls: string): string {
-  if (m.avatarUrl) return `<img class="${cls} ${cls}-img" src="${esc(variantUrl(m.avatarUrl, 192))}" alt="${esc(m.nickname)}">`
-  const ch = (m.nickname || '客').trim().charAt(0) || '客'
-  return `<span class="${cls}" aria-hidden="true">${esc(ch)}</span>`
-}
-
-/** 评论头像位（文章 / 留言板评论）：会员有站内头像用图；作者（管理员）发言用站点头像
- *  （settings.avatarUrl，与微博卡/后台侧栏同源）；其余退回昵称首字块。
+/** 评论头像位（文章 / 留言板评论）：作者（管理员）发言用站点头像（settings.avatarUrl，
+ *  与微博卡/后台侧栏同源）；游客有站内转存 QQ 头像用图；其余退回昵称首字块。
  *  site.js 的微博评论渲染是本函数的 ES5 手工镜像，改任一侧记得同步 */
 function commentAvatarHtml(c: CommentRow, adminAvatar?: string): string {
-  if (c.member_avatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(variantUrl(c.member_avatar, 192))}" loading="lazy" decoding="async" alt="">`
   if (c.is_admin && adminAvatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(variantUrl(adminAvatar, 192))}" alt="">`
   // 游客自填 QQ 抓取转存的站内头像（C2 扩展）：qq 本体永不出参，这里只会是 /images/ 地址
   if (c.avatar) return `<img class="cmt-avatar cmt-avatar-img" src="${esc(variantUrl(c.avatar, 192))}" loading="lazy" decoding="async" alt="">`
@@ -1236,249 +1095,6 @@ function commentAvatarHtml(c: CommentRow, adminAvatar?: string): string {
   return `<span class="cmt-avatar" aria-hidden="true">${esc(ch)}</span>`
 }
 
-/** 排行榜单行（/rank 页结构） */
-function rankRow(e: RankEntryView): string {
-  // 档位徽标：自定义档位（tierName 在场）按生效档位渲染——非基础档出带色认证徽标，基础档出普通 chip；
-  // 缺省（老数据/第三方调用）回落历史三档 tierLabel
-  const tierChip = e.tierName
-    ? e.tierIsBase
-      ? `<span class="rk-tier">${esc(e.tierName)}</span>`
-      : tierBadgeHtml(e.tierName, e.tierColor || '', 'rk-tier')
-    : `<span class="rk-tier">${tierLabel(e.tier)}</span>`
-  return `<li class="rk-item${e.rank <= 3 ? ` is-top${e.rank}` : ''}${e.isMe ? ' is-me' : ''}">
-  <span class="rk-no">${e.rank}</span>
-  ${memberAvatarHtml(e, 'rk-avatar')}
-  <span class="rk-name">${esc(e.nickname)}</span>
-  ${tierChip}${e.fanName ? `<span class="rk-tier rk-fan" title="铁粉等级">${esc(e.fanName)}</span>` : ''}
-  <b class="rk-pts">${e.points}</b>
-</li>`
-}
-
-/** /rank 完整榜单列表（页面壳由主题渲染）；空榜返回空串，由页面出空态文案 */
-export function rankListHtml(entries: RankEntryView[]): string {
-  if (!entries.length) return ''
-  return `<ol class="rk-list rk-list-page">${entries.map((e) => rankRow(e)).join('\n')}</ol>`
-}
-
-/** 昵称修改窗口的说明文案（30 天一次，天数从常量取防两处漂移）；冷却中附解禁日期 */
-function nicknameRuleText(m: MemberView): { allowed: boolean; text: string } {
-  const days = Math.round(NICKNAME_CHANGE_COOLDOWN_MS / 86_400_000)
-  const cd = nicknameCooldown(m.displayNameChangedAt)
-  if (cd.allowed)
-    return { allowed: true, text: `昵称中英文均可，每 ${days} 天可修改一次` }
-  return { allowed: false, text: `每 ${days} 天只能修改一次，${fmtDateCN(cd.nextAt)}后可再改` }
-}
-
-/** 活动中心条目行：href 在场 = 可点链接（目标存活），否则只出文字（目标已删/进回收站）。
- *  样式走内联（八主题零 CSS 改动），配色用 opacity 灰阶跟随主题前景色 */
-function memberActItem(it: MemberActivityItem): string {
-  const inner = `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.title)}</span><time style="font-size:11px;opacity:.45;flex-shrink:0;">${fmtDate(it.ts)}</time>${
-    it.pending ? `<span style="font-size:11px;flex-shrink:0;color:#b45309;border:1px solid currentColor;border-radius:999px;padding:0 6px;">待审</span>` : ''
-  }`
-  const row = it.href
-    ? `<a class="mem-act-link" href="${esc(it.href)}" style="display:flex;gap:8px;align-items:center;text-decoration:none;color:inherit;">${inner}</a>`
-    : `<span class="mem-act-link is-dead" style="display:flex;gap:8px;align-items:center;opacity:.5;">${inner}</span>`
-  return `<li style="list-style:none;padding:8px 0;border-top:1px solid rgba(128,128,128,.15);">${row}${
-    it.sub ? `<span style="display:block;font-size:12px;opacity:.55;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.sub)}</span>` : ''
-  }</li>`
-}
-
-/** 会员活动中心（会员 3.0 预备）：四组折叠卡，原生 <details> 无 JS 可用（CSP 禁内联脚本）；
- *  空组不渲染（新会员不看到一排「空空如也」） */
-function memberActivityHtml(a: MemberActivityView): string {
-  const groups: { title: string; items: MemberActivityItem[] }[] = [
-    { title: '我的足迹', items: a.visits },
-    { title: '我的点赞', items: a.likes },
-    { title: '我的评论', items: a.comments },
-    { title: '收到的回复', items: a.replies },
-  ]
-  return groups
-    .filter((g) => g.items.length)
-    .map(
-      (g) => `<details class="mem-card mem-act">
-  <summary style="cursor:pointer;font-weight:600;display:flex;justify-content:space-between;align-items:center;list-style:none;"><span>${esc(g.title)}</span><span style="font-size:12px;opacity:.45;">${g.items.length}</span></summary>
-  <ul style="margin:6px 0 0;padding:0;">${g.items.map((it) => memberActItem(it)).join('\n')}</ul>
-</details>`
-    )
-    .join('\n')
-}
-
-/** 会员中心（已登录态）：身份卡 + 每日签到 + 昵称修改卡 + QQ 头像卡 + 密码修改卡 + 活动中心。
- *  档位是**生效档位**（过期已降级）：非基础档出带色认证徽标，限时档出「有效期至 / 已过期」。
- *  各卡走 .mem-* 共享结构（与登录/注册表单同套样式），提交交互在 site.js */
-export function memberCardHtml(m: MemberView): string {
-  const rule = nicknameRuleText(m)
-  const dis = rule.allowed ? '' : ' disabled'
-  // 档位徽标：自定义档位（tierName 在场）按生效档位渲染；缺省回落历史三档 tierLabel
-  const tierChip = m.tierName
-    ? m.tierIsBase
-      ? `<span class="mem-tier" data-tier="${esc(m.tier)}">${esc(m.tierName)}</span>`
-      : tierBadgeHtml(m.tierName, m.tierColor || '', 'mem-tier')
-    : `<span class="mem-tier" data-tier="${esc(m.tier)}">${tierLabel(m.tier)}</span>`
-  // 有效期行：已过期必须出提示（此时生效档位已是降级后的档，tierIsBase 可能为 false，
-  // 不能因为「有徽标」就把提示挡掉）；未过期的限时档出「有效期至」；永久档不出。
-  // 过期文案走降级口径（咖啡会员到期 → 现按优质会员生效），不再说「恢复为基础会员」
-  const tierExpiry = m.tierExpired
-    ? `<p class="mem-email">${
-        `${esc(m.tierDowngradedFrom || '会员档位')}已到期，现按「${esc(m.tierName || '会员')}」生效；续费请联系站长`
-      }</p>`
-    : m.tierExpiresAt && !m.tierIsBase
-      ? `<p class="mem-email">有效期至 ${fmtDateCN(m.tierExpiresAt)}</p>`
-      : ''
-  // 升级卡（2026-11 第五批）：优质会员的三条来路——邀请码（注册时填）、积分兑换、付费（线下，站长手动授予）。
-  // 只在「当前档位低于目标档」且至少有一条来路可用时出现；已经是优质及以上就整块不出，不打扰
-  const canRedeem = !!(m.upgradeCost && m.upgradeCost > 0)
-  const upgradeCard =
-    m.upgradeTargetName && (canRedeem || m.paidNote)
-      ? `<section class="mem-card" data-member-upgrade>
-  <h2 class="mem-form-title">升级会员</h2>
-  ${
-    canRedeem
-      ? `<p class="mem-swap">${
-          `用 ${m.upgradeCost} 积分兑换「${esc(m.upgradeTargetName)}」，一次兑换永久有效`
-        }</p>
-  <p class="mem-swap" style="opacity:.7;">${`当前积分：${m.points}`}</p>
-  <button class="mem-btn" type="button" data-member-redeem${m.points < (m.upgradeCost || 0) ? ' disabled' : ''}>${
-          m.points < (m.upgradeCost || 0)
-            ? `还差 ${(m.upgradeCost || 0) - m.points} 积分`
-            : '立即兑换'
-        }</button>
-  <p class="mem-tip" data-member-redeem-tip aria-live="polite"></p>`
-      : ''
-  }
-  ${m.paidNote ? `<p class="mem-swap" style="opacity:.8;">${esc(m.paidNote)}</p>` : ''}
-</section>`
-      : ''
-  const notice = m.notice ? `<section class="mem-card mem-notice" style="border-left:3px solid rgba(128,128,128,.35);">${esc(m.notice)}</section>` : ''
-  return `${notice}
-<section class="mem-card" data-member-card>
-  <div class="mem-who">
-    ${memberAvatarHtml(m, 'mem-avatar')}
-    <div class="mem-main">
-      <b class="mem-name">${esc(m.nickname)}</b>
-      ${tierChip}${m.fanName ? `<span class="mem-tier mem-fan" title="铁粉等级">${esc(m.fanName)}</span>` : ''}
-    </div>
-    <div class="mem-points"><b>${m.points}</b><span>积分</span></div>
-  </div>
-  ${m.email ? `<p class="mem-email">${esc(m.email)}</p>` : ''}
-  ${m.createdAt ? (`<p class="mem-email">${fmtDateCN(m.createdAt)}加入</p>`) : ''}
-  ${tierExpiry}
-  <button class="mem-btn mem-btn-ghost" type="button" data-member-logout>退出登录</button>
-</section>
-${upgradeCard}
-<section class="mem-card" data-member-checkin${m.checkedToday ? ' data-checked="1"' : ''}>
-  <h2 class="mem-form-title">每日签到</h2>
-  <p class="mem-swap">${m.checkedToday
-    ? `Signed in today — streak ${m.checkinStreak ?? 0} day(s). Come back tomorrow.`
-    : `Check in for +2 points daily; 7-day streaks earn a bonus. Current streak: ${m.checkinStreak ?? 0}.`}</p>
-  <button class="mem-btn" type="button" data-member-checkin-btn${m.checkedToday ? ' disabled' : ''}>${m.checkedToday ? '已签到' : '签到领积分'}</button>
-  <p class="mem-tip" data-member-checkin-tip aria-live="polite"></p>
-</section>
-<section class="mem-card">
-  <h2 class="mem-form-title">修改昵称</h2>
-  <form data-member-nickname-form>
-    <input class="mem-input" name="nickname" maxlength="24" value="${esc(m.nickname)}" placeholder="昵称（中英文均可）" aria-label="昵称"${dis}>
-    <p class="mem-swap">${esc(rule.text)}</p>
-    <button class="mem-btn" type="submit"${dis}>保存昵称</button>
-    <p class="mem-tip" data-member-tip aria-live="polite"></p>
-  </form>
-</section>
-<section class="mem-card">
-  <h2 class="mem-form-title">QQ 头像</h2>
-  <form data-member-qq-form>
-    <input class="mem-input" name="qq" inputmode="numeric" maxlength="11" value="${esc(m.qq || '')}" placeholder="输入你的 QQ 号" aria-label="QQ 号">
-    <p class="mem-swap">${
-      m.qq
-        ? m.avatarUrl
-          ? '已绑定，头像会显示在评论区与排行榜'
-          : '已绑定但头像还没抓到，点下方按钮重试'
-        : '绑定后评论区与排行榜显示 QQ 头像；QQ 号仅用于抓取头像，不会公开展示'
-    }</p>
-    <button class="mem-btn" type="submit">${m.qq && !m.avatarUrl ? '重试头像' : '保存'}</button>
-    <p class="mem-tip" data-member-tip aria-live="polite"></p>
-  </form>
-</section>
-<section class="mem-card">
-  <h2 class="mem-form-title">修改密码</h2>
-  <form data-member-password-form>
-    <input class="mem-input" type="password" name="current" maxlength="72" placeholder="当前密码" autocomplete="current-password" required aria-label="当前密码">
-    <input class="mem-input" type="password" name="next" maxlength="72" placeholder="新密码（至少 8 位）" autocomplete="new-password" required aria-label="新密码（至少 8 位）">
-    <p class="mem-swap">本站不提供密码找回，请务必记好新密码；修改成功后其他设备将退出登录</p>
-    <button class="mem-btn" type="submit">确认修改</button>
-    <p class="mem-tip" data-member-tip aria-live="polite"></p>
-  </form>
-</section>${m.activity ? `\n${memberActivityHtml(m.activity)}` : ''}`
-}
-
-/** 会员登录 / 注册双表单（未登录态）：提交与切换交互在 site.js；蜜罐字段照评论表单口径（name=link）。
- *  注册可填昵称（选填，中英文均可，不占用 30 天修改窗口），密码无找回的提醒放在提交键旁。
- *  o.settings（会员 3.0 预备）：带 settings 时渲染会员公告、按 memberRegOpen 收起注册表单——
- *  主题侧把 MemberData 原样传入即可，不传保持历史行为 */
-export function memberAuthHtml( o?: { settings?: SettingsMap }): string {
-  const s = o?.settings
-  const notice = s?.memberNotice?.trim() ? `<section class="mem-card mem-notice" style="border-left:3px solid rgba(128,128,128,.35);">${esc(s.memberNotice.trim())}</section>` : ''
-  const regOpen = !s || s.memberRegOpen !== '0'
-  // 注册表单**总是渲染**：关闭开放注册时它变成「凭邀请码注册」的入口——
-  // 做邀请制的站不该为了发码而把注册重新放开，也不该让持码的人找不到入口
-  const registerForm = `<form class="mem-card mem-form" data-member-form="register">
-    <h2 class="mem-form-title">注册会员</h2>
-    ${regOpen ? '' : `<p class="mem-swap" style="margin-top:0;">本站为邀请制：填写邀请码即可注册</p>`}
-    <input class="mem-input" name="username" maxlength="24" placeholder="用户名（2-24 位字母、数字、_ 或 -）" autocomplete="username" required aria-label="用户名">
-    <input class="mem-input" name="nickname" maxlength="24" placeholder="昵称（选填，中英文均可）" aria-label="昵称（选填，中英文均可）">
-    <input class="mem-input" type="password" name="password" maxlength="72" placeholder="密码（至少 8 位）" autocomplete="new-password" required aria-label="密码">
-    <input class="mem-input" type="email" name="email" maxlength="100" placeholder="邮箱（必填，用于识别会员身份）" autocomplete="email" required aria-label="邮箱（必填）">
-    <input class="mem-input" type="email" name="emailConfirm" maxlength="100" placeholder="再次输入邮箱" autocomplete="off" spellcheck="false" required aria-label="再次输入邮箱">
-    <input class="mem-input" name="inviteCode" maxlength="12" placeholder="邀请码（选填，填了可直接获得对应档位）" autocomplete="off" spellcheck="false" style="text-transform:uppercase;" aria-label="邀请码">
-    <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="mem-btn" type="submit">注册并登录</button>
-    <p class="mem-swap">密码一旦遗失无法找回，请务必记好</p>
-    <p class="mem-swap">已有账号？<button type="button" class="mem-swap-btn" data-member-swap="login">去登录</button></p>
-    <p class="mem-tip" data-member-tip aria-live="polite"></p>
-  </form>`
-  return `<section class="mem-auth">
-  ${notice}
-  <form class="mem-card mem-form" data-member-form="login">
-    <h2 class="mem-form-title">登录</h2>
-    <input class="mem-input" name="username" maxlength="24" placeholder="用户名" autocomplete="username" required aria-label="用户名">
-    <input class="mem-input" type="password" name="password" maxlength="72" placeholder="密码" autocomplete="current-password" required aria-label="密码">
-    <input class="cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
-    <button class="mem-btn" type="submit">登录</button>
-    <p class="mem-swap">${regOpen ? `还没有账号？<button type="button" class="mem-swap-btn" data-member-swap="register">注册一个</button>` : `本站为邀请制<button type="button" class="mem-swap-btn" data-member-swap="register">凭邀请码注册</button>`}</p>
-    <p class="mem-tip" data-member-tip aria-live="polite"></p>
-  </form>
-  ${registerForm}
-</section>`
-}
-
-/** 付费墙遮挡卡：locked 文章在试读段之后的升级提示（正文已被服务端截断，浏览器拿不到全文）。
- *  CTA 统一指向 /member。档位名解析：o.settings 在场（主题把 PostData 原样传入）时按自定义档位
- *  定义（settings.memberTiers）取展示名，'member' 伪档 = 任意登录会员；缺省回落历史三档文案 */
-export function paywallHtml(minTier: string | undefined | null,  o?: { settings?: SettingsMap }): string {
-  let tierName: string
-  const key = (minTier || '').trim()
-  if (o?.settings) {
-    if (key === 'member') tierName = ('会员')
-    else tierName = tierByKey(parseMemberTiers(o.settings.memberTiers), key)?.name ?? tierLabel(key)
-  } else {
-    tierName = (key === 'top'
-        ? TIER_LABELS.top
-        : key === 'member'
-          ? '会员'
-          : TIER_LABELS.coffee)
-  }
-  return `<section class="paywall" aria-label="会员专属内容">
-  <svg class="paywall-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/><circle cx="12" cy="15.5" r="1.3"/></svg>
-  <h2 class="paywall-title">${`${esc(tierName)}专属内容`}</h2>
-  <p class="paywall-text">${
-    `本文剩余部分仅限${esc(tierName)}阅读。已是会员？登录后继续；还不是会员？加入即可解锁。`
-  }</p>
-  <a class="paywall-cta" href="/member">登录 / 加入会员</a>
-</section>`
-}
-
-/* ---------------- 历史上的今天（首页时光机卡，共享构建器） ----------------
- * 结构全主题共用（语义化 .otd-* class），视觉由主题 CSS 塑形；没有命中时不渲染。
- */
 export interface OnThisDayItemView {
   kind: 'post' | 'weibo'
   href: string
@@ -1613,15 +1229,6 @@ export function pagerHtml(c: PagerContext): string {
  * - isAdmin：当前访客为管理员，渲染每条留言的「回复」按钮（site.js 接管交互）
  * - guestbook：留言板页（/guestbook）复用同一套结构，表单提交到 /api/public/guestbook
  */
-/** 评论区会员徽标（commentsHtml 内部件）：档位定义在场时按生效档位渲染——非基础档出带色认证
- *  徽标（会员 3.0 预备，过期即时降级），基础档回落「会员」普通徽标；缺省定义保持历史文案 */
-function memberCommentBadge(c: CommentRow, tiers: MemberTierDef[] | undefined): string {
-  if (!tiers) return `<span class="cmt-badge">会员</span>`
-  const eff = effectiveTier(tiers, c.member_tier, c.member_tier_expires_at ?? null)
-  if (eff.isBase) return `<span class="cmt-badge">会员</span>`
-  return tierBadgeHtml(eff.name, eff.color, 'cmt-badge')
-}
-
 export function commentsHtml(o: {
   comments: CommentRow[]
   slug: string
@@ -1630,8 +1237,6 @@ export function commentsHtml(o: {
   isAdmin?: boolean
   /** 登录管理员昵称：表单免填昵称，以作者身份发言 */
   adminName?: string
-  /** 登录会员昵称（管理员未登录时生效）：表单免填昵称，以会员身份发言 */
-  memberName?: string
   /** 站点头像（settings.avatarUrl）：作者（管理员）评论的头像位用它，与微博卡同源 */
   adminAvatar?: string
   title?: string
@@ -1641,14 +1246,6 @@ export function commentsHtml(o: {
   /** 展示评论 IP 属地（settings.showCommentRegion）：标签由 ipRegionLabel 单点格式化，
    *  关闭时不渲染；采集与出参门控见 api.ts */
   showRegion?: boolean
-  /** 会员档位定义（会员 3.0 预备）：在场时评论区会员徽标按生效档位渲染（非基础档出带色认证徽标）；
-   *  缺省回落历史「会员」普通徽标 */
-  tiers?: MemberTierDef[]
-  /** 评论区会员徽标开关（settings.showMemberBadge，缺省开）：关闭时会员/档位徽标整体不渲染 */
-  showBadge?: boolean
-  /** 当前读者的圈层等级（src/commentgate.ts：0 = 游客）：只影响遮罩占位块的第二行提示
-   *  （游客→登录会员后可见 / 低档会员→升级档位后可见）。遮罩本身由服务端 applyCommentGate 决定 */
-  gateViewerRank?: number
 }): string {
   const tops = o.comments.filter((c) => !c.parent_id)
   const children = new Map<number, CommentRow[]>()
@@ -1665,23 +1262,15 @@ export function commentsHtml(o: {
   for (const c of orphans) tops.push({ ...c, parent_id: 0 })
 
   const renderItem = (c: CommentRow, floor?: number): string => {
-    // 徽标：作者优先（文章语境叫「楼主」，留言板没有楼层的概念沿用「作者」）；会员评论（member_id > 0 时列表查询带出
-    // member_tier，契约 DEVPLAN 附录 A）带会员徽标——档位定义在场时按生效档位出认证徽标（会员 3.0 预备），
-    // showBadge 关闭时整体不渲染。楼层号只标顶层评论（盖楼的是一楼一层，楼中楼不占号）
-    const badge = c.is_admin
-      ? `<span class="cmt-badge">${o.guestbook ? '作者' : '楼主'}</span>`
-      : c.member_tier && o.showBadge !== false
-        ? memberCommentBadge(c, o.tiers)
-        : ''
-    // 操作键：登录管理员有回复 + 删除；登录会员有回复（会员 3.0 起可回复楼中楼，游客没有按钮）
-    // 只对登录身份渲染（访客 HTML 里不存在）。前台删评论走后台 /api/admin/comments/:id（会话鉴权）
-    const replyBtn = `<button class="cmt-reply-btn" type="button" data-reply="${c.id}" data-name="${esc(c.nickname)}">回复</button>`
+    // 徽标：作者（文章语境叫「楼主」，留言板没有楼层的概念沿用「作者」）。楼层号只标顶层评论
+    //（盖楼的是一楼一层，楼中楼不占号）
+    const badge = c.is_admin ? `<span class="cmt-badge">${o.guestbook ? '作者' : '楼主'}</span>` : ''
+    // 操作键：登录管理员有回复 + 删除；只对登录身份渲染（访客 HTML 里不存在）。
+    // 前台删评论走后台 /api/admin/comments/:id（会话鉴权）
     const adminBtns = o.isAdmin
-      ? `${replyBtn}
+      ? `<button class="cmt-reply-btn" type="button" data-reply="${c.id}" data-name="${esc(c.nickname)}">回复</button>
     <button class="cmt-del-btn" type="button" data-cmt-del="${c.id}" title="删除这条评论（其下回复一并删除，不可恢复）">删除</button>`
-      : o.memberName
-        ? replyBtn
-        : ''
+      : ''
     const kids = children.get(c.id) || []
     // IP 属地：与楼号同款小灰字（复用内联样式，七主题零改动）；开关关闭或无快照（旧评论/自托管）不渲染
     const region = o.showRegion ? ipRegionLabel(c.ip_region || '') : ''
@@ -1694,25 +1283,6 @@ export function commentsHtml(o: {
     ${floor ? `<span class="cmt-floor" style="font-size:11px;opacity:0.45;font-variant-numeric:tabular-nums">#${floor}</span>` : ''}
     ${btns}
   </div>`
-    // 圈层遮罩（src/commentgate.ts）：正文与回复都不出 HTML——content 在服务端已被清空，这里
-    // 只画占位块（同付费墙 teaserHtml 口径：浏览器里根本没有原文）。昵称 / 档位徽标 / 时间照常露，
-    // 读者知道「圈子里有谁在聊」
-    if (c.gated) {
-      const g = commentGateText(c.gate_tier_name || '', o.gateViewerRank || 0)
-      const more = c.gate_hidden
-        ? `<div class="cmt-gate-more" style="font-size:12px;opacity:0.55;margin-top:6px">${esc(
-            commentGateMoreText(c.gate_tier_name || '', c.gate_hidden)
-          )}</div>`
-        : ''
-      return `<li class="cmt-item cmt-item-gated" id="cmt-${c.id}">
-  ${head('')}
-  <div class="cmt-gate" style="border:1px dashed currentColor;border-radius:8px;padding:8px 10px;opacity:0.6;font-size:13px;line-height:1.6">
-    <span>${esc(g.title)}</span>
-    <span style="display:block;font-size:11px;opacity:0.75;margin-top:2px">${esc(g.hint)}</span>
-  </div>
-  ${more}
-</li>`
-    }
     return `<li class="cmt-item" id="cmt-${c.id}">
   ${head(adminBtns)}
   <div class="cmt-body">${replaceEmoji(esc(c.content))}</div>
@@ -1727,9 +1297,7 @@ export function commentsHtml(o: {
   ${
     o.adminName
       ? adminIdentity(o.adminName)
-      : o.memberName
-        ? memberIdentity(o.memberName)
-        : `<div class="cmt-form-row">
+      : `<div class="cmt-form-row">
     <input class="cmt-input" name="nickname" maxlength="24" placeholder="昵称" required>
     <input class="cmt-input cmt-hp" name="link" tabindex="-1" autocomplete="off" aria-hidden="true">
   </div>

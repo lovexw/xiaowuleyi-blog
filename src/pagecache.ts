@@ -1,5 +1,5 @@
 import type { MiddlewareHandler } from 'hono'
-import { MEMBER_SESSION_COOKIE, SESSION_COOKIE } from './auth'
+import { SESSION_COOKIE } from './auth'
 import { getSettings, PAGE_CACHE_EPOCH_KEY, saveSettings } from './db'
 import { nodeMemoryCache } from './memory-cache'
 import { GATE_COOKIE } from './protect'
@@ -52,7 +52,7 @@ export const PAGE_CACHE_TTL_S = 1800
 
 /** 可缓存的公开页面路由白名单：新增公开页要过一遍「这个页对匿名访客是否千人一面」 */
 const CACHEABLE_PAGE_RE =
-  /^(\/|\/tag\/[^/]+|\/category\/[^/]+|\/post\/[^/]+|\/page\/[^/]+|\/about|\/archives|\/guestbook|\/weibo|\/links|\/member|\/rank|\/search)$/
+  /^(\/|\/tag\/[^/]+|\/category\/[^/]+|\/post\/[^/]+|\/page\/[^/]+|\/about|\/archives|\/guestbook|\/weibo|\/links|\/search)$/
 
 /**
  * 可缓存的订阅源与公开只读 API（P0-2 扩面）：URL 规整、匿名千人一面。
@@ -156,11 +156,7 @@ export function pageCacheKeyFor(input: {
   }
   if (!CACHEABLE_PAGE_RE.test(u.pathname) && !CACHEABLE_DATA_RE.test(u.pathname)) return null
   const cookie = input.cookie
-  if (
-    cookie.includes(SESSION_COOKIE) ||
-    cookie.includes(MEMBER_SESSION_COOKIE) ||
-    cookie.includes(GATE_COOKIE)
-  ) {
+  if (cookie.includes(SESSION_COOKIE) || cookie.includes(GATE_COOKIE)) {
     return null
   }
   const q = normalizeCacheQuery(u.searchParams)

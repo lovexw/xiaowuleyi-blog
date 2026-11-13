@@ -9,26 +9,15 @@
 import { getSettings, saveSettings } from './db'
 import { fireBackupCompleted } from './hooks'
 import { notifyAdminText } from './external'
-import { purgeExpiredSessions, purgeExpiredMemberSessions } from './auth'
+import { purgeExpiredSessions } from './auth'
 import type { Env } from './types'
 import { fmtDate, isoDate } from './utils'
 
 const BACKUP_PREFIX = 'backups/'
 const KEEP_FILES = 30
-// 会话表是临时凭证（管理员的 sessions 与会员的 member_sessions）、tg_buffer 是相册合并缓冲，都不值得备份
+// 会话表是临时凭证（sessions）、tg_buffer 是相册合并缓冲，都不值得备份
 const BACKUP_TABLES = [
   'users',
-  'members',
-  'member_points_log',
-  'member_visits',
-  'member_likes',
-  // 邀请码与核销明细是运营资产：漏了它们，换服务器后所有已发出的码与使用记录全丢
-  // （且 used_count 与 members 的档位来源对不上，无法追溯谁凭哪个码进来的）
-  'invite_codes',
-  'invite_uses',
-  // 跨站继承流水（src/partner.ts）：换机器后 members 里的 remote_issuer/remote_subject 还在，
-  // 但流水丢了就没法回答「这个永久会员是谁给他开的」——审计数据同积分账本口径
-  'partner_grants',
   'posts',
   'pages',
   'comments',
@@ -105,10 +94,9 @@ export async function runBackup(env: Env): Promise<BackupResult> {
 
 /** Cron 入口：备份失败 / 表超限截断时尽量推一条 Telegram 给站长（成功不打扰） */
 export async function scheduledBackup(_controller: unknown, env: Env): Promise<void> {
-  // 顺带清理过期会话（管理员 + 会员，一天一次足够），失败不影响备份
+  // 顺带清理过期会话（一天一次足够），失败不影响备份
   try {
     await purgeExpiredSessions(env.DB)
-    await purgeExpiredMemberSessions(env.DB)
   } catch {
     /* ignore */
   }

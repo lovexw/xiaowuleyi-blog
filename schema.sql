@@ -7,7 +7,6 @@ CREATE TABLE IF NOT EXISTS users (
   salt          TEXT    NOT NULL,
   display_name  TEXT    NOT NULL DEFAULT '',
   avatar        TEXT    NOT NULL DEFAULT '',
-  role          TEXT    NOT NULL DEFAULT 'admin', -- 多作者（3.0-M1）：admin = 站长（全部权限）；author = 作者（内容面可用，管理面 403，见 docs/DEVPLAN-3.0.md 权限矩阵）
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
@@ -22,141 +21,6 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_expiry ON sessions (expires_at);
 -- 登录时「清本账号过期会话 + 计活跃会话数」都按 user_id 过滤，没这条索引就扫整张会话表
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at);
-
--- 会员：访客注册的站内身份。架构红线：与 users/sessions 彻底分离（users 只承载管理员，
--- /api/auth/setup 靠 countUsers()===0 判断首装，游客混入会破坏部署初始化流程），见 docs/ROADMAP.md 会员体系小节
-CREATE TABLE IF NOT EXISTS members (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  username      TEXT    NOT NULL UNIQUE,
-  password_hash TEXT    NOT NULL,
-  salt          TEXT    NOT NULL,
-  email         TEXT    NOT NULL DEFAULT '',          -- 可选；邮件服务（B1）落地后启用验证与找回
-  display_name  TEXT    NOT NULL DEFAULT '',          -- 前台展示名，空 = 用 username
-  avatar        TEXT    NOT NULL DEFAULT '',          -- 头像地址（站内 /images/ 或外链），空 = 首字图标
-  qq            TEXT    NOT NULL DEFAULT '',          -- 绑定的 QQ 号（仅头像抓取记账位，任何公开出参不携带）
-  tier          TEXT    NOT NULL DEFAULT 'normal',    -- 档位 key（src/tiers.ts 自定义档位：settings.memberTiers 定义，顺序即等级）
-  tier_expires_at INTEGER,                             -- 档位有效期（毫秒；NULL = 永久/不失效）。过期在读侧即时降级为基础档（不靠 cron）
-  tier_source   TEXT    NOT NULL DEFAULT '',           -- 档位来源：register 注册自带 / invite 邀请码 / points 积分兑换 / paid 付费 / partner 跨站继承 / manual 后台手改（空 = 历史数据）
-  remote_issuer TEXT    NOT NULL DEFAULT '',           -- 跨站会员继承（src/partner.ts）：来源站标识，如 btchao；空 = 本地原生会员
-  remote_subject TEXT   NOT NULL DEFAULT '',           -- 来源站的会员 id（稳定不变，用户名可改但 id 不改）
-  points        INTEGER NOT NULL DEFAULT 0,           -- 当前积分余额（冗余，明细在 member_points_log）
-  status        TEXT    NOT NULL DEFAULT 'active',    -- active | banned（封禁后禁登录与评论，历史评论保留）
-  created_at    INTEGER NOT NULL,
-  updated_at    INTEGER NOT NULL,
-  last_login_at INTEGER,
-  display_name_changed_at INTEGER,                   -- 上次改昵称时间（30 天一次，src/utils.ts NICKNAME_CHANGE_COOLDOWN_MS）；NULL = 从未改过，首次修改不受限
-  active_days    INTEGER NOT NULL DEFAULT 0,          -- 铁粉体系（DEVPLAN-3.0）：累计活跃天数（北京日，登录/签到各计一天，条件更新幂等）
-  last_active_day TEXT   NOT NULL DEFAULT '',          -- 最近活跃日（YYYY-MM-DD 北京墙上日期）
-  checkin_streak INTEGER NOT NULL DEFAULT 0,           -- 连续签到天数（断签归 1 重来）
-  last_checkin_day TEXT  NOT NULL DEFAULT ''           -- 最近签到日（同北京墙上日期口径）
-);
-CREATE INDEX IF NOT EXISTS idx_members_points ON members (points DESC);
--- 跨站认领按邮箱找本地会员（src/partner.ts）：注册只 trim 没 lower，历史数据大小写混着有，
--- 比较走 LOWER(email) —— 表达式索引才对得上；空邮箱不进索引（未填邮箱的会员不参与认领）
-CREATE INDEX IF NOT EXISTS idx_members_email_lower ON members (LOWER(email)) WHERE email <> '';
-
--- 会员会话：独立于管理员 sessions（Cookie xw_member_session），独立 TTL 与清理，互不干扰
-CREATE TABLE IF NOT EXISTS member_sessions (
-  -- token 存 SHA-256（同 sessions）
-  token      TEXT    PRIMARY KEY,
-  member_id  INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_member_sessions_expiry ON member_sessions (expires_at);
--- 会员登录同款膨胀防护：按 member_id 清过期 + 计活跃会话数
-CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at);
-
--- 跨站会员继承队列 + 流水（src/partner.ts，分站模式）：来源站推送过来的一条记录。
--- member_id 0 = 待认领（本站还没有这个邮箱的会员）/ -1 = 认领冲突（该来源会员已绑别的账号）/ 正数 = 已授予的本地会员 id。
--- 既是队列也是审计流水，后台「跨站继承」页直接读它；两站会员表互不读写，关联只落在 members.remote_* 上
-CREATE TABLE IF NOT EXISTS partner_grants (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  issuer     TEXT    NOT NULL,                     -- 来源站标识（如 btchao）
-  subject    TEXT    NOT NULL,                     -- 来源站的会员 id
-  email      TEXT    NOT NULL DEFAULT '',          -- 认领键（归一化小写；空 = 来源站会员没填邮箱）
-  member_id  INTEGER NOT NULL DEFAULT 0,           -- 见上：0 待认领 / -1 冲突 / 正数已认领
-  tier       TEXT    NOT NULL DEFAULT '',          -- 授予的档位 key（必须存在于本站 memberTiers）
-  note       TEXT    NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  claimed_at INTEGER
-);
--- 同一来源会员只留一条：重复推送按更新处理（来源站改档位/邮箱再推一次）
-CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_grants_subject ON partner_grants (issuer, subject);
-CREATE INDEX IF NOT EXISTS idx_partner_grants_email ON partner_grants (email, member_id);
-
--- 积分账本：每笔变动一条（规则键常量表在 src/points.ts），余额冗余在 members.points；
--- delta 可为负（扣减 / 管理员调整），ref_id 关联对象（评论 id 等），0 = 无
-CREATE TABLE IF NOT EXISTS member_points_log (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  member_id  INTEGER NOT NULL,
-  delta      INTEGER NOT NULL,
-  reason     TEXT    NOT NULL DEFAULT '',
-  ref_id     INTEGER NOT NULL DEFAULT 0,
-  note       TEXT    NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_points_log_member ON member_points_log (member_id, created_at);
--- 记分幂等（评论 ref_id=评论 id、每日登录 ref_id=北京日序号）；db.ts SCHEMA_INDEXES 有同款，两处同步
-CREATE UNIQUE INDEX IF NOT EXISTS idx_points_log_dedup ON member_points_log (member_id, reason, ref_id) WHERE ref_id > 0;
-
--- 会员浏览足迹（会员中心「我的足迹」）：会员登录后浏览已发布文章记一行，同会员同文章同北京日
--- 只有一行（唯一索引去重，重复浏览仅刷新 ts/title）。title 是浏览时的快照——文章改名/删除后足迹仍可读
--- （LEFT JOIN posts 取 slug，文章没了就不出链接）。滚动保留 90 天（每晚备份 cron 清理）
-CREATE TABLE IF NOT EXISTS member_visits (
-  id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  member_id  INTEGER NOT NULL,
-  post_id    INTEGER NOT NULL,
-  day        TEXT    NOT NULL DEFAULT '',  -- 北京日 YYYY-MM-DD（fanDay 口径），去重键的一部分
-  ts         INTEGER NOT NULL,             -- 最近一次浏览时间（毫秒）
-  title      TEXT    NOT NULL DEFAULT ''   -- 浏览时的文章标题快照
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_member_visits_dedup ON member_visits (member_id, post_id, day);
-CREATE INDEX IF NOT EXISTS idx_member_visits_member ON member_visits (member_id, ts DESC);
-
--- 会员点赞记录（会员中心「我的点赞」）：登录会员点赞文章/微博记一行，取消赞删行。
--- 目标是否存活由读侧 LEFT JOIN 判定（删了就不出链接，记录保留）
-CREATE TABLE IF NOT EXISTS member_likes (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  member_id   INTEGER NOT NULL,
-  target_type TEXT    NOT NULL DEFAULT 'post', -- post | weibo
-  target_id   INTEGER NOT NULL,
-  created_at  INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_member_likes_dedup ON member_likes (member_id, target_type, target_id);
-CREATE INDEX IF NOT EXISTS idx_member_likes_member ON member_likes (member_id, created_at DESC);
-
--- 注册邀请码（2026-11，src/invite.ts）：后台生成，持码注册直接拿到码上指定的档位（默认优质会员）。
--- 核销次数：max_uses = 1 一码一人（默认）；= 0 不限次数（发给会员群当福利码）；N >= 2 限量 N 次。
--- used_count 是已核销次数（冗余计数，原子核销拿它做条件判断）；used_at / used_by 记**最近一次**核销，
--- 完整明细在 invite_uses。used_by_name 是注册时的用户名快照——会员被删后仍能看出「这码被谁用了」
-CREATE TABLE IF NOT EXISTS invite_codes (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  code         TEXT    NOT NULL UNIQUE,            -- 大写字母数字（去掉易混字符），全局唯一
-  tier         TEXT    NOT NULL DEFAULT 'premium', -- 注册后授予的档位 key
-  note         TEXT    NOT NULL DEFAULT '',        -- 后台备注（发给谁 / 用途）
-  max_uses     INTEGER NOT NULL DEFAULT 1,         -- 可核销次数，0 = 不限
-  used_count   INTEGER NOT NULL DEFAULT 0,         -- 已核销次数
-  created_at   INTEGER NOT NULL,
-  expires_at   INTEGER,                            -- 码自身的失效时间，NULL = 不过期
-  used_at      INTEGER,                            -- 最近一次核销时间，NULL = 从未使用
-  used_by      INTEGER NOT NULL DEFAULT 0,         -- 最近一次核销的会员 id，0 = 无
-  used_by_name TEXT    NOT NULL DEFAULT ''         -- 最近一次核销时的用户名快照
-);
-CREATE INDEX IF NOT EXISTS idx_invite_used ON invite_codes (used_at, created_at DESC);
-
--- 邀请码核销明细（每次成功核销一条）：一码多人时靠它回查「谁凭这个码进来的」，
--- 也是「注册成功但没档位」这类事故的唯一对账依据。删码不删明细（账留着）
-CREATE TABLE IF NOT EXISTS invite_uses (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  invite_id   INTEGER NOT NULL,                    -- invite_codes.id（删码后成为孤儿行，保留）
-  code        TEXT    NOT NULL DEFAULT '',         -- 码快照（删码后仍可读）
-  member_id   INTEGER NOT NULL DEFAULT 0,
-  member_name TEXT    NOT NULL DEFAULT '',         -- 注册时的用户名快照
-  tier        TEXT    NOT NULL DEFAULT '',         -- 该次核销实际授予的档位 key
-  created_at  INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_invite_uses_invite ON invite_uses (invite_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS posts (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -197,7 +61,6 @@ CREATE TABLE IF NOT EXISTS comments (
   weibo_id   INTEGER NOT NULL DEFAULT 0,  -- 微博评论；文章评论固定为 0
   parent_id  INTEGER NOT NULL DEFAULT 0,  -- 楼中楼：父评论 id，0 = 顶层（作者回复用）
   is_admin   INTEGER NOT NULL DEFAULT 0,  -- 1 = 作者（管理员）发言，前台加徽标
-  member_id  INTEGER NOT NULL DEFAULT 0,  -- 会员身份：0 = 游客，>0 = members.id（评论自动带会员昵称/头像/徽标）
   nickname   TEXT    NOT NULL,
   email      TEXT    NOT NULL DEFAULT '',
   website    TEXT    NOT NULL DEFAULT '',
@@ -214,11 +77,10 @@ CREATE INDEX IF NOT EXISTS idx_comments_post ON comments (post_id, created_at);
 -- 本文件对老库执行时该列可能尚不存在，在这里建索引会直接报错
 -- idx_comments_weibo 由 src/db.ts ensureSchema() 在运行时创建：
 -- 老库执行本文件时 weibo_id 列尚不存在（ALTER 由运行时补齐），在这里建索引会报错
--- （idx_comments_member 同理：挂在运行时补齐的 member_id 列上，只进 db.ts SCHEMA_INDEXES）
 CREATE INDEX IF NOT EXISTS idx_comments_status ON comments (status, created_at DESC);
 -- idx_comments_parent（楼中楼级联删除 DELETE WHERE id = ? OR parent_id = ? 的 MULTI-INDEX OR 依赖，
 -- 没有它 OR 全表扫）只进 db.ts SCHEMA_INDEXES：parent_id 在老库是运行时 ALTER 补的列，
--- schema.sql 在部署时对老库执行时该列尚不存在，在这里建索引会报错（同 weibo_id / member_id 的归位规矩）
+-- schema.sql 在部署时对老库执行时该列尚不存在，在这里建索引会报错（同 weibo_id 的归位规矩）
 
 CREATE TABLE IF NOT EXISTS categories (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -5,10 +5,8 @@ import type {
   CategoryLink,
   FriendLinkView,
   HomePostView,
-  MemberView,
   NavPage,
   OnThisDayItemView,
-  RankEntryView,
   SearchSort,
   TagCount,
   WeiboItemView,
@@ -218,32 +216,6 @@ export interface GuestbookData {
 }
 
 /** 会员中心页（/member）：member 为 null 渲染登录/注册双表单（memberAuthHtml），否则渲染会员卡（memberCardHtml） */
-export interface MemberData {
-  settings: SettingsMap
-  categories: CategoryLink[]
-  pages?: NavPage[]
-  tags?: TagCount[]
-  /** 导航高亮：会员中心页传 'member' */
-  navActive?: string
-  /** 当前登录会员（服务端会话解析产出）；null = 未登录 */
-  member: MemberView | null
-}
-
-/** 排行榜页（/rank）：会员积分总榜，entries 已按 points 倒序、rank 已排好名次 */
-export interface RankData {
-  settings: SettingsMap
-  categories: CategoryLink[]
-  pages?: NavPage[]
-  tags?: TagCount[]
-  /** 导航高亮：排行榜页传 'rank' */
-  navActive?: string
-  entries: RankEntryView[]
-  /** 上榜会员总数（页头副标题用） */
-  total: number
-  /** 当前访客在榜上的自己（未上榜/未登录为 null；本人行同时带 isMe 标记） */
-  me?: RankEntryView | null
-}
-
 /**
  * 主题注册表 —— 新增主题：
  * 1. 在 src/themes/ 下新建 mytheme.ts + mytheme.css，从本文件 import 上述 *Data 类型
@@ -266,10 +238,6 @@ export interface ThemeModule {
   page(d: PageData): string
   archives(d: ArchivesData): string
   guestbook(d: GuestbookData): string
-  /** 会员中心页（/member）：可省略，运行时兜底通用版 */
-  member?(d: MemberData): string
-  /** 排行榜页（/rank）：可省略，运行时兜底通用版 */
-  rank?(d: RankData): string
 }
 
 export const THEMES: Record<string, ThemeModule> = {

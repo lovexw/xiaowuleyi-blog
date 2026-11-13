@@ -1,6 +1,6 @@
 import type { SettingsMap } from '../types'
 import type { PostSort } from '../db'
-import type { AboutData, ArchivesData, GuestbookData, HomeData, LinksData, MemberData, PageData, PostData, RankData, WeiboData } from './registry'
+import type { AboutData, ArchivesData, GuestbookData, HomeData, LinksData, PageData, PostData, WeiboData } from './registry'
 import {
   archiveListHtml,
   categoryLink,
@@ -16,18 +16,14 @@ import {
   homeSortBar,
   likesBtn,
   markHtml,
-  memberAuthHtml,
-  memberCardHtml,
   onThisDayCard,
   pagerHtml,
-  paywallHtml,
 
   yearStatsSuffix,
   footCardHtml,
   newSiteGuideHtml,
   postNeighborsHtml,
   heatmapHtml,
-  rankListHtml,
   shareBtn,
   siteMode,
   siteNav,
@@ -147,7 +143,7 @@ export function home(d: HomeData): string {
 
   const side = homeSide(d)
   return `<div class="wx-page${side ? ' wx-page-wide' : ''}">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
   <header class="wx-masthead">
     ${avatar(s)}
     <h1 class="wx-masthead-name">${esc((s.siteName))}</h1>
@@ -156,7 +152,7 @@ export function home(d: HomeData): string {
   ${d.notice ? `<div class="wx-notice">${d.notice}</div>` : ''}
   ${d.newSite ? newSiteGuideHtml() : ''}
   ${side ? `<div class="wx-cols"><div class="wx-maincol">` : ''}
-  ${d.weiboFeed ? weiboHomeFeed({ settings: s, items: d.weiboFeed.items, total: d.weiboFeed.total, avatarHtml: avatar(s), allowComments: d.weiboFeed.allowComments, adminName: d.weiboFeed.adminName, memberName: d.weiboFeed.memberName }) : ''}
+  ${d.weiboFeed ? weiboHomeFeed({ settings: s, items: d.weiboFeed.items, total: d.weiboFeed.total, avatarHtml: avatar(s), allowComments: d.weiboFeed.allowComments, adminName: d.weiboFeed.adminName }) : ''}
   ${d.weibo ? weiboHomeEntry({ ...d.weibo }) : ''}
   ${onThisDayCard(d.onThisDay)}
   ${searchForm(d.q)}
@@ -223,7 +219,7 @@ export function post(d: PostData): string {
   const side = `${tocCard}${sideCard(('文章信息'), '', `<div class="wx-side-rows">${infoRows}</div>`)}`
 
   return `<div class="wx-article wx-article-wide">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages })}
   <div class="wx-cols"><div class="wx-maincol">
   <h1 class="wx-title">${esc(p.title)}</h1>
   <div class="wx-meta">
@@ -235,7 +231,6 @@ export function post(d: PostData): string {
   </div>
   ${p.cover ? `<div class="wx-cover"><img src="${esc(variantUrl(p.cover, 960))}"${coverSrcset(p.cover)} loading="eager" fetchpriority="high" decoding="async" alt=""></div>` : ''}
   <article class="rich" id="rich-content">${p.contentHtml}</article>
-  ${p.locked ? paywallHtml(p.minTier,  d) : ''}
   ${tagChips || catChip ? `<div class="wx-tags">${catChip}${tagChips}</div>` : ''}
   <div class="wx-actions">
     ${likesBtn(p.slug, p.likes)}
@@ -255,7 +250,7 @@ export function post(d: PostData): string {
 
 export function about(d: AboutData): string {
   return `<div class="wx-article">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
   <h1 class="wx-title">关于我</h1>
   <div class="wx-meta"><a class="wx-meta-avatar" href="/" aria-label="返回首页">${avatar(d.settings)}</a>
     <div class="wx-meta-main"><a class="wx-account" href="/">${esc((d.settings.siteName))}</a></div>
@@ -268,7 +263,7 @@ export function about(d: AboutData): string {
 /** 独立页面页（/page/:slug，slug='about' 时渲染 /about）：结构同关于我，标题由页面数据决定 */
 export function page(d: PageData): string {
   return `<div class="wx-article">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
   <h1 class="wx-title">${esc(d.title)}</h1>
   <article class="rich">${d.contentHtml}</article>
   ${foot(d.settings, footLinksFor(d.settings).about)}
@@ -279,7 +274,7 @@ export function page(d: PageData): string {
 export function archives(d: ArchivesData): string {
   const s = d.settings
   return `<div class="wx-page">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'archives' })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'archives' })}
   <header class="wb-page-head">
     <h1 class="wb-page-title">归档</h1>
     <p class="wb-page-sub">${d.total > 0 ? (`写下的每一篇 · 共 ${d.total} 篇`) : '写下的每一篇都会收进这里'}${yearStatsSuffix(d.yearStats)}</p>
@@ -294,7 +289,7 @@ export function archives(d: ArchivesData): string {
 export function guestbook(d: GuestbookData): string {
   const s = d.settings
   return `<div class="wx-page">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'guestbook' })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'guestbook' })}
   <header class="wb-page-head">
     <h1 class="wb-page-title">留言板</h1>
     <p class="wb-page-sub">${d.count > 0 ? (`已有 ${d.count} 条留言 · 随便聊聊`) : '想说点什么，就在这里写下来'}</p>
@@ -315,10 +310,9 @@ export function weibo(d: WeiboData): string {
     avatarHtml: avatar(s),
     allowComments: d.allowComments,
     adminName: d.adminName,
-    memberName: d.memberName,
   })
   return `<div class="wx-page">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'weibo' })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'weibo' })}
   <header class="wb-page-head">
     <h1 class="wb-page-title">微博</h1>
     <p class="wb-page-sub">${d.topic ? (`话题 #${esc(d.topic)} · 共 ${d.total} 条`) : d.total > 0 ? (`随手记 · 共 ${d.total} 条`) : '随手记，想写就写'}</p>
@@ -337,7 +331,7 @@ export function weibo(d: WeiboData): string {
 export function links(d: LinksData): string {
   const s = d.settings
   return `<div class="wx-page">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: d.settings.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'links' })}
+  ${siteNav({ mode: siteMode(d.settings), cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'links' })}
   <header class="wb-page-head">
     <h1 class="wb-page-title">友情链接</h1>
     <p class="wb-page-sub">${d.total > 0 ? (`朋友站点 · 共 ${d.total} 个`) : '和朋友交换链接的地方'}</p>
@@ -346,34 +340,6 @@ export function links(d: LinksData): string {
     ${friendLinkCards(d.items) || '<p class="wb-empty">还没有友链，去后台添加，或在下方申请收录。</p>'}
   </main>
   ${friendLinkApply()}
-  ${foot(s, footLinksFor(s).archive)}
-</div>`
-}
-
-/** 排行榜页（/rank）：会员积分总榜，榜单行结构共用 .rk-* */
-export function rank(d: RankData): string {
-  const s = d.settings
-  return `<div class="wx-page">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: s.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'rank' })}
-  <header class="wb-page-head">
-    <h1 class="wb-page-title">排行榜</h1>
-    <p class="wb-page-sub">${d.total > 0 ? (`会员积分总榜 · 共 ${d.total} 位`) : '发留言、常回来，就能上榜'}</p>
-  </header>
-  <main class="wx-rank">${rankListHtml(d.entries) || '<p class="wb-empty">还没有会员上榜，抢个头名吧。</p>'}</main>
-  ${foot(s, footLinksFor(s).archive)}
-</div>`
-}
-
-/** 会员中心页（/member）：未登录出登录/注册表单，已登录出会员卡（结构共用 .mem-*） */
-export function member(d: MemberData): string {
-  const s = d.settings
-  return `<div class="wx-page">
-  ${siteNav({ mode: siteMode(d.settings), memberEnabled: s.membersEnabled === '1', cls: 'wx-snav', compact: true, sticky: true, categories: d.categories, tags: d.tags, pages: d.pages, active: 'member' })}
-  <header class="wb-page-head">
-    <h1 class="wb-page-title">会员中心</h1>
-    <p class="wb-page-sub">${d.member ? ('留言、常回来，积分与专属内容都在这里') : '登录或注册，加入本站会员'}</p>
-  </header>
-  <main class="wx-member">${d.member ? memberCardHtml(d.member) : memberAuthHtml( d)}</main>
   ${foot(s, footLinksFor(s).archive)}
 </div>`
 }

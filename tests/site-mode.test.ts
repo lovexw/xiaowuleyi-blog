@@ -54,46 +54,27 @@ test('siteNav：纯微博「微博」提为首位，博客专属模块（归档/
   assert.ok(first.includes('/weibo'))
 })
 
-// ── compact 布局（主题试点）：主条去微博（首页微博流自带「全部 →」入口），留言板/友情链接进顶栏，会员变药丸压轴，排行榜/随机降级页脚 ──
+// ── compact 布局（主题试点）：主条去微博（首页微博流自带「全部 →」入口），留言板/友情链接进顶栏 ──
 
-test('siteNav：compact 收窄主条并渲染会员药丸，微博/排行榜/随机不进顶栏', () => {
-  const html = siteNav({ cls: 't', ...navData, memberEnabled: true, active: 'home', compact: true })
+test('siteNav：compact 收窄主条，微博/排行榜/随机不进顶栏', () => {
+  const html = siteNav({ cls: 't', ...navData, active: 'home', compact: true })
   assert.match(html, /href="\/">首页</)
   assert.match(html, /href="\/archives">归档</)
   assert.match(html, /分类话题/)
   assert.match(html, /href="\/about">关于我</)
   assert.match(html, /href="\/guestbook">留言板</)
   assert.match(html, /href="\/links">友情链接</)
-  assert.match(html, /class="t-member" href="\/member">会员</)
-  // 微博入口收敛进首页微博流；排行榜/随机仍降级页脚
+  // 微博入口收敛进首页微博流；随机降级页脚
   assert.doesNotMatch(html, /href="\/weibo"/)
-  assert.doesNotMatch(html, /href="\/rank"/)
   assert.doesNotMatch(html, /href="\/random"/)
 })
 
-test('siteNav：compact 会员开关关闭时药丸不渲染，普通布局不受 compact 影响', () => {
-  const off = siteNav({ cls: 't', ...navData, compact: true })
-  assert.doesNotMatch(off, /t-member/)
-  assert.doesNotMatch(off, /href="\/member"/)
-  // 未开 compact 的默认布局原样（回归守卫：其余主题仍走全量导航，含微博入口）
-  const plain = siteNav({ cls: 't', ...navData, memberEnabled: true })
-  assert.match(plain, /href="\/weibo">微博</)
-  assert.match(plain, /href="\/guestbook">留言板</)
-  assert.match(plain, /class="t-link" href="\/member">会员</)
-  assert.match(plain, /href="\/rank">排行榜</)
-  assert.match(plain, /href="\/random">随机</)
-})
-
-test('siteNav：compact 纯微博模式药丸压轴、博客模块仍隐藏', () => {
-  const html = siteNav({ cls: 't', ...navData, memberEnabled: true, mode: 'weibo', active: 'weibo', compact: true })
+test('siteNav：compact 纯微博模式首页即微博、博客模块仍隐藏', () => {
+  const html = siteNav({ cls: 't', ...navData, mode: 'weibo', active: 'weibo', compact: true })
   assert.match(html, /class="t-link is-active" href="\/weibo">微博</)
   assert.doesNotMatch(html, /href="\/archives"/)
   assert.doesNotMatch(html, /分类话题/)
   assert.match(html, /href="\/guestbook">留言板</)
-  assert.match(html, /class="t-member" href="\/member">会员</)
-  // 「会员」药丸是导航最后一个链接
-  const tail = html.slice(html.lastIndexOf('t-member'))
-  assert.ok(tail.includes('/member'))
 })
 
 test('weiboHomeFeed：完整卡片流 + 头部计数，空列表不渲染', () => {

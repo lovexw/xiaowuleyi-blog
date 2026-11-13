@@ -53,12 +53,6 @@ export const BUNDLE_MAX_BYTES = 2 * 1024 * 1024 * 1024
 /** 进包的业务表（= backup.ts BACKUP_TABLES 去掉 users）。users 是**实例身份**：
  *  目标站用自己的管理员登录，把包里的账号灌进去反而可能被旧密码锁在外面 */
 export const BUNDLE_TABLES = [
-  'members',
-  'member_points_log',
-  'member_visits',
-  'member_likes',
-  'invite_codes',
-  'invite_uses',
   'posts',
   'pages',
   'comments',

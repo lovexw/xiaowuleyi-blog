@@ -9,56 +9,6 @@ export interface SessionUser {
   username: string
   display_name: string
   avatar: string
-  /** 多作者（3.0-M1）：admin = 站长；author = 作者（管理面 403，requireAdminRole 门槛） */
-  role?: 'admin' | 'author'
-}
-
-/* ---------------- 会员体系（访客注册身份，与 users 管理员彻底分离，契约见 docs/archive/DEVPLAN-2026-10-07.md 附录 A） ---------------- */
-
-export type MemberTier = 'normal' | 'coffee' | 'top'
-
-/** members 表整行（含口令字段，仅服务端登录/管理口径使用；对外一律过 memberView 裁剪） */
-export interface MemberRow {
-  id: number
-  username: string
-  password_hash: string
-  salt: string
-  email: string
-  display_name: string
-  avatar: string
-  /** 绑定的 QQ 号（仅头像抓取记账位）；任何公开出参不携带，头像走站内转存 */
-  qq: string
-  /** 档位 key（src/tiers.ts 自定义档位，settings.memberTiers 定义） */
-  tier: MemberTier
-  /** 档位有效期（毫秒）；NULL = 永久/不失效。过期在读侧即时降级为基础档（src/tiers.ts effectiveTier） */
-  tier_expires_at?: number | null
-  /** 档位来源（只做运营标注，不参与权限判定）：register / invite / points / paid / manual，空 = 历史数据 */
-  tier_source?: string
-  points: number
-  status: 'active' | 'banned'
-  created_at: number
-  updated_at: number
-  last_login_at: number | null
-  /** 上次改昵称时间；null = 从未改过，首次修改不受 30 天窗口限制 */
-  display_name_changed_at: number | null
-  /** 铁粉体系（DEVPLAN-3.0）：累计活跃天数 / 最近活跃日 / 连续签到 / 最近签到日（老库 ALTER 补列前可能缺省） */
-  active_days?: number
-  last_active_day?: string
-  checkin_streak?: number
-  last_checkin_day?: string
-}
-
-/** 会员会话身份（Cookie xw_member_session；banned 在查询层即视为未登录） */
-export interface MemberSessionUser {
-  id: number
-  username: string
-  display_name: string
-  avatar: string
-  tier: MemberTier
-  /** 档位到期时间（毫秒）；读侧 effectiveTier / canReadTiers 据此即时降级，NULL = 不失效。
-   *  老库 ALTER 补列前可能缺省，所以是可选字段。 */
-  tier_expires_at?: number | null
-  points: number
 }
 
 export type PostStatus = 'draft' | 'published' | 'scheduled'
@@ -79,7 +29,8 @@ export interface PostRow {
   published_at: number | null
   /** 定时发布目标时间（毫秒）；仅 scheduled 状态有值 */
   publish_at: number | null
-  /** 可见档位（契约 DEVPLAN 附录 A）：all | member | coffee | top，缺省 all；老库 ALTER 补列前可能缺省 */
+  /** 可见档位（两档站级口令见 src/protect.ts）：all 公开 / fixed 固定密码 / member 会员密码；
+   *  会员体系时代的脏值由冷启动迁移收成 member；老库 ALTER 补列前可能缺省 */
   min_tier?: string
   /** 访问密码（src/protect.ts）：salt:hash（PBKDF2），空 = 未加密；不进任何后台响应 */
   password_hash?: string
@@ -125,25 +76,10 @@ export interface CommentRow {
   /** 评论 IP 属地快照（src/ipregion.ts）：写库定格 cf（CN:Guangdong / US / HK），空 = 无数据不展示；公开出参走 showCommentRegion 门控，标签由 ipRegionLabel 单点格式化 */
   ip_region?: string
   created_at: number
-  /** 会员徽标冗余字段：评论列表 LEFT JOIN members 带出（member_id > 0 时非空，契约 DEVPLAN 附录 A） */
-  member_name?: string
-  member_tier?: MemberTier
-  /** 档位有效期（毫秒，随评论 JOIN 带出）：读侧 effectiveTier 即时判过期（src/tiers.ts），
-   *  只在服务端参与徽标解析，任何公开出参不携带 */
-  member_tier_expires_at?: number | null
-  /** 会员头像（站内 /images/ 转存地址）：评论头像位展示用；QQ 号本体永不出参 */
-  member_avatar?: string
   /** 游客选填的 QQ 号（评论头像 C2）：仅头像抓取记账位，任何公开出参不携带 */
   qq?: string
   /** 游客头像（服务端 qlogo 抓取后站内转存地址）：评论头像位展示用；空 = 首字块 */
   avatar?: string
-  /** 评论圈层可见（src/commentgate.ts）：true = 本条对当前读者遮罩（content 已被服务端清空）。
-   *  出参 / 渲染态字段，不落库；判定与脱敏统一走 applyCommentGate */
-  gated?: boolean
-  /** 遮罩项的作者生效档位名（"咖啡会员"）：占位块文案用，与徽标开关无关 */
-  gate_tier_name?: string
-  /** 遮罩项被折叠的回复条数（子孙同属私密线程，不逐条渲染） */
-  gate_hidden?: number
 }
 
 export interface CategoryRow {

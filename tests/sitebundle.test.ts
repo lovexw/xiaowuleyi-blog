@@ -283,7 +283,7 @@ test('sanitizeImportedRow：正文过净化，其余字段不动', () => {
 })
 
 test('BUNDLE_SETTINGS_SKIP：密钥与实例态键一律不进包', () => {
-  for (const k of ['externalToken', 'telegramBotToken', 'telegramWebhookSecret', 'bufferAccessToken', 'plazaToken', 'commentWebhookUrl', 'turnstileSecret']) {
+  for (const k of ['externalToken', 'telegramBotToken', 'telegramWebhookSecret', 'bufferAccessToken', 'plazaToken', 'commentWebhookUrl']) {
     assert.ok(BUNDLE_SETTINGS_SKIP.includes(k), k)
   }
   for (const k of ['siteUrl', 'pageCacheEpoch', 'bundleImport']) assert.ok(BUNDLE_SETTINGS_SKIP.includes(k), k)
@@ -362,10 +362,6 @@ function seedSource(db: DatabaseSync): void {
     INSERT INTO tags (id, name, created_at) VALUES (1, '标签一', ${now});
     INSERT INTO friend_links (id, name, url, description, icon, status, sort, created_at, updated_at)
       VALUES (1, '友链', 'https://example.com', '描述', '', 'approved', 0, ${now}, ${now});
-    INSERT INTO members (id, username, display_name, password_hash, salt, tier, points, status, created_at, updated_at)
-      VALUES (1, 'demo', '演示会员', 'hash', 'salt', 'normal', 12, 'active', ${now}, ${now});
-    INSERT INTO member_points_log (id, member_id, delta, reason, ref_id, created_at)
-      VALUES (1, 1, 1, 'daily_login', 0, ${now});
     INSERT INTO uploads (id, key, name, mime, size, created_at, hash)
       VALUES (1, 'u/202601/a.jpg', 'a.jpg', 'image/jpeg', 4, ${now}, 'h1'),
              (2, 'og/202601/b.png', 'b.png', 'image/png', 3, ${now}, 'h2');
@@ -460,9 +456,6 @@ test('整站包：导出 → 还原到空站，数据与图片完整回来（且
   assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM post_categories').get()!.n, 1)
   assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM tags').get()!.n, 1)
   assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM friend_links').get()!.n, 1)
-  assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM members').get()!.n, 1)
-  assert.equal(dstDb.raw.prepare('SELECT points FROM members WHERE id = 1').get()!.points, 12)
-  assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM member_points_log').get()!.n, 1)
   assert.equal(dstDb.raw.prepare('SELECT COUNT(*) AS n FROM uploads').get()!.n, 2)
 
   // ── 图片回来了（逐字节）──
@@ -614,7 +607,6 @@ test('清空本站：内容清光（含回收站）、设置与管理员账号�
   assert.equal(r.cleared.weibo, 1)
   assert.equal(r.cleared.pages, 1)
   assert.equal(r.cleared.comments, 1)
-  assert.equal(r.cleared.members, 1)
   assert.equal(r.cleared.uploads, 4) // a.jpg / b.png / avatar.png / logo.png
   assert.equal(r.images, 2) // 只删内容侧的两张：被保留表引用的两张头像排除在外
   assert.equal(r.imagesDone, true)

@@ -156,63 +156,28 @@ export function weiboVisibleCutoff(settings: Record<string, unknown>, now: numbe
   return listRangeCutoff(visibleRangeOf(settings, 'weibo'), now)
 }
 
-/** 可见窗口是否同样限制会员（默认 true，保持旧版「游客和会员都受限」口径） */
-export function visibleRangeAppliesToMembers(settings: Record<string, unknown>): boolean {
-  return settings.contentVisibleForMembers !== '0'
-}
-
 /** 页面口径的可见窗口判定（纯函数）：公开 API（留言 / 评论 / 点赞）与页面渲染（renderPost /
  *  renderWeibo）对齐的豁免规则，单一来源。
  *  - base = 0（窗口关闭）恒放行；
- *  - 管理员豁免仅文章（renderPost 的预览语义——微博页连管理员也吃窗口，保持一致）；
- *  - 站点选择「不限制会员」（contentVisibleForMembers='0' 且 membersEnabled 开启）且会员已登录时豁免。
+ *  - 管理员豁免仅文章（renderPost 的预览语义——微博页连管理员也吃窗口，保持一致）。
  *  返回生效 cutoff（0 = 放行）；调用方对 cutoff > 0 且行时间早于 cutoff 的内容按「不存在」口径 404 /
  *  返回 0（与直链 404、旧 slug 301 的「窗口外不可见」信息差禁令同款） */
 export function pageWindowCutoff(
   settings: Record<string, unknown>,
   kind: 'posts' | 'weibo',
-  who: { admin?: boolean; member?: boolean },
+  who: { admin?: boolean },
   now: number = Date.now()
 ): number {
   const base = kind === 'weibo' ? weiboVisibleCutoff(settings, now) : siteVisibleCutoff(settings, now)
   if (!base) return 0
   if (kind === 'posts' && who.admin) return 0
-  if (settings.membersEnabled === '1' && !visibleRangeAppliesToMembers(settings) && who.member) return 0
   return base
 }
 
-/* ---------------- 会员昵称（注册选填 + 30 天一次修改，中英文均可） ----------------
- * 展示名不做唯一约束（username 才是登录凭证），渲染层 esc 兜底 XSS；
- * 清洗与窗口判定是纯函数：SSR 渲染、API 校验、Node 测试三处共用同一口径。 */
-
-export const NICKNAME_MAX_LEN = 24
-
-/** 昵称清洗：trim、剥控制字符（含 \t\r\n，防止渲染出怪异换行）、限长。
- *  空/纯空白返回空串，由调用方决定回落 username 还是拒绝 */
-export function cleanNickname(raw: unknown): string {
-  return String(raw ?? '')
-    .replace(/[\u0000-\u001f\u007f]/g, '')
-    .trim()
-    .slice(0, NICKNAME_MAX_LEN)
-}
-
-/** 昵称修改冷却窗口（30 天）：NULL = 从未改过，首次修改不受限 */
-export const NICKNAME_CHANGE_COOLDOWN_MS = 30 * 24 * 3600_000
-
-/** QQ 号校验（评论头像 C2）：5-11 位数字、不以 0 开头——qlogo 头像抓取的入参门槛。
- *  site.js 会员卡里有一份同款 ES5 正则镜像，改任一侧记得同步 */
+/** QQ 号校验（评论头像 C2，游客选填）：5-11 位数字、不以 0 开头——qlogo 头像抓取的入参门槛。
+ *  site.js 的评论表单里有一份同款 ES5 正则镜像，改任一侧记得同步 */
 export function isValidQQ(q: unknown): boolean {
   return /^[1-9][0-9]{4,10}$/.test(String(q ?? ''))
-}
-
-/** 30 天窗口判定：allowed = 现在能不能改；nextAt = 冷却中时的解禁时间（毫秒，可喂给 fmtDateCN） */
-export function nicknameCooldown(
-  changedAt: number | null | undefined,
-  now = Date.now()
-): { allowed: boolean; nextAt: number } {
-  if (!changedAt) return { allowed: true, nextAt: 0 }
-  const nextAt = changedAt + NICKNAME_CHANGE_COOLDOWN_MS
-  return { allowed: nextAt <= now, nextAt }
 }
 
 /** 插件停用列表（settings 的 pluginsDisabled，逗号分隔的 manifest id）清洗：去空白、保序去重、
@@ -302,35 +267,3 @@ export async function sha256Hex(buf: ArrayBuffer): Promise<string> {
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-/** 付费墙试读段：按可见文本长度截断 HTML——标签原样保留、结尾闭合未关标签。
- *  截断在服务端完成是付费墙的安全边界：浏览器拿不到的正文才真正拿不到（契约 DEVPLAN-2026-10-07 附录 A A2） */
-export function teaserHtml(html: string, limit = 200): string {
-  let seen = 0
-  let out = ''
-  const stack: string[] = []
-  const VOID = new Set(['br', 'img', 'hr', 'meta', 'link', 'input', 'source', 'wbr'])
-  for (const tok of html.match(/<[^>]+>|[^<]+/g) ?? []) {
-    if (tok[0] === '<') {
-      const close = /^<\/([a-zA-Z0-9-]+)\s*>$/.exec(tok)
-      if (close) {
-        if (stack[stack.length - 1] === close[1].toLowerCase()) stack.pop()
-      } else if (!/\/>$/.test(tok)) {
-        const open = /^<([a-zA-Z0-9-]+)/.exec(tok)
-        const name = open?.[1].toLowerCase()
-        if (name && !VOID.has(name)) stack.push(name)
-      }
-      out += tok
-      continue
-    }
-    const remain = limit - seen
-    if (tok.length > remain) {
-      out += tok.slice(0, remain)
-      break
-    }
-    seen += tok.length
-    out += tok
-    if (seen >= limit) break
-  }
-  while (stack.length) out += `</${stack.pop()}>`
-  return out
-}

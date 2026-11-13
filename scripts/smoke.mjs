@@ -76,7 +76,7 @@ async function startDevServer() {
 /** 页面缓存旁路（src/pagecache.ts）：冒烟大量「写完立即匿名重读同一 URL」的断言，
  *  会撞上 5 分钟边缘缓存的旧副本。对页面与订阅源/公开 API 白名单路由的
  *  GET 自动追加 _smoke 时间戳——SSR 渲染路径与不带参数完全一致，只是绕开边缘层 */
-const PAGE_BYPASS_RE = /^(\/|\/tag\/[^\/?]+|\/category\/[^\/?]+|\/post\/[^\/?]+|\/page\/[^\/?]+|\/about|\/archives|\/guestbook|\/weibo|\/links|\/member|\/rank|\/search|\/rss\.xml|\/feed\.json|\/sitemap\.xml|\/api\/public\/weibo|\/api\/public\/posts)$/
+const PAGE_BYPASS_RE = /^(\/|\/tag\/[^\/?]+|\/category\/[^\/?]+|\/post\/[^\/?]+|\/page\/[^\/?]+|\/about|\/archives|\/guestbook|\/weibo|\/links|\/search|\/rss\.xml|\/feed\.json|\/sitemap\.xml|\/api\/public\/weibo|\/api\/public\/posts)$/
 function bypassUrl(url) {
   if (url.includes('?')) return url
   const q = url.indexOf('#')
@@ -237,7 +237,7 @@ try {
   await check('GET', '/_headers', 404) // 配置文件本身不对外服务（与 Cloudflare 行为一致）
   // 皮肤/插件市场：编辑器插件清单与市场目录是后台「插件 / 皮肤」页的数据源，必须可访问且是合法 JSON
   await check('GET', '/plugins/manifest.json', 200, 'hello-sign')
-  await check('GET', '/market/catalog.json', 200, 'themes')
+  await check('GET', '/market/catalog.json', 200, 'plugins')
   await check('GET', '/post/no-such-post-should-404', 404)
   // 访客统计：公开打点 200、后台聚合接口未登录必须 401（在 /admin/* 鉴权保护之下）
   await check('POST', '/api/public/track', 200, 'ok', {
@@ -396,35 +396,32 @@ try {
   results.push(['引导记账位：手册键复位', obManualOff.status === 200])
   console.log(`  ${obManualOff.status === 200 ? '✓' : '✗'} 引导记账位：手册键复位`)
 
-  // ── 内容可见范围链路（文章 / 微博分键 + 会员开关，api.ts 设置 PUT 白名单）──
+  // ── 内容可见范围链路（文章 / 微博分键，api.ts 设置 PUT 白名单）──
   // 纯函数口径（脏值降级、旧键回落）由 tests/list-range.test.ts 守；这里只验 API 接线：
-  // 三个键能存能回显、旧单键被清空、脏值整体 400、复位后回 '' / '1'
+  // 两个键能存能回显、旧单键被清空、脏值整体 400、复位后回 ''
   console.log('\n▸ 内容可见范围链路')
-  const vrSet = await putSettings({ contentVisibleRangePosts: '3d', contentVisibleRangeWeibo: '1m', contentVisibleForMembers: '0' })
+  const vrSet = await putSettings({ contentVisibleRangePosts: '3d', contentVisibleRangeWeibo: '1m' })
   const vrSetBody = await vrSet.json().catch(() => null)
   const vrSetOk =
     vrSet.status === 200 &&
     vrSetBody?.settings?.contentVisibleRangePosts === '3d' &&
     vrSetBody?.settings?.contentVisibleRangeWeibo === '1m' &&
-    vrSetBody?.settings?.contentVisibleForMembers === '0' &&
     vrSetBody?.settings?.contentVisibleRange === ''
   results.push(['可见范围：文章 / 微博分键保存并回显 + 旧键清空', vrSetOk])
   console.log(`  ${vrSetOk ? '✓' : '✗'} 可见范围：分键保存回显 + 旧键清空（status ${vrSet.status}）`)
 
   const vrBadRange = await putSettings({ contentVisibleRangePosts: '10y' })
-  const vrBadMember = await putSettings({ contentVisibleForMembers: 'maybe' })
-  const vrBadOk = vrBadRange.status === 400 && vrBadMember.status === 400
+  const vrBadOk = vrBadRange.status === 400
   results.push(['可见范围：脏档位整体 400（不静默降级）', vrBadOk])
-  console.log(`  ${vrBadOk ? '✓' : '✗'} 可见范围：脏档位 400（${vrBadRange.status}/${vrBadMember.status}）`)
+  console.log(`  ${vrBadOk ? '✓' : '✗'} 可见范围：脏档位 400（${vrBadRange.status}）`)
 
-  const vrOff = await putSettings({ contentVisibleRangePosts: '', contentVisibleRangeWeibo: '', contentVisibleForMembers: '1' })
+  const vrOff = await putSettings({ contentVisibleRangePosts: '', contentVisibleRangeWeibo: '' })
   const vrOffBody = await vrOff.json().catch(() => null)
   const vrOffOk =
     vrOff.status === 200 &&
     vrOffBody?.settings?.contentVisibleRangePosts === '' &&
-    vrOffBody?.settings?.contentVisibleRangeWeibo === '' &&
-    vrOffBody?.settings?.contentVisibleForMembers === '1'
-  results.push(['可见范围：复位为全部可见 + 会员同样受限', vrOffOk])
+    vrOffBody?.settings?.contentVisibleRangeWeibo === ''
+  results.push(['可见范围：复位为全部可见', vrOffOk])
   console.log(`  ${vrOffOk ? '✓' : '✗'} 可见范围：复位（status ${vrOff.status}）`)
 
   // ── 微博前台管理链路（登录管理员在 /weibo 页直接编辑/置顶/删除随手记）──
@@ -921,354 +918,6 @@ try {
 
   // Token 复位（空 = 接口关闭，与 telegramBotToken 清理同款）
   await putSettings({ externalToken: '' })
-
-  // ── 会员链路（docs/archive/DEVPLAN-2026-10-07.md 契约 v1）：开关门控 → 注册即登录 → 会员身份评论计分
-  // → 榜单/首页挂件 → 付费墙防泄漏（游客试读段/会员全文/RSS 无全文）→ 后台会员管理（拉黑即踢）──
-  console.log('\n▸ 会员链路')
-  const MEMBER_NAME = 'smokemember'
-  const MEMBER_PASS = 'smoke-member-12345'
-  const MEMBER_NICK = '冒烟昵称'
-  // 注册必填邮箱（跨站会员继承只认邮箱，2026-11 起）：漏了它注册回 400「请填写邮箱」，
-  // 冒烟会把它误当成「用户名已占用」改走登录，整条会员链从这一步全红
-  const MEMBER_EMAIL = 'smokemember@example.com'
-  const mJson = (res) => res.json().catch(() => null)
-
-  // 上一轮残留的昵称与冷却窗口先夹具化（幂等，行不存在时无操作）：链路内昵称口径断言依赖它
-  await run(
-    NODE,
-    [
-      WRANGLER_JS,
-      'd1',
-      'execute',
-      'DB',
-      '--local',
-      '--command',
-      `UPDATE members SET display_name = '${MEMBER_NICK}', display_name_changed_at = NULL WHERE username = '${MEMBER_NAME}'`,
-    ],
-    '重置冒烟会员昵称与修改窗口（幂等）'
-  )
-
-  // 开关默认关：/member /rank 与注册全部 404（契约 A6：关闭 = 全套 404，前台无入口）
-  await check('GET', '/member', 404)
-  await check('GET', '/rank', 404)
-  await check('POST', '/api/member/register', 404, undefined, {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS }),
-  })
-
-  const mOn = await raw('PUT', '/api/admin/settings', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ membersEnabled: '1' }),
-  })
-  results.push(['会员链路：开启 membersEnabled', mOn.status === 200])
-  console.log(`  ${mOn.status === 200 ? '✓' : '✗'} 会员链路：开启 membersEnabled`)
-
-  // 注册即登录（幂等：上一轮冒烟残留同号时改走登录）；昵称选填（中英文均可），注册填写不占用 30 天修改窗口
-  let mCookie = ''
-  const mReg = await raw('POST', '/api/member/register', {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS, nickname: MEMBER_NICK, email: MEMBER_EMAIL, link: '' }),
-  })
-  mCookie = (mReg.headers.get('set-cookie') || '').split(';')[0]
-  if (mReg.status === 400) {
-    const mLogin = await raw('POST', '/api/member/login', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS }),
-    })
-    mCookie = (mLogin.headers.get('set-cookie') || '').split(';')[0]
-    const reOk = mLogin.status === 200 && mCookie.startsWith('xw_member_session=')
-    results.push(['会员链路：同号重复冒烟改登录', reOk])
-    console.log(`  ${reOk ? '✓' : '✗'} 会员链路：同号重复冒烟改登录`)
-  } else {
-    const mRegBody = await mJson(mReg)
-    const regOk = mReg.status === 200 && mRegBody?.ok === true && mCookie.startsWith('xw_member_session=')
-    results.push(['会员链路：注册即登录（签发 xw_member_session）', regOk])
-    console.log(`  ${regOk ? '✓' : '✗'} 会员链路：注册即登录（status ${mReg.status}）`)
-  }
-
-  // 会员中心：会话态出会员卡（而非登录表单）
-  await check('GET', '/member', 200, 'data-member-card', { headers: { Cookie: mCookie } })
-
-  // 会员身份发言（身份来自会话，蜜罐空字段）：即时过审 → 评论积分 +2（注册/登录当日已 +1，合计 ≥3）
-  const mCmt = await raw('POST', '/api/public/comments', {
-    headers: { 'Content-Type': 'application/json', Cookie: mCookie },
-    body: JSON.stringify({ slug: 'smoke-multi-tag', content: '冒烟会员评论：身份来自会话，昵称字段被忽略', link: '' }),
-  })
-  const mCmtBody = await mJson(mCmt)
-  const mCmtOk = mCmt.status === 200 && mCmtBody?.ok === true && mCmtBody?.pending === false
-  results.push(['会员链路：会员身份发言即时过审', mCmtOk])
-  console.log(`  ${mCmtOk ? '✓' : '✗'} 会员链路：会员身份发言即时过审`)
-  await new Promise((r) => setTimeout(r, 800)) // 积分 waitUntil 异步落库，稍等一拍再读
-  const mMeAfter = await mJson(await raw('GET', '/api/member/me', { headers: { Cookie: mCookie } }))
-  const ptsOk = (mMeAfter?.member?.points ?? 0) >= 3
-  results.push(['会员链路：评论计分落账（每日登录+1、评论+2）', ptsOk])
-  console.log(`  ${ptsOk ? '✓' : '✗'} 会员链路：评论计分落账（当前 ${mMeAfter?.member?.points ?? '?'} 分）`)
-
-  // 榜单页：上榜会员可见（只出 active 且积分>0；昵称口径 display_name 优先）；首页不再渲染排行挂件（榜单收敛到 /rank）
-  await check('GET', '/rank', 200, MEMBER_NICK)
-  await check('GET', '/', 200, undefined, { notContains: 'rk-card' })
-
-  // 会员登录态贯通前台评论表单（memberName 接线）：文章页/微博页免填昵称、以会员身份发言；游客仍需填昵称
-  await check('GET', '/post/smoke-multi-tag', 200, `以会员 <b>${MEMBER_NICK}</b>`, { headers: { Cookie: mCookie } })
-  await check('GET', '/post/smoke-multi-tag', 200, 'name="nickname"')
-  await check('GET', '/weibo', 200, `以会员 <b>${MEMBER_NICK}</b>`, { headers: { Cookie: mCookie } })
-  await check('GET', '/guestbook', 200, `以会员 <b>${MEMBER_NICK}</b>`, { headers: { Cookie: mCookie } })
-
-  // 微博正文链接自动超链（服务端 weiboTextHtml）：非白名单外链包 /go 中间页，话题不受影响
-  const wbLinkRes = await raw('POST', '/api/admin/weibo', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ content: '冒烟外链：https://example.com/very-link #随手记#', images: [], status: 'published' }),
-  })
-  const wbLinkId = (await mJson(wbLinkRes))?.weibo?.id
-  if (wbLinkId) {
-    await check('GET', '/weibo', 200, 'wb-link')
-    await check('GET', '/weibo', 200, `/go?u=${encodeURIComponent('https://example.com/very-link')}`)
-    await raw('DELETE', `/api/admin/weibo/${wbLinkId}`, { headers: { Cookie: cookie } })
-    await raw('DELETE', `/api/admin/trash/weibo/${wbLinkId}`, { headers: { Cookie: cookie } })
-  } else {
-    results.push(['微博正文：外链自动超链（建冒烟微博）', false])
-    console.log('  ✗ 微博正文：外链自动超链（建冒烟微博失败）')
-  }
-
-  // 微信表情链路（src/emoji.ts）：映射表端点 → 微博正文渲染 → 文章正文渲染 → 评论区渲染
-  const emojiApi = await mJson(await raw('GET', '/api/public/emoji'))
-  const emojiOk = emojiApi?.base === '/emoji/' && (emojiApi?.codes?.['微笑'] ?? '') !== ''
-  results.push(['微信表情：映射表端点', emojiOk])
-  console.log(`  ${emojiOk ? '✓' : '✗'} 微信表情：映射表端点（${Object.keys(emojiApi?.codes ?? {}).length} 个码点）`)
-  const wbEmoji = await raw('POST', '/api/admin/weibo', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ content: '冒烟表情：早上好[微笑]，裂开[裂开] #随手记#', images: [], status: 'published' }),
-  })
-  const wbEmojiId = (await mJson(wbEmoji))?.weibo?.id
-  if (wbEmojiId) {
-    await check('GET', '/weibo', 200, 'wxq-emoji')
-    await check('GET', '/weibo', 200, `src="/emoji/${emojiApi.codes['裂开']}.png"`)
-    await check('GET', '/weibo', 200, `alt="[微笑]"`)
-    await raw('DELETE', `/api/admin/weibo/${wbEmojiId}`, { headers: { Cookie: cookie } })
-    await raw('DELETE', `/api/admin/trash/weibo/${wbEmojiId}`, { headers: { Cookie: cookie } })
-  } else {
-    results.push(['微信表情：微博正文渲染', false])
-    console.log('  ✗ 微信表情：微博正文渲染（建冒烟微博失败）')
-  }
-  const emojiPost = await raw('POST', '/api/admin/posts', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ title: '冒烟：微信表情文章', content: '<p>正文里一个[捂脸]，再来一个[强]。</p>', status: 'published' }),
-  })
-  const emojiPostBody = await mJson(emojiPost)
-  const emojiSlug = emojiPostBody?.post?.slug
-  if (emojiSlug) {
-    await check('GET', `/post/${emojiSlug}`, 200, `src="/emoji/${emojiApi.codes['捂脸']}.png"`)
-    // 评论区渲染：游客评论带表情（SSR 后晒在页面里）
-    const emojiCmt = await raw('POST', '/api/public/comments', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ slug: emojiSlug, content: '游客评论[爱心]', nickname: '冒烟游客', link: '' }),
-    })
-    const cmtOk = (await mJson(emojiCmt))?.ok === true
-    if (cmtOk) await check('GET', `/post/${emojiSlug}`, 200, `alt="[爱心]"`)
-    else {
-      results.push(['微信表情：评论渲染（发评论）', false])
-      console.log('  ✗ 微信表情：评论渲染（发评论失败）')
-    }
-    await raw('DELETE', `/api/admin/posts/${emojiPostBody.post.id}`, { headers: { Cookie: cookie } })
-    await raw('DELETE', `/api/admin/trash/post/${emojiPostBody.post.id}`, { headers: { Cookie: cookie } })
-  } else {
-    results.push(['微信表情：文章正文渲染', false])
-    console.log('  ✗ 微信表情：文章正文渲染（建冒烟文章失败）')
-  }
-
-  // 外链中间页（/go）：白名单域名 302 直跳，非白名单出确认页（免责声明），非法目标回首页
-  const goDirect = await fetch(`${BASE}/go?u=${encodeURIComponent('https://www.apple.com/iphone')}`, {
-    redirect: 'manual',
-    signal: AbortSignal.timeout(15_000),
-  })
-  const goDirectOk = goDirect.status === 302 && (goDirect.headers.get('location') || '').startsWith('https://www.apple.com/iphone')
-  results.push(['外链中间页：白名单域名 302 直跳', goDirectOk])
-  console.log(`  ${goDirectOk ? '✓' : '✗'} 外链中间页：白名单域名 302 直跳（${goDirect.status}）`)
-  await check('GET', `/go?u=${encodeURIComponent('https://example.com/page')}`, 200, '免责声明')
-  const goBad = await fetch(`${BASE}/go?u=javascript:alert(1)`, { redirect: 'manual', signal: AbortSignal.timeout(15_000) })
-  const goBadOk = goBad.status === 302 && (goBad.headers.get('location') || '').endsWith('/')
-  results.push(['外链中间页：非法目标回首页', goBadOk])
-  console.log(`  ${goBadOk ? '✓' : '✗'} 外链中间页：非法目标回首页（${goBad.status}）`)
-
-  // 会员体系兼容（membersEnabled='1'，2026-11 起会员已冻结但这层没拆）：member 档文章对
-  // 未配口令的站来说，登录会员照旧可读；游客看到的是口令表单而不是试读段。
-  const PW_SECRET = 'smoke-paywall-secret-tail-99077'
-  const pwCreate = await raw('POST', '/api/admin/posts', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({
-      title: '冒烟：会员档文章',
-      content: `<p>smoke-paywall-head</p><p>${PW_SECRET}</p>`,
-      status: 'published',
-      minTier: 'member',
-    }),
-  })
-  const pwCreated = await mJson(pwCreate)
-  const pwId = pwCreated?.post?.id
-  const pwSlug = pwCreated?.post?.slug
-  const pwOk = pwCreate.status === 200 && !!pwSlug
-  results.push(['会员兼容：建 member 档文章', pwOk])
-  console.log(`  ${pwOk ? '✓' : '✗'} 会员兼容：建 member 档文章（slug ${pwSlug}）`)
-  if (pwSlug) {
-    await check('GET', `/post/${pwSlug}`, 200, '这篇文章需要密码')
-    await check('GET', `/post/${pwSlug}`, 200, undefined, { notContains: PW_SECRET })
-    await check('GET', `/post/${pwSlug}`, 200, PW_SECRET, { headers: { Cookie: mCookie } })
-    await check('GET', `/post/${pwSlug}`, 200, PW_SECRET, { headers: { Cookie: cookie } }) // 管理员预览不受限
-    await check('GET', '/rss.xml', 200, undefined, { notContains: PW_SECRET })
-    // 清理：软删 + 彻底删除（不碰夹具，可重复运行）
-    await raw('DELETE', `/api/admin/posts/${pwId}`, { headers: { Cookie: cookie } })
-    await raw('DELETE', `/api/admin/trash/post/${pwId}`, { headers: { Cookie: cookie } })
-  }
-
-  // AI 生成标注链路（显式标识口径）：建文带 aiGenerated → 只发 {status} 的 PUT（列表页真实载荷）不得误清
-  // → 后台出参带 ai_generated:1 → 文章页 meta 行渲染「AI 生成」标注 → 清理
-  const aiCreate = await raw('POST', '/api/admin/posts', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({
-      title: '冒烟：AI 生成标注',
-      content: '<p>冒烟 AI 标注正文</p>',
-      status: 'draft',
-      aiGenerated: 1,
-    }),
-  })
-  const aiCreated = await aiCreate.json().catch(() => null)
-  const aiId = aiCreated?.post?.id
-  results.push(['AI 标注：建文带 aiGenerated', aiCreate.status === 200 && !!aiId])
-  console.log(`  ${aiCreate.status === 200 && !!aiId ? '✓' : '✗'} AI 标注：建文带 aiGenerated（id ${aiId}）`)
-  if (aiId) {
-    const aiCookie = { headers: { Cookie: cookie } }
-    const aiToggle = await raw('PUT', `/api/admin/posts/${aiId}`, {
-      headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ status: 'published' }),
-    })
-    await check('GET', `/api/admin/posts/${aiId}`, 200, '"ai_generated":1', aiCookie)
-    await check('GET', `/post/${aiCreated?.post?.slug}`, 200, 'AI 生成')
-    const aiMarkOk = aiToggle.status === 200
-    results.push(['AI 标注：缺键 PUT 保留 + 文章页渲染', aiMarkOk])
-    console.log(`  ${aiMarkOk ? '✓' : '✗'} AI 标注：缺键 PUT 保留 + 文章页渲染`)
-    // 清理：软删 + 彻底删除（不碰夹具，可重复运行）
-    await raw('DELETE', `/api/admin/posts/${aiId}`, { headers: { Cookie: cookie } })
-    await raw('DELETE', `/api/admin/trash/post/${aiId}`, { headers: { Cookie: cookie } })
-  }
-
-  // 后台会员管理：未登录一律 401（路由必须注册在 /admin/* 鉴权中间件之后）→ 搜索 → 拉黑（会话即刻失效 + 登录 403 banned）→ 恢复 active（下轮可复用）
-  await check('GET', '/api/admin/members', 401, '请先登录')
-  await check('PUT', '/api/admin/members/1', 401, '请先登录', {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status: 'banned' }),
-  })
-  const mList = await mJson(await raw('GET', `/api/admin/members?q=${MEMBER_NAME}`, { headers: { Cookie: cookie } }))
-  const mId = mList?.items?.[0]?.id
-  results.push(['会员管理：列表搜索到会员', !!mId])
-  console.log(`  ${mId ? '✓' : '✗'} 会员管理：列表搜索到会员（id ${mId}）`)
-  if (mId) {
-    const mBan = await raw('PUT', `/api/admin/members/${mId}`, {
-      headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ status: 'banned' }),
-    })
-    const mMeBanned = await mJson(await raw('GET', '/api/member/me', { headers: { Cookie: mCookie } }))
-    const bannedOk = mBan.status === 200 && mMeBanned?.member === null
-    results.push(['会员管理：拉黑后会话即失效', bannedOk])
-    console.log(`  ${bannedOk ? '✓' : '✗'} 会员管理：拉黑后会话即失效`)
-    await check('POST', '/api/member/login', 403, 'banned', {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS }),
-    })
-    const mUnban = await raw('PUT', `/api/admin/members/${mId}`, {
-      headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ status: 'active' }),
-    })
-    results.push(['会员管理：恢复 active', mUnban.status === 200])
-    console.log(`  ${mUnban.status === 200 ? '✓' : '✗'} 会员管理：恢复 active`)
-  }
-
-  // ── 会员资料链路（/member 页会员卡）：改昵称（30 天一次，窗口判定下沉 SQL 条件更新）+ 改密码（无找回，改后踢其他设备）──
-  console.log('\n▸ 会员资料链路')
-  // 拉黑测试已踢掉全部会话，重新登录拿新会话（昵称与冷却窗口已在链路开头夹具化）
-  const mPf = await raw('POST', '/api/member/login', {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS }),
-  })
-  const mPfCookie = (mPf.headers.get('set-cookie') || '').split(';')[0]
-
-  // 会员中心页出昵称/密码两张修改卡（冷却中输入框与按钮 disabled）
-  await check('GET', '/member', 200, 'data-member-nickname-form', { headers: { Cookie: mPfCookie } })
-  await check('GET', '/member', 200, 'data-member-password-form', { headers: { Cookie: mPfCookie } })
-  await check('GET', '/member', 200, '不提供密码找回', { headers: { Cookie: mPfCookie } })
-
-  // 改昵称：空值拒绝 → 成功落库且 SSR 即显 → 立即再改撞 30 天窗口（403）
-  await check('POST', '/api/member/profile', 400, '不能为空', {
-    headers: { 'Content-Type': 'application/json', Cookie: mPfCookie },
-    body: JSON.stringify({ nickname: '   ' }),
-  })
-  const mNick = await mJson(
-    await raw('POST', '/api/member/profile', {
-      headers: { 'Content-Type': 'application/json', Cookie: mPfCookie },
-      body: JSON.stringify({ nickname: '冒烟新昵称' }),
-    })
-  )
-  const mNickOk = mNick?.ok === true && mNick?.nickname === '冒烟新昵称'
-  results.push(['会员资料：修改昵称成功', mNickOk])
-  console.log(`  ${mNickOk ? '✓' : '✗'} 会员资料：修改昵称成功`)
-  await check('GET', '/member', 200, '冒烟新昵称', { headers: { Cookie: mPfCookie } })
-  await check('POST', '/api/member/profile', 403, '30 天', {
-    headers: { 'Content-Type': 'application/json', Cookie: mPfCookie },
-    body: JSON.stringify({ nickname: '刚改完又改' }),
-  })
-
-  // 改密码：错旧密码拒绝 → 长度校验 → 改密前先登录一个「第二设备」会话 → 成功改密
-  const MEMBER_PASS2 = 'smoke-member-67890'
-  await check('POST', '/api/member/password', 400, '当前密码不正确', {
-    headers: { 'Content-Type': 'application/json', Cookie: mPfCookie },
-    body: JSON.stringify({ currentPassword: 'wrong-pass-123', newPassword: MEMBER_PASS2 }),
-  })
-  await check('POST', '/api/member/password', 400, '8-64 位', {
-    headers: { 'Content-Type': 'application/json', Cookie: mPfCookie },
-    body: JSON.stringify({ currentPassword: MEMBER_PASS, newPassword: 'short7' }),
-  })
-  const mOld = await raw('POST', '/api/member/login', {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS }),
-  })
-  const mOldCookie = (mOld.headers.get('set-cookie') || '').split(';')[0]
-  const mPwd = await raw('POST', '/api/member/password', {
-    headers: { 'Content-Type': 'application/json', Cookie: mPfCookie },
-    body: JSON.stringify({ currentPassword: MEMBER_PASS, newPassword: MEMBER_PASS2 }),
-  })
-  const mPwdOk = mPwd.status === 200
-  results.push(['会员资料：修改密码成功', mPwdOk])
-  console.log(`  ${mPwdOk ? '✓' : '✗'} 会员资料：修改密码成功（${mPwd.status}）`)
-  // 当前会话保留；其他设备（mOldCookie）被踢下线；旧密码 401、新密码可登录
-  const mKeep = await mJson(await raw('GET', '/api/member/me', { headers: { Cookie: mPfCookie } }))
-  const mKicked = await mJson(await raw('GET', '/api/member/me', { headers: { Cookie: mOldCookie } }))
-  const keepOk = mKeep?.member !== null && mKicked?.member === null
-  results.push(['会员资料：改密后保留当前会话、踢其他设备', keepOk])
-  console.log(`  ${keepOk ? '✓' : '✗'} 会员资料：改密后保留当前会话、踢其他设备`)
-  await check('POST', '/api/member/login', 401, '用户名或密码错误', {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS }),
-  })
-  const mRe = await raw('POST', '/api/member/login', {
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: MEMBER_NAME, password: MEMBER_PASS2 }),
-  })
-  const mReCookie = (mRe.headers.get('set-cookie') || '').split(';')[0]
-  // 改回原密码（下轮冒烟从同一状态开始）；改回动作同样踢掉 mPfCookie，改密者会话 mReCookie 保留
-  const mPwdBack = await raw('POST', '/api/member/password', {
-    headers: { 'Content-Type': 'application/json', Cookie: mReCookie },
-    body: JSON.stringify({ currentPassword: MEMBER_PASS2, newPassword: MEMBER_PASS }),
-  })
-  const mBackOk = mPwdBack.status === 200 && (await mJson(await raw('GET', '/api/member/me', { headers: { Cookie: mReCookie } })))?.member !== null
-  results.push(['会员资料：改回原密码（幂等收尾）', mBackOk])
-  console.log(`  ${mBackOk ? '✓' : '✗'} 会员资料：改回原密码（幂等收尾）`)
-
-  // 收尾关回开关（默认关口径），下轮冒烟从同一状态开始
-  const mOff = await raw('PUT', '/api/admin/settings', {
-    headers: { 'Content-Type': 'application/json', Cookie: cookie },
-    body: JSON.stringify({ membersEnabled: '0' }),
-  })
-  await check('GET', '/member', 404)
-  results.push(['会员链路：关闭开关复原', mOff.status === 200])
-  console.log(`  ${mOff.status === 200 ? '✓' : '✗'} 会员链路：关闭开关复原`)
 
   // ── 文章访问口令（src/protect.ts）：两档站级密码 → 防泄漏 → 解锁 → 覆盖关系 → 改密失效 ──
   console.log('\n▸ 文章访问口令链路（固定密码 / 会员密码）')

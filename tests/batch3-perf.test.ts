@@ -9,7 +9,7 @@ import { SCHEMA_INDEXES, getSettings } from '../src/db.ts'
 
 /* ── 第三批性能修复的回归断言（2026-11-04）──
  * 1) docker-poc/shims/d1.ts 语句缓存：同一 SQL 不重复解析、不同 bind 不串参、DDL 后失效
- * 2) 索引：comments.qq / sessions.user_id / member_sessions.member_id 三条查询真走索引、不扫全表
+ * 2) 索引：comments.qq / sessions.user_id 两条查询真走索引、不扫全表
  * 3) 索引归位：会话两条双份登记，comments.qq 只进 SCHEMA_INDEXES（老库运行时补列）
  * 4) getSettings：并发读返回各自副本，后台把密钥改掩码不会污染别的请求
  */
@@ -93,10 +93,8 @@ function seededDb(): DatabaseSync {
     c.run(`访客${i}`, i % 2 ? '10001' : '', i % 3 ? '/images/a.png' : '', '内容', 'approved', 1700000000000 + i)
   }
   const s = db.prepare('INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
-  const ms = db.prepare('INSERT INTO member_sessions (token, member_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
   for (let i = 0; i < 120; i++) {
     s.run(`t${i}`, i % 7 + 1, 1800000000000 + i, 1700000000000 + i)
-    ms.run(`m${i}`, i % 7 + 1, 1800000000000 + i, 1700000000000 + i)
   }
   return db
 }
@@ -118,7 +116,7 @@ test('EXPLAIN：游客 QQ 头像反查走 idx_comments_qq，不扫全表评论',
   db.close()
 })
 
-test('EXPLAIN：管理员 / 会员会话按账号统计与清理都走新索引', () => {
+test('EXPLAIN：管理员会话按账号统计与清理都走新索引', () => {
   const db = seededDb()
   // COUNT 只取索引列时 SQLite 会给出 USING COVERING INDEX（比 USING INDEX 更好，连表都不回）
   const uses = (plan: string, index: string) => new RegExp(`USING (?:COVERING )?INDEX ${index}\\b`).test(plan)
@@ -127,11 +125,6 @@ test('EXPLAIN：管理员 / 会员会话按账号统计与清理都走新索引'
   assert.ok(!/SCAN sessions/.test(s1), `会话计数全表扫：${s1}`)
   const s2 = planOf(db, 'DELETE FROM sessions WHERE user_id = ? AND expires_at <= ?')
   assert.ok(uses(s2, 'idx_sessions_user'), `过期会话清理未走索引：${s2}`)
-  const m1 = planOf(db, 'SELECT COUNT(*) AS n FROM member_sessions WHERE member_id = ?')
-  assert.ok(uses(m1, 'idx_member_sessions_member'), `会员会话计数未走索引：${m1}`)
-  assert.ok(!/SCAN member_sessions/.test(m1), `会员会话计数全表扫：${m1}`)
-  const m2 = planOf(db, 'DELETE FROM member_sessions WHERE member_id = ? AND expires_at <= ?')
-  assert.ok(uses(m2, 'idx_member_sessions_member'), `会员过期会话清理未走索引：${m2}`)
   db.close()
 })
 
@@ -139,7 +132,6 @@ test('索引归位：会话索引双份登记，comments.qq 只进 SCHEMA_INDEXE
   const sql = norm(SCHEMA_SQL)
   for (const ddl of [
     'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at)',
-    'CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at)',
   ]) {
     assert.ok(sql.includes(norm(ddl)), `schema.sql 缺：${ddl}`)
     assert.ok(SCHEMA_INDEXES.includes(ddl), `SCHEMA_INDEXES 缺：${ddl}`)

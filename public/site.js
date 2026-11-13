@@ -846,8 +846,7 @@
   }
 
   // 平铺评论 → 楼中楼（父评论被删的回复按顶层展示）。
-  // memberName（会员 3.0 预备）：接口随列表下发当前登录会员昵称，非空 = 渲染「回复」按钮（会员可回复楼中楼）
-  function renderWeiboComments(panel, comments, isAdmin, adminAvatar, memberName, viewerRank) {
+  function renderWeiboComments(panel, comments, isAdmin, adminAvatar) {
     var listEl = panel.querySelector('[data-role=list]')
     if (!listEl) return
     var byParent = {}
@@ -864,71 +863,33 @@
       listEl.innerHTML = '<p class="wb-cmt-empty">' + '还没有评论，来抢沙发～' + '</p>'
       return
     }
-    // 评论圈层可见（src/commentgate.ts）：遮罩由服务端判定并清空 content，这里只画占位块——
-    // 正文与回复都不在出参里，客户端不持有原文（与 SSR 评论区同一套文案口径）。viewerRank 0 = 游客
-    var vRank = Number(viewerRank) || 0
-    function gateTitle(c) {
-      var who = c.gate_tier_name || ('会员')
-      return '这条评论仅对' + who + '及以上可见'
-    }
-    function gateHint() {
-      return vRank > 0 ? '升级档位后可见' : '登录会员后可见'
-    }
-    function gateMore(c) {
-      var who = c.gate_tier_name || ('会员')
-      var n = Number(c.gate_hidden) || 0
-      return '另有 ' + n + ' 条回复，同样仅对' + who + '及以上可见'
-    }
     // 评论头像位（服务端 commentAvatarHtml 的 ES5 手工镜像，改任一侧记得同步）：
-    // 会员有站内头像用图；作者（管理员）发言用站点头像（adminAvatar，接口随列表下发）；
-    // 游客自填 QQ 抓取转存的站内头像（接口只出 /images/ 地址，qq 本体永不下发）；其余退回昵称首字块
+    // 作者（管理员）发言用站点头像（adminAvatar，接口随列表下发）；游客自填 QQ 抓取转存的
+    // 站内头像（接口只出 /images/ 地址，qq 本体永不下发）；其余退回昵称首字块
     function avatarHtml(c) {
-      if (c.member_avatar) return '<img class="wb-cmt-avatar wb-cmt-avatar-img" src="' + esc(c.member_avatar) + '" alt="">'
       if (Number(c.is_admin) && adminAvatar) return '<img class="wb-cmt-avatar wb-cmt-avatar-img" src="' + esc(adminAvatar) + '" alt="">'
       if (c.avatar) return '<img class="wb-cmt-avatar wb-cmt-avatar-img" src="' + esc(c.avatar) + '" alt="">'
       var ch = (c.nickname || ('客')).charAt(0) || ('客')
       return '<span class="wb-cmt-avatar" aria-hidden="true">' + esc(ch) + '</span>'
     }
     function item(c, nested, floor) {
-      // 会员徽标（服务端解析好的展示串）：member_tier_name 非空 = 生效档位是非基础档，出带 ✓ 的
-      // 认证徽标（色值接口已过白名单）；否则回落「会员」普通徽标（member_name 在场才出）
-      var tierBadge = ''
-      if (c.member_tier_name) {
-        var tc = esc(c.member_tier_color || '')
-        tierBadge = '<span class="wb-cmt-badge"' + (tc ? ' style="color:' + tc + ';border-color:' + tc + '"' : '') + '>✓ ' + esc(c.member_tier_name) + '</span>'
-      } else if (c.member_name) {
-        tierBadge = '<span class="wb-cmt-badge">' + ('会员') + '</span>'
-      }
-      var gated = !!c.gated
       var replyBtn = '<button type="button" class="wb-cmt-reply-btn" data-reply="' + c.id + '" data-name="' + esc(c.nickname) + '">' + '回复' + '</button>'
-      // 遮罩项：正文换占位块，不给回复/删除键（回复权限另有服务端写侧判定）
-      var body = gated
-        ? '<div class="wb-cmt-gate" style="border:1px dashed currentColor;border-radius:8px;padding:8px 10px;opacity:.6;font-size:13px;line-height:1.6">' +
-          '<span>' + esc(gateTitle(c)) + '</span>' +
-          '<span style="display:block;font-size:11px;opacity:.75;margin-top:2px">' + esc(gateHint()) + '</span>' +
-          '</div>' +
-          (Number(c.gate_hidden) > 0 ? '<div class="wb-cmt-gate-more" style="font-size:12px;opacity:.55;margin-top:6px">' + esc(gateMore(c)) + '</div>' : '')
-        : '<div class="wb-cmt-body">' + wxqReplace(esc(c.content)) + '</div>'
+      var body = '<div class="wb-cmt-body">' + wxqReplace(esc(c.content)) + '</div>'
       var html =
-        '<li class="wb-cmt-item' + (nested ? ' wb-cmt-nested' : '') + (gated ? ' wb-cmt-item-gated' : '') + '" id="wbc-' + c.id + '">' +
+        '<li class="wb-cmt-item' + (nested ? ' wb-cmt-nested' : '') + '" id="wbc-' + c.id + '">' +
         '<div class="wb-cmt-head">' + avatarHtml(c) + '<span class="wb-cmt-name">' + esc(c.nickname) +
-        (Number(c.is_admin) ? '<span class="wb-cmt-badge">' + '楼主' + '</span>' : tierBadge) +
+        (Number(c.is_admin) ? '<span class="wb-cmt-badge">' + '楼主' + '</span>' : '') +
         '</span><span class="wb-cmt-time">' + fmtTime(c.created_at) + '</span>' +
         // IP 属地：接口在 showCommentRegion 开启时才带 ip_region（已是服务端格式化好的标签），与楼号同款小灰字
         (c.ip_region ? '<span class="wb-cmt-region" style="font-size:11px;opacity:0.45">' + esc(c.ip_region) + '</span>' : '') +
         (floor ? '<span class="wb-cmt-floor" style="font-size:11px;opacity:0.45;font-variant-numeric:tabular-nums">#' + floor + '</span>' : '') +
-        (gated
-          ? ''
-          : isAdmin
-            ? replyBtn +
-              '<button type="button" class="wb-cmt-del-btn" data-cmt-del="' + c.id + '" title="' + '删除这条评论（其下回复一并删除，不可恢复）' + '">' + '删除' + '</button>'
-            : memberName
-              ? replyBtn
-              : '') +
+        (isAdmin
+          ? replyBtn +
+            '<button type="button" class="wb-cmt-del-btn" data-cmt-del="' + c.id + '" title="' + '删除这条评论（其下回复一并删除，不可恢复）' + '">' + '删除' + '</button>'
+          : '') +
         '</div>' + body
       var kids = byParent[c.id] || []
-      // 遮罩项的回复同属私密线程（服务端同样遮罩），所以不再逐条渲染——占位块下方已有「另有 N 条回复」
-      if (!gated && kids.length) html += '<ul class="wb-cmt-children">' + kids.map(function (k) { return item(k, true) }).join('') + '</ul>'
+      if (kids.length) html += '<ul class="wb-cmt-children">' + kids.map(function (k) { return item(k, true) }).join('') + '</ul>'
       return html + '</li>'
     }
     listEl.innerHTML = '<ul class="wb-cmt-list">' + tops.map(function (c, i) { return item(c, false, i + 1) }).join('') + '</ul>'
@@ -946,7 +907,7 @@
     listEl.innerHTML = '<p class="wb-cmt-loading">' + '加载中…' + '</p>'
     Promise.all([getJSON('/api/public/weibo/' + encodeURIComponent(wbId) + '/comments'), authState()])
       .then(function (rs) {
-        renderWeiboComments(panel, (rs[0] && rs[0].comments) || [], !!(rs[1] && rs[1].user), (rs[0] && rs[0].adminAvatar) || '', (rs[0] && rs[0].memberName) || '', (rs[0] && rs[0].viewerRank) || 0)
+        renderWeiboComments(panel, (rs[0] && rs[0].comments) || [], !!(rs[1] && rs[1].user), (rs[0] && rs[0].adminAvatar) || '')
         panel.dataset.loaded = '1'
         delete panel.dataset.loading
       })
@@ -2936,313 +2897,6 @@
     window.addEventListener('scroll', onScroll, { passive: true })
     onScroll()
   })()
-
-  /* ---------------- 会员（/member：登录 / 注册 / 退出，API 见 DEVPLAN 附录 A5） ----------------
-   * 表单为服务端渲染（memberAuthHtml），这里只接管提交与双表单切换；
-   * 无 JS 时两个表单都可见可直接提交，有 JS 时只显当前一个 */
-  var memAuth = document.querySelector('.mem-auth')
-  if (memAuth) {
-    var memForms = memAuth.querySelectorAll('[data-member-form]')
-    /* 注册人机验证（Turnstile，A2 根治）：sitekey 挂 <html data-turnstile>（服务端仅 /member
-     * 下发），未配置则整个分支旁路、注册行为与历史完全一致。组件用显式渲染、注册表单首次
-     * 可见时才挂（隐藏容器里 Turnstile 渲染不出）；令牌一次性，注册失败后 reset 换新再提交；
-     * 脚本加载失败不重试到成功不给出路——无令牌的提交会被服务端拒绝（fail closed） */
-    var turnstileSiteKey = document.documentElement.getAttribute('data-turnstile') || ''
-    var turnstileReady = false
-    var turnstileLoading = false
-    var turnstileWidgetId = null
-    var turnstileToken = function () {
-      return turnstileReady && window.turnstile && window.turnstile.getResponse && turnstileWidgetId !== null
-        ? window.turnstile.getResponse(turnstileWidgetId)
-        : ''
-    }
-    var turnstileEnsure = function () {
-      if (!turnstileSiteKey || turnstileReady || turnstileLoading) return
-      turnstileLoading = true
-      window.__xwTurnstileCb = function () {
-        turnstileLoading = false
-        var form = memAuth.querySelector('[data-member-form="register"]')
-        if (!form || !window.turnstile || !window.turnstile.render) return
-        var box = document.createElement('div')
-        box.className = 'mem-turnstile'
-        form.insertBefore(box, form.querySelector('.mem-btn'))
-        turnstileWidgetId = window.turnstile.render(box, { sitekey: turnstileSiteKey })
-        turnstileReady = true
-      }
-      var sc = document.createElement('script')
-      sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__xwTurnstileCb'
-      sc.async = true
-      sc.onerror = function () { turnstileLoading = false }
-      document.head.appendChild(sc)
-    }
-    var turnstileReset = function () {
-      if (turnstileReady && window.turnstile && window.turnstile.reset && turnstileWidgetId !== null) {
-        window.turnstile.reset(turnstileWidgetId)
-      }
-    }
-    if (memForms.length > 1) {
-      var memShow = function (name) {
-        memForms.forEach(function (f) {
-          f.hidden = f.getAttribute('data-member-form') !== name
-        })
-        if (name === 'register') turnstileEnsure()
-      }
-      memAuth.addEventListener('click', function (e) {
-        var btn = e.target && e.target.closest ? e.target.closest('[data-member-swap]') : null
-        if (btn) memShow(btn.getAttribute('data-member-swap') || 'login')
-      })
-      memShow('login')
-    }
-    memForms.forEach(function (form) {
-      var kind = form.getAttribute('data-member-form')
-      var tip = form.querySelector('[data-member-tip]')
-      form.addEventListener('submit', function (e) {
-        e.preventDefault()
-        var btn = form.querySelector('.mem-btn')
-        if (!btn || btn.disabled) return
-        var username = form.querySelector('[name=username]')
-        var password = form.querySelector('[name=password]')
-        var email = form.querySelector('[name=email]')
-        var emailConfirm = form.querySelector('[name=emailConfirm]')
-        var link = form.querySelector('[name=link]')
-        if (!username || !username.value.trim() || !password || !password.value) return
-        /* 邮箱必填（服务端也拦）+ 二次输入防手误：它是跨站会员继承唯一的身份凭据，
-         * 填错等于认领不到权益。两次比对忽略大小写（地址本身大小写不敏感），不一致就地停下，
-         * 不发注定失败的请求。 */
-        if (kind === 'register') {
-          var mailIn = email ? email.value.trim() : ''
-          var mailAgain = emailConfirm ? emailConfirm.value.trim() : ''
-          if (!mailIn) {
-            if (tip) tip.textContent = '请填写邮箱'
-            if (email) email.focus()
-            return
-          }
-          if (mailIn.toLowerCase() !== mailAgain.toLowerCase()) {
-            if (tip) tip.textContent = '两次输入的邮箱不一致，请核对'
-            if (emailConfirm) {
-              emailConfirm.focus()
-              emailConfirm.select()
-            }
-            return
-          }
-        }
-        var label = btn.textContent
-        btn.textContent = kind === 'register' ? '注册中…' : '登录中…'
-        btn.disabled = true
-        var body = { username: username.value.trim(), password: password.value, link: link ? link.value : '' }
-        if (kind === 'register') {
-          var nick = form.querySelector('[name=nickname]')
-          if (nick && nick.value.trim()) body.nickname = nick.value.trim()
-          if (email) body.email = email.value.trim() // emailConfirm 只在前端比对，不上送（它只防手误，不是数据）
-          // 邀请码（选填）：一码一人，服务端核销后直接把会员提到码上指定的档位；
-          // 关闭开放注册时它就是唯一入口，留空会被服务端拒绝
-          var inv = form.querySelector('[name=inviteCode]')
-          if (inv && inv.value.trim()) body.inviteCode = inv.value.trim()
-          // Turnstile 令牌（配置了 sitekey 才校验）：未就绪先在本侧拦下，省一次注定失败的请求
-          if (turnstileSiteKey) {
-            var tok = turnstileToken()
-            if (!tok) {
-              if (tip) tip.textContent = turnstileReady ? '请先完成人机验证' : '人机验证还没就绪，请稍候再试'
-              btn.textContent = label
-              btn.disabled = false
-              return
-            }
-            body.turnstileToken = tok
-          }
-        }
-        postJSON('/api/member/' + kind, body)
-          .then(function () {
-            if (tip) tip.textContent = kind === 'register' ? '注册成功，正在进入…' : '登录成功，正在进入…'
-            setTimeout(function () {
-              reloadFresh()
-            }, 500)
-          })
-          .catch(function (err) {
-            if (tip) tip.textContent = err.message || '操作失败，请重试'
-            btn.textContent = label
-            btn.disabled = false
-            if (kind === 'register') turnstileReset()
-          })
-      })
-    })
-  }
-
-  // 会员中心卡（memberCardHtml）：昵称 30 天一次、密码无找回；提交走 /api/member/profile|password
-  var memNickForm = document.querySelector('[data-member-nickname-form]')
-  if (memNickForm) {
-    memNickForm.addEventListener('submit', function (e) {
-      e.preventDefault()
-      var btn = memNickForm.querySelector('.mem-btn')
-      var tip = memNickForm.querySelector('[data-member-tip]')
-      var input = memNickForm.querySelector('[name=nickname]')
-      if (!btn || btn.disabled) return
-      if (!input || !input.value.trim()) {
-        if (tip) tip.textContent = '昵称不能为空'
-        return
-      }
-      var label = btn.textContent
-      btn.disabled = true
-      btn.textContent = '保存中…'
-      postJSON('/api/member/profile', { nickname: input.value.trim() })
-        .then(function () {
-          if (tip) tip.textContent = '昵称已更新，正在刷新…'
-          setTimeout(function () {
-            reloadFresh()
-          }, 500)
-        })
-        .catch(function (err) {
-          if (tip) tip.textContent = err.message || '保存失败，请重试'
-          btn.textContent = label
-          btn.disabled = false
-        })
-    })
-  }
-
-  // 会员中心卡（memberCardHtml）：QQ 头像绑定（评论头像 C2）——绑过再存即幂等重试头像；
-  // QQ 号正则与 utils.ts isValidQQ 同款镜像，改任一侧记得同步
-  var memQQForm = document.querySelector('[data-member-qq-form]')
-  if (memQQForm) {
-    memQQForm.addEventListener('submit', function (e) {
-      e.preventDefault()
-      var btn = memQQForm.querySelector('.mem-btn')
-      var tip = memQQForm.querySelector('[data-member-tip]')
-      var input = memQQForm.querySelector('[name=qq]')
-      if (!btn || btn.disabled) return
-      var qq = input ? input.value.trim() : ''
-      if (!/^[1-9][0-9]{4,10}$/.test(qq)) {
-        if (tip) tip.textContent = 'QQ 号格式不对（5-11 位数字，不以 0 开头）'
-        return
-      }
-      var label = btn.textContent
-      btn.disabled = true
-      btn.textContent = '保存中…'
-      postJSON('/api/member/profile', { qq: qq })
-        .then(function (d) {
-          if (d && d.avatarFailed) {
-            // 头像抓取失败但 qq 已记上：提示重试（服务端容忍失败是设计口径）
-            if (tip) tip.textContent = 'QQ 已绑定，但头像没抓到，稍后再点一次重试'
-            btn.textContent = '重试头像'
-            btn.disabled = false
-          } else {
-            if (tip) tip.textContent = '已保存，正在刷新…'
-            setTimeout(function () {
-              reloadFresh()
-            }, 500)
-          }
-        })
-        .catch(function (err) {
-          if (tip) tip.textContent = err.message || '保存失败，请重试'
-          btn.textContent = label
-          btn.disabled = false
-        })
-    })
-  }
-
-  var memPwdForm = document.querySelector('[data-member-password-form]')
-  if (memPwdForm) {
-    memPwdForm.addEventListener('submit', function (e) {
-      e.preventDefault()
-      var btn = memPwdForm.querySelector('.mem-btn')
-      var tip = memPwdForm.querySelector('[data-member-tip]')
-      var cur = memPwdForm.querySelector('[name=current]')
-      var next = memPwdForm.querySelector('[name=next]')
-      if (!btn || btn.disabled) return
-      if (!cur || !cur.value || !next || !next.value) {
-        if (tip) tip.textContent = '请填写当前密码与新密码'
-        return
-      }
-      if (next.value.length < 8) {
-        if (tip) tip.textContent = '新密码至少 8 位'
-        return
-      }
-      var label = btn.textContent
-      btn.disabled = true
-      btn.textContent = '提交中…'
-      postJSON('/api/member/password', { currentPassword: cur.value, newPassword: next.value })
-        .then(function () {
-          if (tip) tip.textContent = '密码已修改，其他设备已退出登录。请务必记好新密码'
-          if (cur) cur.value = ''
-          if (next) next.value = ''
-          btn.textContent = label
-          btn.disabled = false
-        })
-        .catch(function (err) {
-          if (tip) tip.textContent = err.message || '修改失败，请重试'
-          btn.textContent = label
-          btn.disabled = false
-        })
-    })
-  }
-
-  // 每日签到（铁粉体系 3.0-M1）：POST /api/member/checkin，成功刷新看新等级与积分
-  var memCheckinBtn = document.querySelector('[data-member-checkin-btn]')
-  if (memCheckinBtn)
-    memCheckinBtn.addEventListener('click', function () {
-      if (memCheckinBtn.disabled) return
-      var tip = document.querySelector('[data-member-checkin-tip]')
-      var card = document.querySelector('[data-member-checkin]')
-      memCheckinBtn.disabled = true
-      postJSON('/api/member/checkin', {})
-        .then(function (d) {
-          if (card) card.setAttribute('data-checked', '1')
-          memCheckinBtn.textContent = '已签到'
-          memCheckinBtn.disabled = true
-          var extra = d.bonus ? '，连续签到加成 +' + d.bonus : ''
-          if (tip) tip.textContent = '签到成功 +' + d.delta + extra + '，当前连续 ' + d.streak + ' 天'
-          setTimeout(function () {
-            reloadFresh()
-          }, 1200)
-        })
-        .catch(function (err) {
-          if (tip) tip.textContent = err.message || '签到失败，请重试'
-          memCheckinBtn.disabled = false
-        })
-    })
-
-  // 积分兑换优质会员（2026-11 会员第五批）：POST /api/member/redeem-premium。
-  // 一次兑换永久有效，所以成功后就整页刷新让档位徽标换成新档；失败只写 tip 不动按钮
-  var memRedeemBtn = document.querySelector('[data-member-redeem]')
-  if (memRedeemBtn)
-    memRedeemBtn.addEventListener('click', function () {
-      if (memRedeemBtn.disabled) return
-      var tip = document.querySelector('[data-member-redeem-tip]')
-      var label = memRedeemBtn.textContent
-      if (!confirm('确认用积分兑换会员？兑换后积分不退。')) return
-      memRedeemBtn.disabled = true
-      memRedeemBtn.textContent = '兑换中…'
-      postJSON('/api/member/redeem-premium', {})
-        .then(function (d) {
-          memRedeemBtn.textContent = '兑换成功'
-          if (tip) tip.textContent = '已升级为「' + d.tierName + '」，剩余积分 ' + d.points
-          setTimeout(function () {
-            reloadFresh()
-          }, 1200)
-        })
-        .catch(function (err) {
-          if (tip) tip.textContent = err.message || '兑换失败，请重试'
-          memRedeemBtn.textContent = label
-          memRedeemBtn.disabled = false
-        })
-    })
-
-  var memLogout = document.querySelector('[data-member-logout]')
-  if (memLogout)
-    memLogout.addEventListener('click', function () {
-      if (memLogout.disabled) return
-      var label = memLogout.textContent
-      memLogout.disabled = true
-      postJSON('/api/member/logout', {})
-        .then(function () {
-          reloadFresh()
-        })
-        .catch(function (err) {
-          memLogout.disabled = false
-          memLogout.textContent = err.message || '退出失败，请重试'
-          setTimeout(function () {
-            memLogout.textContent = label
-          }, 2000)
-        })
-    })
 
   /* ---------------- 搜索框：输入联想 + 最近搜索（2026-11 搜索强化） ----------------
    * 只增强「表单提交到 /search」的那个输入框：八套主题的搜索框 action 都是 /search，

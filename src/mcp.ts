@@ -246,7 +246,7 @@ async function runListComments(deps: McpDeps, args: Record<string, unknown>): Pr
   const [listRes, countRes] = await Promise.all([
     deps.db
       .prepare(
-        `SELECT c.id, c.post_id, c.weibo_id, c.parent_id, c.is_admin, c.member_id, c.nickname, c.website,
+        `SELECT c.id, c.post_id, c.weibo_id, c.parent_id, c.is_admin, c.nickname, c.website,
                 c.content, c.status, c.created_at,
                 p.title AS post_title, p.slug AS post_slug, w.content AS weibo_content, pc.nickname AS parent_nickname
          FROM comments c ${indexHint}

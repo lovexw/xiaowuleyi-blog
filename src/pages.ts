@@ -1,9 +1,8 @@
 import type { Context } from 'hono'
-import { clientIp, getCookie, getMemberUser, getSessionUser } from './auth'
+import { clientIp, getCookie, getSessionUser } from './auth'
 import { replaceEmoji } from './emoji'
 import {
   getCategoryBySlug,
-  getMemberById,
   getPage,
   findPublishedByOldSlug,
   getPostBySlug,
@@ -21,23 +20,16 @@ import {
   listPages,
   listPosts,
   listPublishedTagsCached,
-  listRankTop,
   listWeibo,
   listWeiboTopics,
   locateWeiboPage,
-  listMemberComments,
-  listMemberLikes,
-  listMemberReplies,
-  listMemberVisits,
   parseTags,
   postCommentCountMap,
-  recordMemberVisit,
   relatedPosts,
   weiboCommentCountMap,
   weiboImageList,
   weiboVideoView,
   type PostSort,
-  type RankMemberRow,
 } from './db'
 import { searchPages, searchPosts, searchWeibo } from './fts'
 import { htmlToMd } from './html-md'
@@ -49,11 +41,8 @@ import {
   commentsHtml,
   HOME_SORTS,
 
-  memberAuthHtml,
-  memberCardHtml,
   page,
 
-  rankListHtml,
   responsiveContentImages,
   SEARCH_HL_CSS,
   searchExtrasHtml,
@@ -66,23 +55,17 @@ import {
   stripCoverDuplicate,
 
   type CategoryLink,
-  type MemberActivityView,
   type NavPage,
-  type RankEntryView,
   type SearchSort,
   type WeiboItemView,
 } from './render'
 import { extractOgImage, sanitizeHtml } from './sanitize'
 import { canEverUnlock, canRead, gateFormHtml, GATE_COOKIE, GATE_CSS, gateHashesOf, normalizeAccess, protectedDescription } from './protect'
-import { canReadTiers, effectiveTier, parseMemberTiers, upgradeTarget, type MemberTierDef } from './tiers'
-import { applyCommentGate, commentGateContext, commentGateText, threadRootTier, type GateContext } from './commentgate'
 import { renderPostContentHtml } from './hooks'
 import { getTheme } from './themes/registry'
-import type { MemberData, RankData } from './themes/registry'
 import type { Env, PostRow, SessionUser, SettingsMap } from './types'
 import { packMatrix, qrMatrix } from './qrcode'
-import { fanDay, fanLevel, fanLevelName } from './fanrank'
-import { clampInt, esc, excerpt, siteVisibleCutoff, visibleRangeAppliesToMembers, weiboVisibleCutoff } from './utils'
+import { clampInt, esc, excerpt, siteVisibleCutoff, weiboVisibleCutoff } from './utils'
 import { analyticsOrigin, breadcrumbJsonLd, contentSignalValue, isSpeculativeRequest, readAiPolicy } from './seo'
 import { needsFontSrc } from './skinpack'
 
@@ -95,22 +78,17 @@ function pageOpts(c: C, o: Parameters<typeof page>[0]): Parameters<typeof page>[
   return o.settings.siteNoindex === '1' ? { ...o, noindex: true } : o
 }
 
-/** Cloudflare Turnstile 挑战脚本与 iframe 的固定可信端点（仅会员页放行） */
-const TURNSTILE_ORIGIN = 'https://challenges.cloudflare.com'
-
 /**
- * 公开页 CSP 组装（默认严格，三处按需放宽）：
+ * 公开页 CSP 组装（默认严格，两处按需放宽）：
  *  ① 统计脚本（settings.analyticsScript）：只放行该脚本自己的域——script-src 载脚本、connect-src 让
  *     它的 fetch / sendBeacon 上报能过；未配置时两者都不出现；
  *  ② Speculation Rules 预取声明：内联 <script type="speculationrules"> 同样受 script-src 约束，需
  *     'inline-speculation-rules' 关键词（MDN「script type=speculationrules」节）。不认该关键词的
- *     浏览器按未知源忽略、内联脚本照旧被拦——只开这一扇窗，不放宽任何其它内联脚本；
- *  ③ 会员页 Turnstile：挑战脚本 + 挑战 iframe（frame-src）。
+ *     浏览器按未知源忽略、内联脚本照旧被拦——只开这一扇窗，不放宽任何其它内联脚本。
  */
-function buildCsp(opts: { analyticsOrigin?: string | null; turnstile?: boolean; fontSrc?: boolean } = {}): string {
+function buildCsp(opts: { analyticsOrigin?: string | null; fontSrc?: boolean } = {}): string {
   const script = ["'self'", "'inline-speculation-rules'"]
   if (opts.analyticsOrigin) script.push(opts.analyticsOrigin)
-  if (opts.turnstile) script.push(TURNSTILE_ORIGIN)
   const parts = [
     "default-src 'self'",
     "style-src 'self' 'unsafe-inline'",
@@ -122,7 +100,6 @@ function buildCsp(opts: { analyticsOrigin?: string | null; turnstile?: boolean; 
     "form-action 'self'",
     "object-src 'none'",
   ]
-  if (opts.turnstile) parts.push(`frame-src 'self' ${TURNSTILE_ORIGIN}`)
   // 皮肤包自定义 CSS（src/skinpack.ts）需要外链字体时才放宽，无 CSS 的站点 CSP 字节级不变
   if (opts.fontSrc) parts.push("font-src 'self' https: data:")
   if (opts.analyticsOrigin) parts.push(`connect-src 'self' ${opts.analyticsOrigin}`)
@@ -228,25 +205,6 @@ function themePageHtml(theme: ReturnType<typeof getTheme>, d: Parameters<typeof 
 </div>`
 }
 
-/** 主题 member() 的运行时兜底：第三方主题未实现时渲染通用版（会员卡/表单 + 返回首页） */
-function themeMemberHtml(theme: ReturnType<typeof getTheme>, d: MemberData): string {
-  if (typeof theme.member === 'function') return theme.member(d)
-  return `<div style="max-width:520px;margin:0 auto;padding:32px 20px 60px;">
-  ${d.member ? memberCardHtml(d.member) : memberAuthHtml( d)}
-  <p style="margin-top:32px;"><a href="/">← 返回首页</a></p>
-</div>`
-}
-
-/** 主题 rank() 的运行时兜底：第三方主题未实现时渲染通用版（榜单列表 + 返回首页） */
-function themeRankHtml(theme: ReturnType<typeof getTheme>, d: RankData): string {
-  if (typeof theme.rank === 'function') return theme.rank(d)
-  return `<div style="max-width:640px;margin:0 auto;padding:32px 20px 60px;">
-  <h1 style="margin-bottom:18px;">排行榜</h1>
-  ${rankListHtml(d.entries) || '<p>还没有会员上榜。</p>'}
-  <p style="margin-top:32px;"><a href="/">← 返回首页</a></p>
-</div>`
-}
-
 export async function renderHome(c: C): Promise<Response> {
   return renderList(c, { mode: 'home' })
 }
@@ -297,14 +255,10 @@ async function renderList(
     sort === 'random' ? clampInt(url.searchParams.get('seed'), 1, 999999999, 0) || 1 + Math.floor(Math.random() * 999999998) : 0
   // 站点可见窗口（朋友圈式 N 天可见）：文章与微博各读各的档位（settings.contentVisibleRangePosts /
   // contentVisibleRangeWeibo，旧单键由 utils.visibleRangeOf 回落）；cutoff 由服务端按档位白名单计算，
-  // URL 传什么都改变不了窗口口径。站点选择「不限制会员」时，已登录会员按 0（不受限）处理。
+  // URL 传什么都改变不了窗口口径。
   // 历史上的今天在任一窗口开启期间整体隐藏（本质是展示往年内容，与窗口直接冲突）
-  const postCutoffBase = siteVisibleCutoff(settings)
-  const weiboCutoffBase = weiboVisibleCutoff(settings)
-  const memberMayBypass = !visibleRangeAppliesToMembers(settings) && membersEnabled(settings)
-  const earlyMember = memberMayBypass && (postCutoffBase || weiboCutoffBase) ? await getMemberUser(c.env.DB, c.req.raw) : null
-  const postCutoff = earlyMember ? 0 : postCutoffBase
-  const weiboCutoff = earlyMember ? 0 : weiboCutoffBase
+  const postCutoff = siteVisibleCutoff(settings)
+  const weiboCutoff = weiboVisibleCutoff(settings)
 
   // 搜索模式与首页同一套分页：文章走 FTS5（src/fts.ts，短词自动退回 LIKE 同口径），
   // 页码/每页条数由 URL 与 settings.postsPerPage 决定，越界页码在 fts.ts 内部回落到最后一页
@@ -318,7 +272,6 @@ async function renderList(
     wbFeedRaw,
     feedUser,
     otd,
-    memberSession,
     // 搜索页微博结果（ROADMAP B4）：微博此前不参与搜索，这里顺带纳入（短词兜底在 fts.ts 内部）
     wbSearch,
     // 搜索页的独立页面结果
@@ -353,9 +306,6 @@ async function renderList(
     // 历史上的今天：仅首页第一页且未带筛选时查（有内部按天缓存）；任一可见窗口开启时整体隐藏
     // ——该模块本质是展示往年内容，与「N 天可见」直接冲突
     opts.mode === 'home' && pageNum === 1 && !tag && !q && !postCutoff && !weiboCutoff ? listOnThisDay(c.env.DB) : Promise.resolve(null),
-    // 会员会话（首页微博流的 memberName 用；未开启时省一次查询，无 Cookie 时是纯内存快路径）。
-    // 上面为会员豁免提前查过就直接复用，避免同一请求查两次
-    earlyMember ? Promise.resolve(earlyMember) : membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
     // 搜索页微博结果（ROADMAP B4）：长词走 weibo_fts、短词 LIKE 扫微博表，都在 fts.ts 内部定（吃微博可见窗口）
     opts.mode === 'search' && sq ? searchWeibo(c.env.DB, sq, 20, weiboCutoff) : Promise.resolve(null),
     // 搜索页的独立页面结果（/page/:slug 那套自建页）：页面数量少，走 LIKE 全扫（fts.ts 里说明过不建虚表）
@@ -411,7 +361,6 @@ async function renderList(
     total: number
     allowComments: boolean
     adminName?: string
-    memberName?: string
   } | null = null
   if (wbFeedRaw) {
     const cmt = await weiboCommentCountMap(
@@ -432,8 +381,6 @@ async function renderList(
       total: wbFeedRaw.total,
       allowComments: settings.allowComments === '1',
       adminName: feedUser ? (feedUser.display_name || feedUser.username || '').slice(0, 24) : undefined,
-      memberName:
-        !feedUser && memberSession ? (memberSession.display_name || memberSession.username || '').slice(0, 24) : undefined,
     }
   }
 
@@ -666,17 +613,12 @@ export async function renderPost(c: C): Promise<Response> {
   const theme = getTheme(settings.theme)
   const slug = c.req.param('slug') ?? ''
   const row = await getPostBySlug(c.env.DB, slug)
-  // 文章可见窗口（settings.contentVisibleRangePosts，旧单键由 utils 回落）。会员豁免只在
-  // 「站点选择不限制会员」且会员已登录时生效；管理员仍走原有登录预览路
+  // 文章可见窗口（settings.contentVisibleRangePosts，旧单键由 utils 回落）。管理员仍走原有登录预览路
   const baseCutoff = siteVisibleCutoff(settings)
-  const memberMayBypass = !visibleRangeAppliesToMembers(settings) && membersEnabled(settings)
   if (!row) {
     // 旧 slug 301（B22）：改过 slug 的文章，旧地址永久跳新地址——判定与 404 同口径
-    // （现存已发布 + 站点可见窗口内），回收站 / 草稿 / 窗口外保持 404 不透露存在性；
-    // 会员豁免时窗口外文章也允许 301（会员点开内容不该落 404）
-    let lookupCutoff = baseCutoff
-    if (lookupCutoff && memberMayBypass && (await getMemberUser(c.env.DB, c.req.raw))) lookupCutoff = 0
-    const hit = await findPublishedByOldSlug(c.env.DB, slug, lookupCutoff)
+    // （现存已发布 + 站点可见窗口内），回收站 / 草稿 / 窗口外保持 404 不透露存在性
+    const hit = await findPublishedByOldSlug(c.env.DB, slug, baseCutoff)
     if (hit && hit.slug !== slug) return c.redirect(`/post/${hit.slug}`, 301)
     return renderNotFound(c)
   }
@@ -689,17 +631,15 @@ export async function renderPost(c: C): Promise<Response> {
   }
   // 站点可见窗口（朋友圈式 N 天可见）：窗口外文章对游客不可见——直链即 404（内容仍在库，
   // 后台管理与备份不受影响）；管理员登录放行预览。解锁 Cookie 不豁免：时间门是第一道门。
-  // 站点「不限制会员」时，已登录会员同样放行（visibleCutoff 归 0，相关/相邻文章也随之放开）
   let visibleCutoff = baseCutoff
   if (visibleCutoff && (row.published_at ?? row.created_at ?? 0) < visibleCutoff) {
     const user = await getSessionUser(c.env.DB, c.req.raw)
-    const memberOk = !user && memberMayBypass && !!(await getMemberUser(c.env.DB, c.req.raw))
-    if (!user && !memberOk) return renderNotFound(c)
-    // 放行者（管理员预览 / 会员豁免）看的是全量：相关与相邻文章不再受窗口收口
+    if (!user) return renderNotFound(c)
+    // 放行者（管理员预览）看的是全量：相关与相邻文章不再受窗口收口
     visibleCutoff = 0
   }
 
-  const [comments, related, categories, categoryId, user, tags, pages, commentTotal, member, neighbors, authorRow] = await Promise.all([
+  const [comments, related, categories, categoryId, user, tags, pages, commentTotal, neighbors] = await Promise.all([
     listApprovedComments(c.env.DB, row.id),
     relatedPosts(c.env.DB, row, 3, visibleCutoff),
     navCategories(c),
@@ -709,16 +649,10 @@ export async function renderPost(c: C): Promise<Response> {
     navPages(c),
     // 计数独立取（列表 LIMIT 500，超限后 length 会少报，JSON-LD commentCount 同口径）
     commentCount(c, row.id),
-    // 会员会话（付费墙可见判定用；membersEnabled 关闭时不查——关着的时候锁文对所有人生效）
-    membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
     // 上一篇/下一篇（prev = 更早、next = 更新）：草稿预览不出，窗口外的邻居也不出（点了就是 404）
     row.status === 'published'
       ? adjacentPosts(c.env.DB, row.published_at ?? row.created_at, row.id, visibleCutoff)
       : Promise.resolve({ prev: null, next: null }),
-    // 多作者署名（3.0-M1）：author 指向的账号（单作者站 author_id 指向 admin，署名行不显示）
-    row.author_id
-      ? c.env.DB.prepare('SELECT display_name, username, role FROM users WHERE id = ?').bind(row.author_id).first<{ display_name: string; username: string; role: string }>()
-      : Promise.resolve(null),
   ])
   const categoryRow = categoryId ? await c.env.DB.prepare('SELECT name, slug FROM categories WHERE id = ?').bind(categoryId).first<{ name: string; slug: string }>() : null
 
@@ -744,24 +678,15 @@ export async function renderPost(c: C): Promise<Response> {
   }
 
   // 访问口令墙（src/protect.ts）：文章标了 fixed/member 时，未持有效解锁 Cookie 的访客
-  // 只看到口令表单，正文连服务端都不处理。会员体系若仍开着（membersEnabled='1'），登录会员
-  // 照旧按档位放行——口令是在会员之上新加的一层，不拆老路。
+  // 只看到口令表单，正文连服务端都不处理。
   // ?pwerr=1（密码不对）/ ?pwerr=slow（试太快）是解锁失败 303 回跳的错误态。
   const pwerr = url.searchParams.get('pwerr')
   const access = normalizeAccess(row.min_tier)
   const gateHashes = gateHashesOf(settings)
-  const tierDefs = parseMemberTiers(settings.memberTiers)
-  const memberPasses =
-    membersEnabled(settings) && !!member && canReadTiers(tierDefs, access === 'fixed' ? 'member' : row.min_tier, member, Date.now())
-  const gateLocked = !user && !memberPasses && !(await canRead(getCookie(c.req.raw, GATE_COOKIE), access, gateHashes, Date.now()))
+  const gateLocked = !user && !(await canRead(getCookie(c.req.raw, GATE_COOKIE), access, gateHashes, Date.now()))
   const gateError = gateLocked && access !== 'all' && !canEverUnlock(access, gateHashes) ? 'unset' : pwerr === 'slow' ? 'slow' : pwerr ? 'wrong' : undefined
   // 口令墙替代了旧的会员试读段：锁住时整页只有表单，不再下发截断正文（locked 恒 false）
   const locked = false
-  // 会员浏览足迹（会员 3.0 预备）：与阅读计数同一套真实访问口径（复用上面的 countThisView），
-  // 口令墙未解锁不记（没看到正文不算「浏览过」）；同文同日只留一行，写侧幂等
-  if (member && !gateLocked && countThisView) {
-    c.executionCtx.waitUntil(recordMemberVisit(c.env.DB, member.id, row.id, row.title, fanDay(), Date.now()))
-  }
   // 口令墙时正文一个字节都不出：连 sanitize 都不做，fullHtml 留空（试读段分支已随会员付费墙退役）。
   // 渲染路径传 origin：非白名单外链包 /go 中间页（存库/RSS/导出不传，保持原始 URL）。
   // 服务端插件渲染过滤（src/hooks.ts postContentHtml，如关键词自动内链）挂在这之后——
@@ -775,28 +700,18 @@ export async function renderPost(c: C): Promise<Response> {
           url.origin
         )
       )
-  // 评论圈层可见（src/commentgate.ts）：高档位会员的评论只对同档及以上会员与管理员可见——
-  // 遮罩/脱敏在服务端一次算好（正文不进 HTML），渲染层只画占位块
-  const gateCtx = commentGateContext(tierDefs, settings.commentGateTier, member, !!user, Date.now())
   const commentsBlock = commentsHtml({
-    comments: applyCommentGate(comments, gateCtx),
+    comments,
     slug: row.slug,
     allowComments: settings.allowComments === '1' && row.status === 'published',
     count: commentTotal,
     isAdmin: !!user,
-    // 管理员登录：表单免填昵称，以作者身份发言；会员登录次之，以会员身份发言
+    // 管理员登录：表单免填昵称，以作者身份发言
     adminName: user ? (user.display_name || user.username || '').slice(0, 24) : undefined,
-    memberName:
-      !user && member ? (member.display_name || member.username || '').slice(0, 24) : undefined,
-    // 作者评论的头像位用站点头像（与微博卡同源），游客/会员评论不适用
+    // 作者评论的头像位用站点头像（与微博卡同源），游客评论不适用
     adminAvatar: settings.avatarUrl || undefined,
-    // 会员认证徽标（会员 3.0 预备）：档位定义解析 + 后台开关（关闭时评论区不出会员徽标）
-    tiers: tierDefs,
-    showBadge: settings.showMemberBadge !== '0',
-    gateViewerRank: gateCtx.viewerRank,
     tip: settings.moderateComments === '1' && !user ? '提交后审核通过即展示' : undefined,
     showRegion: settings.showCommentRegion === '1',
-
   })
 
   // 正文 HTML：口令墙整页只出解锁表单；标题锚点由 render.ts headingAnchors 对
@@ -824,8 +739,6 @@ export async function renderPost(c: C): Promise<Response> {
       locked,
       // AI 生成标注（编辑器自愿申报）：<人工智能生成合成内容标识办法> 显式标识口径，meta 行输出
       aiGenerated: !!row.ai_generated,
-      // 多作者署名（3.0-M1）：author 角色的署名；单作者站（admin 执笔）保持无署名行
-      authorName: authorRow && authorRow.role === 'author' ? (authorRow.display_name || authorRow.username).slice(0, 24) : undefined,
     },
     category: categoryRow ? { name: categoryRow.name, slug: categoryRow.slug } : null,
     categories,
@@ -985,11 +898,8 @@ export async function renderArchive(c: C): Promise<Response> {
   baseHeaders(c, settings)
   const theme = getTheme(settings.theme)
   // 文章可见窗口：归档页也是公开面——窗口外文章不列（列表 / 年度统计 / 热力图三处同一口径），
-  // 否则直链 404 的文章仍能从归档点过去。站点选择「不限制会员」时，已登录会员看全量
-  const postCutoffBase = siteVisibleCutoff(settings)
-  const memberMayBypass = !visibleRangeAppliesToMembers(settings) && membersEnabled(settings)
-  const earlyMember = memberMayBypass && postCutoffBase ? await getMemberUser(c.env.DB, c.req.raw) : null
-  const postCutoff = earlyMember ? 0 : postCutoffBase
+  // 否则直链 404 的文章仍能从归档点过去
+  const postCutoff = siteVisibleCutoff(settings)
   const [rows, categories, tags, pages, yearStats, heatmap] = await Promise.all([
     listAllPublishedArchives(c.env.DB, postCutoff),
     navCategories(c),
@@ -1027,7 +937,7 @@ export async function renderGuestbook(c: C): Promise<Response> {
   const settings = await getSettings(c.env.DB)
   baseHeaders(c, settings)
   const theme = getTheme(settings.theme)
-  const [comments, categories, tags, pages, user, gbCount, member] = await Promise.all([
+  const [comments, categories, tags, pages, user, gbCount] = await Promise.all([
     listGuestbookComments(c.env.DB),
     navCategories(c),
     navTags(c),
@@ -1037,11 +947,7 @@ export async function renderGuestbook(c: C): Promise<Response> {
     // 强制 idx_comments_post 同 listGuestbookComments 口径：规划器会选 weibo_id=0
     // （扫进全部文章评论），强制 post_id=0 前导只扫留言板行
     c.env.DB.prepare("SELECT COUNT(*) AS n FROM comments INDEXED BY idx_comments_post WHERE post_id = 0 AND weibo_id = 0 AND status = 'approved'").first<{ n: number }>(),
-    membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
   ])
-  // 评论圈层可见（src/commentgate.ts）：遮罩与脱敏在服务端一次算好，渲染层只画占位块
-  const gbTierDefs = parseMemberTiers(settings.memberTiers)
-  const gbGateCtx = commentGateContext(gbTierDefs, settings.commentGateTier, member, !!user, Date.now())
   const html = theme.guestbook({
     settings,
     categories,
@@ -1049,19 +955,14 @@ export async function renderGuestbook(c: C): Promise<Response> {
     pages,
     count: gbCount?.n ?? comments.length,
     html: commentsHtml({
-      comments: applyCommentGate(comments, gbGateCtx),
+      comments,
       slug: '',
       allowComments: settings.allowComments === '1',
       count: gbCount?.n ?? comments.length,
       isAdmin: !!user,
-      // 管理员登录：表单免填昵称，以作者身份发言；会员登录次之，以会员身份发言
+      // 管理员登录：表单免填昵称，以作者身份发言
       adminName: user ? (user.display_name || user.username || '').slice(0, 24) : undefined,
-      memberName: !user && member ? (member.display_name || member.username || '').slice(0, 24) : undefined,
       adminAvatar: settings.avatarUrl || undefined,
-      // 会员认证徽标（会员 3.0 预备）：与文章评论区同一套口径
-      tiers: gbTierDefs,
-      showBadge: settings.showMemberBadge !== '0',
-      gateViewerRank: gbGateCtx.viewerRank,
       tip: settings.moderateComments === '1' && !user ? '提交后审核通过即展示' : undefined,
       showRegion: settings.showCommentRegion === '1',
       guestbook: true,
@@ -1096,12 +997,8 @@ export async function renderWeibo(c: C, asHome = false): Promise<Response> {
   const url = new URL(c.req.url)
   const perPage = 15
   const topic = (url.searchParams.get('topic') || '').trim().slice(0, 24)
-  // 微博可见窗口（settings.contentVisibleRangeWeibo，旧单键由 utils 回落）：微博流统一收口，与话题筛选叠加。
-  // 站点选择「不限制会员」时，已登录会员不受限（cutoff 归 0）
-  const weiboCutoffBase = weiboVisibleCutoff(settings)
-  const memberMayBypass = !visibleRangeAppliesToMembers(settings) && membersEnabled(settings)
-  const earlyMember = memberMayBypass && weiboCutoffBase ? await getMemberUser(c.env.DB, c.req.raw) : null
-  const rangeAfterTs = earlyMember ? 0 : weiboCutoffBase
+  // 微博可见窗口（settings.contentVisibleRangeWeibo，旧单键由 utils 回落）：微博流统一收口，与话题筛选叠加
+  const rangeAfterTs = weiboVisibleCutoff(settings)
   const pageParam = clampInt(url.searchParams.get('page'), 1, 1000, 1)
   // ?wb=<id> 深链定位：历史上的今天、首页入口卡、TG 通知都链到 /weibo?wb=x#wb-x，而目标条目常不在第 1
   // 页——服务端先算出所在页直接渲染，浏览器原生锚点才滚动得到；定位失败（已删/非已发布）回退 ?page=
@@ -1111,7 +1008,7 @@ export async function renderWeibo(c: C, asHome = false): Promise<Response> {
     const located = await locateWeiboPage(c.env.DB, Number(wbParam), { limit: perPage, topic: topic || undefined, afterTs: rangeAfterTs })
     if (located) pageNum = located
   }
-  const [r, categories, topics, user, tags, pages, member] = await Promise.all([
+  const [r, categories, topics, user, tags, pages] = await Promise.all([
     listWeibo(c.env.DB, {
       status: 'published',
       page: pageNum,
@@ -1126,7 +1023,6 @@ export async function renderWeibo(c: C, asHome = false): Promise<Response> {
     getSessionUser(c.env.DB, c.req.raw),
     navTags(c),
     navPages(c),
-    earlyMember ? Promise.resolve(earlyMember) : membersEnabled(settings) ? getMemberUser(c.env.DB, c.req.raw) : Promise.resolve(null),
   ])
   // 页码越界时回到最后一页重取一次
   if (r.page > r.totalPages && r.total > 0) {
@@ -1166,9 +1062,8 @@ export async function renderWeibo(c: C, asHome = false): Promise<Response> {
     totalPages: r.totalPages,
     total: r.total,
     allowComments: settings.allowComments === '1',
-    // 管理员登录：卡片内评论表单免填昵称，以作者身份发言；会员登录次之，以会员身份发言
+    // 管理员登录：卡片内评论表单免填昵称，以作者身份发言
     adminName: user ? (user.display_name || user.username || '').slice(0, 24) : undefined,
-    memberName: !user && member ? (member.display_name || member.username || '').slice(0, 24) : undefined,
     topic: topic || undefined,
     topics,
   })
@@ -1223,239 +1118,6 @@ export async function renderLinks(c: C): Promise<Response> {
       title: '友情链接',
       description: `${settings.siteName}的朋友站点，也欢迎申请收录`,
       path: '/links',
-      origin: new URL(c.req.url).origin,
-      body: html,
-    }))
-  )
-}
-
-/** 会员体系总开关（settings.membersEnabled）：'1' 开启；关闭时 /member 与 /rank 随公开页口径 404。
- *  默认关闭（键不存在视为关），站长在后台「设置」里打开——避免新部署站凭空多出两个空页面 */
-function membersEnabled(settings: { membersEnabled?: string }): boolean {
-  return settings.membersEnabled === '1'
-}
-
-/** 榜单行 → 视图条目：rank 服务端排好（1 起），isMe 标记当前访客本人行（契约 A1） */
-/** 排行榜取数口径（/rank 页与首页挂件共用）：rankTopN 兜底 1-50。
- *  榜单行带生效档位（自定义档位按 effectiveTier 解析展示名/徽标色，过期即时降级） */
-async function rankEntries(c: C, settings: SettingsMap, sessionId: number | null): Promise<RankEntryView[]> {
-  const limit = clampInt(settings.rankTopN, 1, 50, 10)
-  const rows = await listRankTop(c.env.DB, limit)
-  const defs = parseMemberTiers(settings.memberTiers)
-  return rows.map((m, i) => {
-    const eff = effectiveTier(defs, m.tier, m.tier_expires_at)
-    return {
-      rank: i + 1,
-      nickname: (m.display_name || m.username).slice(0, 24),
-      tier: m.tier,
-      tierName: eff.name,
-      tierColor: eff.color,
-      tierIsBase: eff.isBase,
-      points: m.points,
-      fanName: fanLevelName(m.points, m.active_days ?? 0),
-      avatarUrl: m.avatar || undefined,
-      isMe: sessionId !== null && sessionId === m.id,
-    }
-  })
-}
-
-/** 会员活动中心数据（会员 3.0 预备）：四组查询转统一条目（href = 目标活链，目标已删只出文字）。
- *  只服务会员本人（/member 页 SSR 直出），无公开出参。
- *  gate = 评论圈层上下文（调用方用同一套 commentGateContext 组装）：高档位线程的回复正文不下发 */
-async function memberActivity(
-  db: D1Database,
-  memberId: number,
-  gate?: GateContext
-): Promise<MemberActivityView> {
-  const [visits, likes, comments, replies] = await Promise.all([
-    listMemberVisits(db, memberId),
-    listMemberLikes(db, memberId),
-    listMemberComments(db, memberId),
-    listMemberReplies(db, memberId),
-  ])
-  const postHref = (slug: string | null) => (slug ? `/post/${encodeURIComponent(slug)}` : '')
-  return {
-    visits: visits.map((v) => ({
-      title: v.title || '(无标题文章)',
-      href: postHref(v.slug),
-      sub: '',
-      ts: v.ts,
-    })),
-    likes: likes.map((l) =>
-      l.targetType === 'post'
-        ? { title: l.title || '(文章已删除)', href: postHref(l.slug), sub: '文章', ts: l.ts }
-        : {
-            title: l.weiboContent ? excerpt(l.weiboContent, 40) : '(微博已删除)',
-            href: `/weibo?wb=${l.targetId}#wb-${l.targetId}`,
-            sub: '微博',
-            ts: l.ts,
-          }
-    ),
-    comments: comments.map((cm) => {
-      const isPost = cm.postId > 0
-      const isWeibo = cm.weiboId > 0
-      const href = isPost
-        ? cm.postSlug
-          ? `/post/${encodeURIComponent(cm.postSlug)}#cmt-${cm.id}`
-          : ''
-        : isWeibo
-          ? `/weibo?wb=${cm.weiboId}#wb-${cm.weiboId}`
-          : `/guestbook#cmt-${cm.id}`
-      const context = isPost
-        ? `《${cm.postTitle || '文章已删除'}》`
-        : isWeibo
-          ? '微博评论'
-          : '留言板'
-      return {
-        title: excerpt(cm.content, 60),
-        href,
-        sub: context,
-        ts: cm.created_at,
-        pending: cm.status === 'pending',
-      }
-    }),
-    replies: replies.map((r) => {
-      const isPost = r.postId > 0
-      const context = isPost
-        ? `《${r.postTitle || '文章已删除'}》`
-        : r.weiboId > 0
-          ? '微博评论'
-          : '留言板'
-      // 圈层过滤（2026-11 审计 P3-26）：「收到的回复」是本人私有页，但高档位线程的回复
-      // 正文同样不能下发——线程根档位（db 带出的 rootTier）高于读者等级时出占位文案。
-      // 管理员 / 门槛关闭 / 等级足够：原样
-      let title = excerpt(r.content, 60)
-      if (gate) {
-        const root = threadRootTier(gate.defs, {
-          id: r.parentId,
-          is_admin: r.isAdmin,
-          member_tier: r.rootTier,
-          member_tier_expires_at: r.rootTierExpires,
-        }, gate.now)
-        if (gate.gateRank > 0 && root.rank >= gate.gateRank && gate.viewerRank < root.rank && !gate.admin) {
-          title = commentGateText(root.name, gate.viewerRank).title
-        }
-      }
-      return {
-        title,
-        href: isPost ? postHref(r.postSlug) : r.weiboId > 0 ? `/weibo?wb=${r.weiboId}#wb-${r.weiboId}` : '/guestbook',
-        sub: `${r.isAdmin ? '作者' : r.nickname} · ${context}`,
-        ts: r.created_at,
-      }
-    }),
-  }
-}
-
-/** 会员中心页（/member）：未登录渲染登录/注册双表单，已登录渲染会员中心卡 */
-export async function renderMember(c: C): Promise<Response> {
-  const settings = await getSettings(c.env.DB)
-  baseHeaders(c, settings)
-  if (!membersEnabled(settings)) return renderNotFound(c)
-  // 注册人机验证（Turnstile）：仅此页放行挑战脚本与 iframe，sitekey 经 <html data-turnstile>
-  // 下发（page() 内按 path==='/member' 注入），site.js 据此懒挂载组件
-  if (settings.turnstileSiteKey) {
-    c.header('Content-Security-Policy', buildCsp({ analyticsOrigin: analyticsOrigin(settings.analyticsScript), turnstile: true, fontSrc: needsFontSrc(settings) }))
-  }
-  const theme = getTheme(settings.theme)
-  const [categories, tags, pages, session] = await Promise.all([
-    navCategories(c),
-    navTags(c),
-    navPages(c),
-    getMemberUser(c.env.DB, c.req.raw),
-  ])
-  let member: MemberData['member'] = null
-  if (session) {
-    // 会话只有昵称/积分口径，email 等自见字段回表补齐（getMemberUser 已挡 banned）
-    const row = await getMemberById(c.env.DB, session.id)
-    if (row) {
-      const fan = fanLevel(row.points, row.active_days ?? 0)
-      // 生效档位（src/tiers.ts）：过期即时降级基础档；卡上带有效期与公告（会员 3.0 预备）
-      const defs = parseMemberTiers(settings.memberTiers)
-      const eff = effectiveTier(defs, row.tier, row.tier_expires_at)
-      // 升级入口（2026-11 第五批）：目标档 = 优质会员；已在该档及以上就整块不出
-      const target = upgradeTarget(defs)
-      const canUpgrade = !!target && eff.rank < (target.rank ?? 1)
-      const redeemCost = Math.trunc(Number(settings.premiumPointsCost || 0))
-      member = {
-        nickname: (row.display_name || row.username).slice(0, 24),
-        tier: row.tier,
-        points: row.points,
-        email: row.email,
-        avatarUrl: row.avatar || undefined,
-        qq: row.qq,
-        createdAt: row.created_at,
-        displayNameChangedAt: row.display_name_changed_at,
-        fanName: fan.name,
-        fanLevel: fan.level,
-        activeDays: row.active_days ?? 0,
-        checkinStreak: row.checkin_streak ?? 0,
-        checkedToday: row.last_checkin_day === fanDay(),
-        tierName: eff.name,
-        tierColor: eff.color,
-        tierIsBase: eff.isBase,
-        tierExpiresAt: row.tier_expires_at ?? null,
-        tierExpired: eff.expired,
-        tierDowngradedFrom: eff.downgradedFrom,
-        upgradeTargetName: canUpgrade ? target!.name : undefined,
-        upgradeCost: canUpgrade && redeemCost > 0 ? redeemCost : undefined,
-        paidNote: canUpgrade && settings.premiumPaidNote?.trim() ? settings.premiumPaidNote.trim() : undefined,
-        notice: settings.memberNotice?.trim() || undefined,
-        // 「收到的回复」的圈层上下文：管理员会话也传（gate.admin 无视遮罩）——
-        // getSessionUser 在未登录时为 null，与游客一致按 viewerRank=0 处理
-        activity: await memberActivity(
-          c.env.DB,
-          row.id,
-          commentGateContext(defs, settings.commentGateTier, row, !!(await getSessionUser(c.env.DB, c.req.raw)), Date.now())
-        ),
-      }
-    }
-  }
-  const html = themeMemberHtml(theme, { settings, categories, tags, pages, navActive: 'member', member })
-  c.header('Cache-Control', 'no-cache')
-  return c.html(
-    page(pageOpts(c, {
-      settings,
-      css: theme.css,
-      title: '会员中心',
-      description: `${settings.siteName}的会员中心，登录注册、攒积分、解锁会员专属内容`,
-      path: '/member',
-      origin: new URL(c.req.url).origin,
-      body: html,
-    }))
-  )
-}
-
-/** 排行榜页（/rank）：会员积分总榜（总榜起步，周榜/天榜待定）；登录访客本人行 isMe 高亮 */
-export async function renderRank(c: C): Promise<Response> {
-  const settings = await getSettings(c.env.DB)
-  baseHeaders(c, settings)
-  if (!membersEnabled(settings)) return renderNotFound(c)
-  const theme = getTheme(settings.theme)
-  const [categories, tags, pages, session] = await Promise.all([
-    navCategories(c),
-    navTags(c),
-    navPages(c),
-    getMemberUser(c.env.DB, c.req.raw),
-  ])
-  const entries = settings.rankEnabled === '0' ? [] : await rankEntries(c, settings, session?.id ?? null)
-  const html = themeRankHtml(theme, {
-    settings,
-    categories,
-    tags,
-    pages,
-    navActive: 'rank',
-    entries,
-    total: entries.length,
-    me: entries.find((e) => e.isMe) ?? null,
-  })
-  c.header('Cache-Control', 'no-cache')
-  return c.html(
-    page(pageOpts(c, {
-      settings,
-      css: theme.css,
-      title: '排行榜',
-      description: `${settings.siteName}的会员积分排行榜，留言、常回来，积分自然涨`,
-      path: '/rank',
       origin: new URL(c.req.url).origin,
       body: html,
     }))

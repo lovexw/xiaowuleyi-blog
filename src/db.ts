@@ -2,26 +2,11 @@ import type {
   CategoryRow,
   CommentRow,
   FriendLinkRow,
-  MemberRow,
   PageRow,
   PostRow,
   SettingsMap,
   WeiboRow,
 } from './types'
-import { NICKNAME_CHANGE_COOLDOWN_MS } from './utils'
-
-/** 排行榜行（listRankTop）：对外只给昵称口径需要的最小字段 */
-export interface RankMemberRow {
-  id: number
-  username: string
-  display_name: string
-  avatar: string
-  tier: MemberRow['tier']
-  /** 档位有效期（毫秒）：读侧 effectiveTier 即时判过期（src/tiers.ts）；老库 ALTER 前可能缺省 */
-  tier_expires_at?: number | null
-  points: number
-  active_days?: number
-}
 import { clampInt, cstDate, excerpt, fmtDate, jsonItemLikePattern, likePattern, WEIBO_MAX_TOPICS } from './utils'
 import { normalizeAccess } from './protect'
 
@@ -124,44 +109,8 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // robots.txt 整站 Disallow——用于空白模板站 / 演示性镜像 / 临时预览实例不进搜索引擎索引；
   // 与闭站不同：页面照常可访问，只是不让收录。默认关闭（正常收录）
   siteNoindex: '0',
-  // 会员体系总开关（契约见 docs/archive/DEVPLAN-2026-10-07.md 附录 A）：关闭时前台无会员入口、/api/member/* 返回 404
-  membersEnabled: '0',
-  // 会员档位定义（src/tiers.ts 自定义档位，会员 3.0 预备）：JSON 数组（key/名称/徽标色/是否永久/默认天数），
-  // 顺序即等级（排前面的低）；'' = 用默认三档（普通会员/咖啡会员/付费会员）。校验与解析都在 tiers.ts
-  memberTiers: '',
-  // 会员注册开关（会员 3.0 预备）：'0' = 关闭注册（已有会员照常登录）；后台「设置 → 会员」可切
-  memberRegOpen: '1',
-  // 排行榜开关：'0' = /rank 出「已关闭」空榜、首页不再取数（/member 与会员体系不受影响）
-  rankEnabled: '1',
-  // 评论会员徽标开关（认证徽标展示）：'0' = 评论区与微博评论不出会员/档位徽标（采集不受影响）
-  showMemberBadge: '1',
-  // 评论圈层可见（src/commentgate.ts）：'' / '0' = 关闭（评论对所有人可见）；档位 key = **该档及
-  // 以上的会员评论只对同档及以上会员与管理员可见**，游客与低档会员只看到占位块（正文不下发，
-  // 回复同样遮罩）。默认 'coffee' = 咖啡会员及以上进私密圈；档位 key 失效时按最严口径兜底
-  commentGateTier: 'coffee',
-  // 会员中心页公告（纯文本 ≤200 字，空 = 不出）：开服须知 / 档位权益说明等站长自填内容
-  memberNotice: '',
-  // 积分兑换优质会员的价格（2026-11 会员第五批）：0 = 未开放（前台不出现兑换入口）。
-  // 站长填个数即生效——0 与正数本身即开关，不需要额外的启用位
-  premiumPointsCost: '0',
-  // 付费获取优质会员的说明（≤200 字，空 = 不出）：本站无在线支付通道，读者线下付款后站长手动授予档位，
-  // 这段文案负责告诉他「怎么付、找谁」。与邀请码、积分兑换并列为优质会员的三条来路
-  premiumPaidNote: '',
-  // 跨站会员继承（src/partner.ts，2026-11）：分站模式下「来源站付费会员 → 本站永久会员」的单向通道。
-  // partnerSelfId  本站标识（小写字母开头，如 btchao / xiaowuleyi）——推送时告诉对方「我是谁」
-  // partnerPushUrl 推给谁（对方站点根地址，如 https://blog.xiaowuleyi.com；空 = 本站不向外推送）
-  // partnerPushSecret 两端共享的 HMAC 密钥（敏感键，SECRET_SETTINGS 打码）——发与收都用它
-  partnerSelfId: '',
-  partnerPushUrl: '',
-  partnerPushSecret: '',
-  // 排行榜展示条数上限（/rank 页与首页挂件共用，1-50）
-  rankTopN: '10',
-  // 注册人机验证（Cloudflare Turnstile，A2 根治）：两键成对填写才启用（PUT 校验成对），都留空 = 关闭；
-  // Secret 属敏感键（api.ts SECRET_SETTINGS 打码），sitekey 是公开值、随 /member 页下发给 site.js
   // 两步验证（B13）：totpEnabled 开关 + totpSecret 密钥（SECRET_SETTINGS 打码）+ totpSecretPending 绑定中暂存
   totpEnabled: '',
-    turnstileSiteKey: '',
-  turnstileSecret: '',
   // 新手引导记账位（后台概览页清单卡）：仅 /api/auth/setup 首装成功时播种 '1'（api.ts），
   // 老站没有此键 = 永不显示引导卡；'0' = 已完成/已跳过，永久消失。onboardingManual 是
   // 「打开使用手册」的点击记账。两键都进 BOOL_SETTINGS 归一化，后台设置页保存全部不含它们
@@ -187,9 +136,6 @@ export const SECRET_SETTINGS = [
   'bufferAccessToken',
   'plazaToken',
   'commentWebhookUrl',
-  'turnstileSecret',
-  // 跨站会员继承的共享密钥（src/partner.ts）：能签出「某个会员是付费会员」的凭证，等同发卡权
-  'partnerPushSecret',
   // 两档访问口令的 hash（src/protect.ts）：hash 本身不可逆，但它就是解锁令牌的签名密钥，
   // 泄漏等于泄漏发卡权——一律不出后台响应，只回显「已设置」
   'gateFixedPassword',
@@ -452,13 +398,11 @@ export async function uniqueSlug(db: D1Database, base: string, excludeId?: numbe
 }
 
 export async function listApprovedComments(db: D1Database, postId: number): Promise<CommentRow[]> {
-  // LEFT JOIN members 带会员徽标数据（member_id = 0 的游客行为 NULL），渲染层按契约 DEVPLAN 附录 A 消费；
-  // member_avatar 仅供评论头像位展示（QQ 号本体永不出参）；tier_expires_at 供读侧即时判过期（src/tiers.ts）
   // INDEXED BY 同 postCommentCountMap 口径（生产实测 2026-10-15 规划器会误选 idx_comments_status
   // 全表扫全部已审评论；「post_id 等值 + status 过滤」一族照此强制，别信规划器）
   const { results } = await db
     .prepare(
-      'SELECT c.*, m.display_name AS member_name, m.tier AS member_tier, m.tier_expires_at AS member_tier_expires_at, m.avatar AS member_avatar FROM comments c INDEXED BY idx_comments_post LEFT JOIN members m ON m.id = c.member_id WHERE c.post_id = ? AND c.status = ? ORDER BY c.created_at ASC LIMIT 500'
+      'SELECT c.* FROM comments c INDEXED BY idx_comments_post WHERE c.post_id = ? AND c.status = ? ORDER BY c.created_at ASC LIMIT 500'
     )
     .bind(postId, 'approved')
     .all<CommentRow>()
@@ -472,7 +416,7 @@ export async function listApprovedComments(db: D1Database, postId: number): Prom
 export async function listGuestbookComments(db: D1Database): Promise<CommentRow[]> {
   const { results } = await db
     .prepare(
-      "SELECT c.*, m.display_name AS member_name, m.tier AS member_tier, m.tier_expires_at AS member_tier_expires_at, m.avatar AS member_avatar FROM comments c INDEXED BY idx_comments_post LEFT JOIN members m ON m.id = c.member_id WHERE c.post_id = 0 AND c.weibo_id = 0 AND c.status = 'approved' ORDER BY c.created_at ASC LIMIT 500"
+      "SELECT c.* FROM comments c INDEXED BY idx_comments_post WHERE c.post_id = 0 AND c.weibo_id = 0 AND c.status = 'approved' ORDER BY c.created_at ASC LIMIT 500"
     )
     .all<CommentRow>()
   return results ?? []
@@ -1240,8 +1184,7 @@ const SCHEMA_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: 'posts', column: 'deleted_at', ddl: 'ALTER TABLE posts ADD COLUMN deleted_at INTEGER' },
   { table: 'weibo', column: 'deleted_at', ddl: 'ALTER TABLE weibo ADD COLUMN deleted_at INTEGER' },
   { table: 'pages', column: 'deleted_at', ddl: 'ALTER TABLE pages ADD COLUMN deleted_at INTEGER' },
-  // 会员体系（docs/archive/DEVPLAN-2026-10-07.md）：评论挂会员身份（0 = 游客）+ 文章可见档位（all | member | coffee | top）
-  { table: 'comments', column: 'member_id', ddl: 'ALTER TABLE comments ADD COLUMN member_id INTEGER NOT NULL DEFAULT 0' },
+  // 文章可见档位（两档站级口令见 src/protect.ts）：all 公开 / fixed 固定密码 / member 会员密码
   { table: 'posts', column: 'min_tier', ddl: "ALTER TABLE posts ADD COLUMN min_tier TEXT NOT NULL DEFAULT 'all'" },
   // 文章访问密码（src/protect.ts）：salt:hash（PBKDF2），空 = 未加密；解锁 Cookie 的 HMAC key 就用它
   { table: 'posts', column: 'password_hash', ddl: "ALTER TABLE posts ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''" },
@@ -1249,31 +1192,6 @@ const SCHEMA_COLUMNS: { table: string; column: string; ddl: string }[] = [
   { table: 'posts', column: 'ai_generated', ddl: 'ALTER TABLE posts ADD COLUMN ai_generated INTEGER NOT NULL DEFAULT 0' },
   // 旧 slug 301（B22）：JSON 数组存历史 slug，改 slug 时追加（utils.ts appendOldSlug 去重/上限），直链 404 前查它 301 到新地址
   { table: 'posts', column: 'old_slugs', ddl: "ALTER TABLE posts ADD COLUMN old_slugs TEXT NOT NULL DEFAULT '[]'" },
-  // 会员昵称 30 天一次修改窗口（src/utils.ts nicknameCooldown）：NULL = 从未改过，首次修改不受限
-  { table: 'members', column: 'display_name_changed_at', ddl: 'ALTER TABLE members ADD COLUMN display_name_changed_at INTEGER' },
-  // 评论头像（C2）：绑定的 QQ 号，仅头像抓取记账位——任何公开出参不携带（头像走站内转存，见 members.avatar）
-  // 多作者（3.0-M1）：admin = 站长全部权限；author = 作者（内容面可用、管理面 403，requireAdminRole 门槛）
-  { table: 'users', column: 'role', ddl: "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'" },
-  { table: 'members', column: 'qq', ddl: "ALTER TABLE members ADD COLUMN qq TEXT NOT NULL DEFAULT ''" },
-  // 铁粉成长体系（DEVPLAN-3.0 主题一）：活跃天数与签到连续天数——等级是 fanLevel 纯函数实时判定不落库
-  { table: 'members', column: 'active_days', ddl: 'ALTER TABLE members ADD COLUMN active_days INTEGER NOT NULL DEFAULT 0' },
-  { table: 'members', column: 'last_active_day', ddl: "ALTER TABLE members ADD COLUMN last_active_day TEXT NOT NULL DEFAULT ''" },
-  { table: 'members', column: 'checkin_streak', ddl: 'ALTER TABLE members ADD COLUMN checkin_streak INTEGER NOT NULL DEFAULT 0' },
-  { table: 'members', column: 'last_checkin_day', ddl: "ALTER TABLE members ADD COLUMN last_checkin_day TEXT NOT NULL DEFAULT ''" },
-  // 会员档位有效期（src/tiers.ts 自定义档位）：毫秒时间戳，NULL = 永久；过期在读侧即时降级为基础档
-  { table: 'members', column: 'tier_expires_at', ddl: 'ALTER TABLE members ADD COLUMN tier_expires_at INTEGER' },
-  // 档位来源（2026-11 会员第五批）：register 注册自带 / invite 邀请码 / points 积分兑换 / paid 付费 / manual 后台手改。
-  // 只做运营标注与后台展示，不参与任何权限判定（权限一律看 members.tier + 生效档位）
-  { table: 'members', column: 'tier_source', ddl: "ALTER TABLE members ADD COLUMN tier_source TEXT NOT NULL DEFAULT ''" },
-  // 跨站会员继承（src/partner.ts，2026-11）：本站账号对应**来源站**的哪个会员。
-  // 两站会员表互不读写，所有关联只落在这两列上；(remote_issuer, remote_subject) 唯一 = 一个来源会员
-  // 只能绑一个本地账号（先到先得，后台可撤）。空串 = 本地原生会员，不走继承
-  { table: 'members', column: 'remote_issuer', ddl: "ALTER TABLE members ADD COLUMN remote_issuer TEXT NOT NULL DEFAULT ''" },
-  { table: 'members', column: 'remote_subject', ddl: "ALTER TABLE members ADD COLUMN remote_subject TEXT NOT NULL DEFAULT ''" },
-  // 邀请码多次核销（2026-11 会员第五批）：max_uses 0 = 不限 / 1 = 一码一人（默认）/ N = 限量 N 次；
-  // used_count 冗余计数，原子核销拿它做条件判断（UPDATE ... WHERE used_count < max_uses）
-  { table: 'invite_codes', column: 'max_uses', ddl: 'ALTER TABLE invite_codes ADD COLUMN max_uses INTEGER NOT NULL DEFAULT 1' },
-  { table: 'invite_codes', column: 'used_count', ddl: 'ALTER TABLE invite_codes ADD COLUMN used_count INTEGER NOT NULL DEFAULT 0' },
   // 游客 QQ 头像（C2 扩展）：游客选填的 qq（仅抓取记账位，公开出参不携带）+ 服务端抓取转存的站内头像地址
   { table: 'comments', column: 'qq', ddl: "ALTER TABLE comments ADD COLUMN qq TEXT NOT NULL DEFAULT ''" },
   { table: 'comments', column: 'avatar', ddl: "ALTER TABLE comments ADD COLUMN avatar TEXT NOT NULL DEFAULT ''" },
@@ -1291,106 +1209,6 @@ const SCHEMA_TABLES = [
   `CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
-  )`,
-  // 会员体系（2026-10-07 起，见 docs/archive/DEVPLAN-2026-10-07.md 附录 A 契约）：
-  // members 与 users/sessions 彻底分离（users 只承载管理员，游客注册混入会破坏 /api/auth/setup 首装判断）
-  `CREATE TABLE IF NOT EXISTS members (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    username      TEXT    NOT NULL UNIQUE,
-    password_hash TEXT    NOT NULL,
-    salt          TEXT    NOT NULL,
-    email         TEXT    NOT NULL DEFAULT '',
-    display_name  TEXT    NOT NULL DEFAULT '',
-    avatar        TEXT    NOT NULL DEFAULT '',
-    qq            TEXT    NOT NULL DEFAULT '',
-    tier          TEXT    NOT NULL DEFAULT 'normal',
-    tier_expires_at INTEGER,
-    tier_source   TEXT    NOT NULL DEFAULT '',
-    remote_issuer TEXT    NOT NULL DEFAULT '',
-    remote_subject TEXT   NOT NULL DEFAULT '',
-    points        INTEGER NOT NULL DEFAULT 0,
-    status        TEXT    NOT NULL DEFAULT 'active',
-    created_at    INTEGER NOT NULL,
-    updated_at    INTEGER NOT NULL,
-    last_login_at INTEGER,
-    display_name_changed_at INTEGER,
-    active_days INTEGER NOT NULL DEFAULT 0,
-    last_active_day TEXT NOT NULL DEFAULT '',
-    checkin_streak INTEGER NOT NULL DEFAULT 0,
-    last_checkin_day TEXT NOT NULL DEFAULT ''
-  )`,
-  `CREATE TABLE IF NOT EXISTS member_sessions (
-    token      TEXT    PRIMARY KEY,
-    member_id  INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    created_at INTEGER NOT NULL
-  )`,
-  // 跨站会员继承队列 + 流水（src/partner.ts）：来源站推送过来的一条记录，
-  // member_id 0 = 待认领（目标站还没有这个邮箱的会员）/ -1 = 认领冲突（来源会员已绑别的账号）/
-  // 正数 = 已授予的本地会员 id。既是队列也是审计流水，后台「跨站继承」页直接读它
-  `CREATE TABLE IF NOT EXISTS partner_grants (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    issuer     TEXT    NOT NULL,
-    subject    TEXT    NOT NULL,
-    email      TEXT    NOT NULL DEFAULT '',
-    member_id  INTEGER NOT NULL DEFAULT 0,
-    tier       TEXT    NOT NULL DEFAULT '',
-    note       TEXT    NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL,
-    claimed_at INTEGER
-  )`,
-  `CREATE TABLE IF NOT EXISTS member_points_log (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    member_id  INTEGER NOT NULL,
-    delta      INTEGER NOT NULL,
-    reason     TEXT    NOT NULL DEFAULT '',
-    ref_id     INTEGER NOT NULL DEFAULT 0,
-    note       TEXT    NOT NULL DEFAULT '',
-    created_at INTEGER NOT NULL
-  )`,
-  // 会员浏览足迹（会员中心「我的足迹」）：同会员同文章同北京日一行（唯一索引去重），
-  // title 是浏览时快照；滚动保留 90 天（index.ts 备份 cron 顺带清理）
-  `CREATE TABLE IF NOT EXISTS member_visits (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    member_id  INTEGER NOT NULL,
-    post_id    INTEGER NOT NULL,
-    day        TEXT    NOT NULL DEFAULT '',
-    ts         INTEGER NOT NULL,
-    title      TEXT    NOT NULL DEFAULT ''
-  )`,
-  // 会员点赞记录（会员中心「我的点赞」）：点赞记一行、取消赞删行，目标存活由读侧 JOIN 判定
-  `CREATE TABLE IF NOT EXISTS member_likes (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    member_id   INTEGER NOT NULL,
-    target_type TEXT    NOT NULL DEFAULT 'post',
-    target_id   INTEGER NOT NULL,
-    created_at  INTEGER NOT NULL
-  )`,
-  // 注册邀请码（src/invite.ts）：持码注册直接拿码上指定的档位（默认优质会员）；
-  // 核销 = used_count 自增（原子 UPDATE ... WHERE 次数未满 AND 未过期 防并发超发），撤销靠删行。
-  // max_uses：1 = 一码一人（默认）/ 0 = 不限 / N = 限量 N 次
-  `CREATE TABLE IF NOT EXISTS invite_codes (
-    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-    code         TEXT    NOT NULL UNIQUE,
-    tier         TEXT    NOT NULL DEFAULT 'premium',
-    note         TEXT    NOT NULL DEFAULT '',
-    max_uses     INTEGER NOT NULL DEFAULT 1,
-    used_count   INTEGER NOT NULL DEFAULT 0,
-    created_at   INTEGER NOT NULL,
-    expires_at   INTEGER,
-    used_at      INTEGER,
-    used_by      INTEGER NOT NULL DEFAULT 0,
-    used_by_name TEXT    NOT NULL DEFAULT ''
-  )`,
-  // 邀请码核销明细（每次成功核销一条）：一码多人时靠它回查「谁凭这个码进来的」
-  `CREATE TABLE IF NOT EXISTS invite_uses (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    invite_id   INTEGER NOT NULL,
-    code        TEXT    NOT NULL DEFAULT '',
-    member_id   INTEGER NOT NULL DEFAULT 0,
-    member_name TEXT    NOT NULL DEFAULT '',
-    tier        TEXT    NOT NULL DEFAULT '',
-    created_at  INTEGER NOT NULL
   )`,
   // Telegram 相册缓冲（src/external.ts）：多选拆成的多条消息先落这里，几秒后合并成一条微博
   `CREATE TABLE IF NOT EXISTS tg_buffer (    media_group_id TEXT PRIMARY KEY,
@@ -1498,42 +1316,16 @@ export const SCHEMA_INDEXES = [
   // idx_comments_post 的 schema.sql 副本自 MoBlog v1.0 就有，但 INDEXED BY 是硬约束（索引不在场语句直接
   // 报错）：这里兜底所有冷启动形态，老库若曾手工删过索引也能自愈（与 schema.sql 双份登记，tests/feed-index.test.ts 守卫）
   'CREATE INDEX IF NOT EXISTS idx_comments_post ON comments (post_id, created_at)',
-  // comments.member_id 与 posts.min_tier 是老库运行时补齐的列，索引只能在这里建（schema.sql 不能建，见该文件内说明）
-  'CREATE INDEX IF NOT EXISTS idx_comments_member ON comments (member_id, created_at)',
   // 楼中楼级联删除（DELETE WHERE id = ? OR parent_id = ?）的 MULTI-INDEX OR 依赖：没有它 OR 全表扫
   // （2026-10-22 实测 comments 14k 行、每删一条扫 1.36 万行，批量清 26 条垃圾评论烧当日额度 7%）。
-  // parent_id 是老库 ALTER 补的列 → 只进这里（tests/member-schema.test.ts 索引归位 + feed-index 计划守卫）
+  // parent_id 是老库 ALTER 补的列 → 只进这里（tests/feed-index.test.ts 索引归位 + 计划守卫）
   'CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments (parent_id)',
   // 游客评论带 QQ 号时反查同号已转存的站内头像（api.ts 公开评论 POST）：
   // WHERE qq = ? AND avatar != '' ORDER BY created_at DESC LIMIT 1，无索引 = 每提交一条评论全表扫。
   // qq 是老库运行时 ALTER 补的列 → 索引只在这里登记、不得进 schema.sql（归位规矩同 idx_comments_parent）
   'CREATE INDEX IF NOT EXISTS idx_comments_qq ON comments (qq, created_at DESC)',
-  'CREATE INDEX IF NOT EXISTS idx_members_points ON members (points DESC)',
-  'CREATE INDEX IF NOT EXISTS idx_member_sessions_expiry ON member_sessions (expires_at)',
-  // 登录膨胀防护：DELETE WHERE member_id = ? AND expires_at <= ? / COUNT WHERE member_id = ?
-  'CREATE INDEX IF NOT EXISTS idx_member_sessions_member ON member_sessions (member_id, expires_at)',
-  // 跨站会员继承（src/partner.ts）：remote_issuer / remote_subject 是老库 ALTER 补的列 →
-  // 索引只能在这里建（归位规矩同 idx_comments_member）。部分唯一索引 = 一个来源会员只绑一个本地账号；
-  // 空串（本地原生会员）不进索引，否则全体会员会在 ('','') 上撞唯一约束
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_members_remote ON members (remote_issuer, remote_subject) WHERE remote_issuer <> ''",
-  // 待认领队列：注册/登录时按邮箱扫 member_id = 0 的行；同 (issuer, subject) 只留一条（重复推送按更新处理）
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_partner_grants_subject ON partner_grants (issuer, subject)',
-  'CREATE INDEX IF NOT EXISTS idx_partner_grants_email ON partner_grants (email, member_id)',
-  // 邮箱大小写不统一是历史遗留（注册只 trim 没 lower）：认领比较走 LOWER(email)，表达式索引才对得上
-  'CREATE INDEX IF NOT EXISTS idx_members_email_lower ON members (LOWER(email)) WHERE email <> \'\'',
-  // 管理员会话同款（sessions.user_id）；两个会话表都按账号维度收口，避免登录路径全表扫
+  // 管理员会话同款（sessions.user_id）；会话表按账号维度收口，避免登录路径全表扫
   'CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions (user_id, expires_at)',
-  // 邀请码核销明细（2026-11 会员第五批）：详情回查按码取最近 N 条；表由 SCHEMA_TABLES 建，索引在这里兜底
-  'CREATE INDEX IF NOT EXISTS idx_invite_uses_invite ON invite_uses (invite_id, created_at DESC)',
-  'CREATE INDEX IF NOT EXISTS idx_points_log_member ON member_points_log (member_id, created_at)',
-  // 记分幂等的数据库强制：评论 ref_id=评论 id、每日登录 ref_id=北京日序号，并发重复记账由唯一索引拦下
-  // （points.ts awardPoints 捕获 UNIQUE 冲突视为已记过；ref_id=0 的 adminAdjust/老 dailyLogin 行不进索引）
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_points_log_dedup ON member_points_log (member_id, reason, ref_id) WHERE ref_id > 0',
-  // 会员足迹 / 点赞（会员中心）：去重唯一索引 + 会员维度列表索引（与 schema.sql 同步登记）
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_visits_dedup ON member_visits (member_id, post_id, day)',
-  'CREATE INDEX IF NOT EXISTS idx_member_visits_member ON member_visits (member_id, ts DESC)',
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_member_likes_dedup ON member_likes (member_id, target_type, target_id)',
-  'CREATE INDEX IF NOT EXISTS idx_member_likes_member ON member_likes (member_id, created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_uploads_created ON uploads (created_at DESC)',
   'CREATE INDEX IF NOT EXISTS idx_friend_links_status ON friend_links (status, sort, id)',
   'CREATE INDEX IF NOT EXISTS idx_visit_day ON visit_log (day, ts)',
@@ -1730,440 +1522,3 @@ export async function seedWelcomePost(db: D1Database, authorId: number): Promise
     .run()
 }
 
-/* ---------------- 会员（访客注册身份，与 users 管理员彻底分离，契约见 docs/archive/DEVPLAN-2026-10-07.md 附录 A） ---------------- */
-
-export async function getMemberByUsername(db: D1Database, username: string): Promise<MemberRow | null> {
-  return db.prepare('SELECT * FROM members WHERE username = ?').bind(username).first<MemberRow>()
-}
-
-export async function getMemberById(db: D1Database, id: number): Promise<MemberRow | null> {
-  return db.prepare('SELECT * FROM members WHERE id = ?').bind(id).first<MemberRow>()
-}
-
-export async function createMember(
-  db: D1Database,
-  v: { username: string; hash: string; salt: string; email: string; displayName?: string; tierSource?: string }
-): Promise<number> {
-  const now = Date.now()
-  const res = await db
-    .prepare(
-      "INSERT INTO members (username, password_hash, salt, email, display_name, avatar, tier, tier_source, points, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', 'normal', ?, 0, 'active', ?, ?)"
-    )
-    .bind(v.username, v.hash, v.salt, v.email, v.displayName ?? '', v.tierSource ?? 'register', now, now)
-    .run()
-  return Number(res.meta.last_row_id)
-}
-
-/**
- * 改昵称：30 天一次的窗口判定用 SQL 条件更新原子完成（防双开/并发请求同时过检查）。
- * 返回 false = 命中冷却窗口（调用方提示解禁日期）；改前应先 getMemberById 做前置检查给出精确文案。
- */
-export async function updateMemberNickname(db: D1Database, id: number, displayName: string, now: number): Promise<boolean> {
-  const r = await db
-    .prepare(
-      'UPDATE members SET display_name = ?, display_name_changed_at = ?, updated_at = ? WHERE id = ? AND (display_name_changed_at IS NULL OR display_name_changed_at <= ?)'
-    )
-    .bind(displayName, now, now, id, now - NICKNAME_CHANGE_COOLDOWN_MS)
-    .run()
-  return (r.meta.changes ?? 0) > 0
-}
-
-/** 绑定 QQ 号并回写头像（评论头像 C2）：avatar 传 null = 只存 qq 不动头像（qlogo 抓取失败容忍，
- *  会员中心「重试头像」用同一 qq 重跑本函数补抓）；qq/avatar 都是本人提交或站内转存的值，无公开面 */
-export async function updateMemberQQ(db: D1Database, id: number, qq: string, avatar: string | null, now: number): Promise<void> {
-  await db
-    .prepare('UPDATE members SET qq = ?, updated_at = ?, avatar = COALESCE(?, avatar) WHERE id = ?')
-    .bind(qq, now, avatar, id)
-    .run()
-}
-
-/** 后台会员列表：q 模糊匹配用户名/邮箱（likePattern 同口径转义），20 条/页，新会员在前 */
-const MEMBER_PAGE_SIZE = 20
-/** 后台会员行（剥口令字段——后台出参永不携带 password_hash/salt，同 postAdminView 口径） */
-export type MemberAdminRow = Omit<MemberRow, 'password_hash' | 'salt'>
-const MEMBER_ADMIN_COLS =
-  'id, username, email, display_name, avatar, tier, tier_expires_at, tier_source, points, status, created_at, updated_at, last_login_at'
-export async function listMembersAdmin(
-  db: D1Database,
-  q: string,
-  page: number
-): Promise<{ items: MemberAdminRow[]; total: number; page: number; totalPages: number }> {
-  const pattern = q ? likePattern(q) : ''
-  const where = q ? "WHERE username LIKE ? ESCAPE '\\' OR email LIKE ? ESCAPE '\\'" : ''
-  const binds = q ? [pattern, pattern] : []
-  const cnt = await db.prepare(`SELECT COUNT(*) AS n FROM members ${where}`).bind(...binds).first<{ n: number }>()
-  const total = cnt?.n ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / MEMBER_PAGE_SIZE))
-  const p = Math.min(Math.max(1, page), totalPages)
-  const { results } = await db
-    .prepare(`SELECT ${MEMBER_ADMIN_COLS} FROM members ${where} ORDER BY id DESC LIMIT ${MEMBER_PAGE_SIZE} OFFSET ?`)
-    .bind(...binds, (p - 1) * MEMBER_PAGE_SIZE)
-    .all<MemberAdminRow>()
-  return { items: results ?? [], total, page: p, totalPages }
-}
-
-/** 后台改档位/封禁：缺键即保留（同 posts PUT 语义），返回是否命中行。
- *  tierExpiresAt：null = 清除有效期（转永久），number = 到期毫秒；undefined = 不动
- *  tierSource：档位来源标注（register/invite/points/paid/manual），只做运营展示，不参与权限判定 */
-export async function updateMemberAdmin(
-  db: D1Database,
-  id: number,
-  patch: { tier?: string; status?: string; tierExpiresAt?: number | null; tierSource?: string }
-): Promise<boolean> {
-  const sets: string[] = []
-  const binds: unknown[] = []
-  if (patch.tier !== undefined) {
-    sets.push('tier = ?')
-    binds.push(patch.tier)
-  }
-  if (patch.tierExpiresAt !== undefined) {
-    sets.push('tier_expires_at = ?')
-    binds.push(patch.tierExpiresAt)
-  }
-  if (patch.tierSource !== undefined) {
-    sets.push('tier_source = ?')
-    binds.push(patch.tierSource)
-  }
-  if (patch.status !== undefined) {
-    sets.push('status = ?')
-    binds.push(patch.status)
-  }
-  if (!sets.length) return true
-  sets.push('updated_at = ?')
-  binds.push(Date.now(), id)
-  const r = await db.prepare(`UPDATE members SET ${sets.join(', ')} WHERE id = ?`).bind(...binds).run()
-  return (r.meta.changes ?? 0) > 0
-}
-
-/* ---------------- 注册邀请码（src/invite.ts 生成码 / 校验形态；这里只做存取与原子核销） ----------------
- * 核销次数：max_uses = 1 一码一人 / 0 不限 / N 限量 N 次，used_count 记已核销次数。
- * 原子性来自一条条件 UPDATE：`WHERE (max_uses = 0 OR used_count < max_uses) AND (expires_at IS NULL OR expires_at > ?)`——
- * 同一个码被两人同时提交时只有一位能过，抢输的那位拿到 changes = 0。
- * 明细同时落 invite_uses（同一次 batch），一码多人时能回查「谁凭这个码进来的」。
- * 撤销 = 删行（已经核销过的删不掉——那是账，得留痕）。 */
-
-export interface InviteCodeRow {
-  id: number
-  code: string
-  tier: string
-  note: string
-  max_uses: number
-  used_count: number
-  created_at: number
-  expires_at: number | null
-  used_at: number | null
-  used_by: number
-  used_by_name: string
-}
-
-export interface InviteUseRow {
-  id: number
-  invite_id: number
-  code: string
-  member_id: number
-  member_name: string
-  tier: string
-  created_at: number
-}
-
-/** 插一条码：撞 UNIQUE 返回 false（调用方换一个码重试），其余错误照常抛 */
-export async function insertInviteCode(
-  db: D1Database,
-  v: { code: string; tier: string; note: string; maxUses: number; createdAt: number; expiresAt: number | null }
-): Promise<boolean> {
-  const r = await db
-    .prepare('INSERT OR IGNORE INTO invite_codes (code, tier, note, max_uses, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(v.code, v.tier, v.note, v.maxUses, v.createdAt, v.expiresAt)
-    .run()
-  return (r.meta.changes ?? 0) > 0
-}
-
-const INVITE_PAGE_SIZE = 20
-
-/** 三态谓词与 src/invite.ts 的 inviteStatus 同口径：已用完优先于已过期（用完了就不关心它是否还过期） */
-const INVITE_USABLE_SQL = '(max_uses = 0 OR used_count < max_uses) AND (expires_at IS NULL OR expires_at > ?)'
-const INVITE_USEDUP_SQL = 'max_uses > 0 AND used_count >= max_uses'
-const INVITE_EXPIRED_SQL = '(max_uses = 0 OR used_count < max_uses) AND expires_at IS NOT NULL AND expires_at <= ?'
-
-/** 后台邀请码列表：四态筛选（全部 / 可用 / 已用完 / 已过期），计数一并回给筛选按钮 */
-export async function listInvitesAdmin(
-  db: D1Database,
-  status: 'all' | 'usable' | 'usedup' | 'expired',
-  page: number,
-  now = Date.now()
-): Promise<{
-  items: InviteCodeRow[]
-  total: number
-  page: number
-  totalPages: number
-  usable: number
-  usedup: number
-  expired: number
-}> {
-  const where = status === 'usable' ? `WHERE ${INVITE_USABLE_SQL}` : status === 'usedup' ? `WHERE ${INVITE_USEDUP_SQL}` : status === 'expired' ? `WHERE ${INVITE_EXPIRED_SQL}` : ''
-  const whereBinds = status === 'usable' || status === 'expired' ? [now] : []
-  const [cnt, usableCnt, usedupCnt, expiredCnt] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS n FROM invite_codes ${where}`).bind(...whereBinds).first<{ n: number }>(),
-    db.prepare(`SELECT COUNT(*) AS n FROM invite_codes WHERE ${INVITE_USABLE_SQL}`).bind(now).first<{ n: number }>(),
-    db.prepare(`SELECT COUNT(*) AS n FROM invite_codes WHERE ${INVITE_USEDUP_SQL}`).first<{ n: number }>(),
-    db.prepare(`SELECT COUNT(*) AS n FROM invite_codes WHERE ${INVITE_EXPIRED_SQL}`).bind(now).first<{ n: number }>(),
-  ])
-  const total = cnt?.n ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / INVITE_PAGE_SIZE))
-  const p = Math.min(Math.max(1, page), totalPages)
-  const { results } = await db
-    .prepare(`SELECT * FROM invite_codes ${where} ORDER BY created_at DESC, id DESC LIMIT ${INVITE_PAGE_SIZE} OFFSET ?`)
-    .bind(...whereBinds, (p - 1) * INVITE_PAGE_SIZE)
-    .all<InviteCodeRow>()
-  return {
-    items: results ?? [],
-    total,
-    page: p,
-    totalPages,
-    usable: usableCnt?.n ?? 0,
-    usedup: usedupCnt?.n ?? 0,
-    expired: expiredCnt?.n ?? 0,
-  }
-}
-
-export async function getInviteByCode(db: D1Database, code: string): Promise<InviteCodeRow | null> {
-  return db.prepare('SELECT * FROM invite_codes WHERE code = ?').bind(code).first<InviteCodeRow>()
-}
-
-export async function getInviteById(db: D1Database, id: number): Promise<InviteCodeRow | null> {
-  return db.prepare('SELECT * FROM invite_codes WHERE id = ?').bind(id).first<InviteCodeRow>()
-}
-
-/** 原子核销：次数未满且未过期的那一次才能成功（并发注册的唯一真锁）。
- *  返回 false = 已被别人用光 / 刚过期（调用方回滚已建的会员并提示码失效）。
- *  明细 INSERT 用 `WHERE EXISTS (... used_by = ? AND used_at = ?)` 与本次 UPDATE 配对——
- *  UPDATE 没生效时 used_by 不会是这位会员，明细也就不会凭空多一条 */
-export async function consumeInvite(
-  db: D1Database,
-  invite: { id: number; code: string; tier: string },
-  memberId: number,
-  username: string,
-  now: number
-): Promise<boolean> {
-  const name = username.slice(0, 24)
-  const res = await db.batch([
-    db
-      .prepare(
-        `UPDATE invite_codes
-            SET used_count = used_count + 1, used_at = ?, used_by = ?, used_by_name = ?
-          WHERE id = ? AND (max_uses = 0 OR used_count < max_uses) AND (expires_at IS NULL OR expires_at > ?)`
-      )
-      .bind(now, memberId, name, invite.id, now),
-    db
-      .prepare(
-        `INSERT INTO invite_uses (invite_id, code, member_id, member_name, tier, created_at)
-         SELECT ?, ?, ?, ?, ?, ?
-          WHERE EXISTS (SELECT 1 FROM invite_codes WHERE id = ? AND used_by = ? AND used_at = ?)`
-      )
-      .bind(invite.id, invite.code, memberId, name, invite.tier, now, invite.id, memberId, now),
-  ])
-  return (res[0].meta.changes ?? 0) > 0
-}
-
-/** 回滚核销（注册后续步骤失败时把这一次还回去）：只认这位会员自己那条明细，不误伤别人。
- *  回退后若这个码已无人使用，把「最近一次核销」快照一并清空，列表不会显示幽灵使用者 */
-export async function releaseInvite(db: D1Database, id: number, memberId: number): Promise<void> {
-  const r = await db.prepare('DELETE FROM invite_uses WHERE invite_id = ? AND member_id = ?').bind(id, memberId).run()
-  if ((r.meta.changes ?? 0) === 0) return
-  // SET 右侧一律读旧值：`used_count <= 1` 判断的是自增前/回退前的余额，语义 = 回退后归零
-  await db
-    .prepare(
-      `UPDATE invite_codes
-          SET used_count = MAX(used_count - 1, 0),
-              used_at = CASE WHEN used_count <= 1 THEN NULL ELSE used_at END,
-              used_by = CASE WHEN used_count <= 1 THEN 0 ELSE used_by END,
-              used_by_name = CASE WHEN used_count <= 1 THEN '' ELSE used_by_name END
-        WHERE id = ?`
-    )
-    .bind(id)
-    .run()
-}
-
-/** 撤销（只删从未核销的；用过一次的就不让删了，让后台提示「已使用，无法撤销」） */
-export async function deleteInvite(db: D1Database, id: number): Promise<boolean> {
-  const r = await db.prepare('DELETE FROM invite_codes WHERE id = ? AND used_count = 0').bind(id).run()
-  return (r.meta.changes ?? 0) > 0
-}
-
-/** 核销明细（后台详情抽屉）：按时间倒序，限量给个上限防大码拖垮渲染 */
-export async function listInviteUses(db: D1Database, inviteId: number, limit = 100): Promise<InviteUseRow[]> {
-  const { results } = await db
-    .prepare('SELECT * FROM invite_uses WHERE invite_id = ? ORDER BY created_at DESC, id DESC LIMIT ?')
-    .bind(inviteId, limit)
-    .all<InviteUseRow>()
-  return results ?? []
-}
-
-/** 排行榜（/rank 页与首页挂件共用）：只含 active 且积分 > 0（全员 0 分时不做无意义长名单），积分倒序、同分按加入先后 */
-export async function listRankTop(db: D1Database, limit: number): Promise<RankMemberRow[]> {
-  const { results } = await db
-    .prepare(
-      "SELECT id, username, display_name, avatar, tier, tier_expires_at, points, active_days FROM members WHERE status = 'active' AND points > 0 ORDER BY points DESC, id ASC LIMIT ?"
-    )
-    .bind(limit)
-    .all<RankMemberRow>()
-  return results ?? []
-}
-
-/* ---------------- 会员活动中心（浏览足迹 / 点赞 / 我的评论 / 收到的回复，会员 3.0 预备） ----------------
- * 数据只服务会员本人（/member 页 SSR 直出），不进任何公开出参；上下文标题取活链——
- * 目标进了回收站 / 被删则 LEFT JOIN 落空，渲染层不出链接（记录本身保留） */
-
-/** 记一笔浏览足迹：同会员同文章同北京日只有一行（唯一索引去重，重复浏览刷新 ts 与标题快照） */
-export async function recordMemberVisit(db: D1Database, memberId: number, postId: number, title: string, day: string, ts: number): Promise<void> {
-  await db
-    .prepare(
-      'INSERT INTO member_visits (member_id, post_id, day, ts, title) VALUES (?, ?, ?, ?, ?) ON CONFLICT(member_id, post_id, day) DO UPDATE SET ts = excluded.ts, title = excluded.title'
-    )
-    .bind(memberId, postId, day, ts, title.slice(0, 150))
-    .run()
-}
-
-/** 浏览足迹列表（最新在前）：slug 为空 = 文章已删/进回收站，渲染层只出标题不出链接 */
-export async function listMemberVisits(db: D1Database, memberId: number, limit = 30): Promise<{ postId: number; title: string; slug: string | null; ts: number }[]> {
-  const { results } = await db
-    .prepare(
-      'SELECT v.post_id AS postId, v.title, p.slug AS slug, v.ts FROM member_visits v LEFT JOIN posts p ON p.id = v.post_id AND p.deleted_at IS NULL WHERE v.member_id = ? ORDER BY v.ts DESC LIMIT ?'
-    )
-    .bind(memberId, limit)
-    .all<{ postId: number; title: string; slug: string | null; ts: number }>()
-  return results ?? []
-}
-
-/** 记一笔点赞（重复点赞幂等：唯一索引 DO NOTHING）；取消赞走 removeMemberLike */
-export async function recordMemberLike(db: D1Database, memberId: number, targetType: 'post' | 'weibo', targetId: number, ts: number): Promise<void> {
-  await db
-    .prepare('INSERT INTO member_likes (member_id, target_type, target_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(member_id, target_type, target_id) DO NOTHING')
-    .bind(memberId, targetType, targetId, ts)
-    .run()
-}
-
-export async function removeMemberLike(db: D1Database, memberId: number, targetType: 'post' | 'weibo', targetId: number): Promise<void> {
-  await db.prepare('DELETE FROM member_likes WHERE member_id = ? AND target_type = ? AND target_id = ?').bind(memberId, targetType, targetId).run()
-}
-
-/** 点赞列表（最新在前）：文章带 slug/标题，微博带正文摘要；目标被删时相应字段为 null */
-export async function listMemberLikes(
-  db: D1Database,
-  memberId: number,
-  limit = 30
-): Promise<{ targetType: 'post' | 'weibo'; targetId: number; ts: number; slug: string | null; title: string | null; weiboContent: string | null }[]> {
-  const { results } = await db
-    .prepare(
-      "SELECT l.target_type AS targetType, l.target_id AS targetId, l.created_at AS ts, p.slug AS slug, p.title AS title, w.content AS weiboContent FROM member_likes l LEFT JOIN posts p ON l.target_type = 'post' AND p.id = l.target_id AND p.deleted_at IS NULL LEFT JOIN weibo w ON l.target_type = 'weibo' AND w.id = l.target_id AND w.deleted_at IS NULL WHERE l.member_id = ? ORDER BY l.created_at DESC LIMIT ?"
-    )
-    .bind(memberId, limit)
-    .all<{ targetType: 'post' | 'weibo'; targetId: number; ts: number; slug: string | null; title: string | null; weiboContent: string | null }>()
-  return results ?? []
-}
-
-/** 我的评论（最新在前，含待审——自己总能看到自己待审的）：带归属上下文（文章标题/slug 或微博正文） */
-export async function listMemberComments(
-  db: D1Database,
-  memberId: number,
-  limit = 30
-): Promise<{ id: number; postId: number; weiboId: number; content: string; status: string; created_at: number; postSlug: string | null; postTitle: string | null; weiboContent: string | null }[]> {
-  const { results } = await db
-    .prepare(
-      'SELECT c.id, c.post_id AS postId, c.weibo_id AS weiboId, c.content, c.status, c.created_at, p.slug AS postSlug, p.title AS postTitle, w.content AS weiboContent FROM comments c LEFT JOIN posts p ON c.post_id > 0 AND p.id = c.post_id AND p.deleted_at IS NULL LEFT JOIN weibo w ON c.weibo_id > 0 AND w.id = c.weibo_id AND w.deleted_at IS NULL WHERE c.member_id = ? ORDER BY c.created_at DESC LIMIT ?'
-    )
-    .bind(memberId, limit)
-    .all<{ id: number; postId: number; weiboId: number; content: string; status: string; created_at: number; postSlug: string | null; postTitle: string | null; weiboContent: string | null }>()
-  return results ?? []
-}
-
-/**
- * 收到的回复（最新在前，只出已审）：两层口径——
- * ① 直接回复我的评论（r.parent_id 指向我的评论行）；
- * ② 我参与回复过的线程里的新回复（线程扁平化：楼中楼 parent 恒指顶层，作者回我的回复时
- *    parent 指线程根，所以按「我回复过的 parent」归并）；自己发的回复不计。
- * r.member_id IS NOT ? 同时覆盖游客/作者回复（member_id=0）与别人会员的回复。
- */
-export async function listMemberReplies(
-  db: D1Database,
-  memberId: number,
-  limit = 30
-): Promise<{ id: number; parentId: number; postId: number; weiboId: number; nickname: string; content: string; isAdmin: number; created_at: number; mineContent: string; postSlug: string | null; postTitle: string | null; weiboContent: string | null; rootTier: string | null; rootTierExpires: number | null }[]> {
-  // 两步锚点查询（2026-11 审计 P2-3 读放大收口）：旧写法 `r.member_id IS NOT ?` 是非索引
-  // 谓词，r 侧每次渲染扫全部已审评论。扁平楼中楼下回复的 parent_id 恒指线程根，
-  // 「我参与过的线程」= 我发过的评论 id ∪ 我回复的 parent_id（都是等值可索引集合）；
-  // 第二步按锚点 IN 走 idx_comments_parent（MULTI-INDEX 同族，INDEXED BY 硬约束）。
-  // 附带 rootTier/rootTierExpires（线程根作者档位）：/member「收到的回复」的圈层过滤
-  // （P3-26）在 pages.ts 按 commentgate 判定，不在这里做（db 层不读 settings）
-  const anchors = new Set<number>()
-  {
-    const mine = await db.prepare('SELECT id FROM comments WHERE member_id = ? LIMIT 500').bind(memberId).all<{ id: number }>()
-    for (const r of mine.results ?? []) anchors.add(r.id)
-    const replied = await db
-      .prepare('SELECT DISTINCT parent_id AS id FROM comments WHERE member_id = ? AND parent_id > 0 LIMIT 500')
-      .bind(memberId)
-      .all<{ id: number }>()
-    for (const r of replied.results ?? []) anchors.add(r.id)
-  }
-  if (!anchors.size) return []
-  const anchorList = [...anchors]
-  const out: {
-    id: number
-    parentId: number
-    postId: number
-    weiboId: number
-    nickname: string
-    content: string
-    isAdmin: number
-    created_at: number
-    mineContent: string
-    postSlug: string | null
-    postTitle: string | null
-    weiboContent: string | null
-    rootTier: string | null
-    rootTierExpires: number | null
-  }[] = []
-  // 分块 90 个锚点（D1 单条 SQL 变量上限 100：90 锚点 + member_id + LIMIT = 92）
-  for (let i = 0; i < anchorList.length; i += 90) {
-    const chunk = anchorList.slice(i, i + 90)
-    const ph = chunk.map(() => '?').join(',')
-    const res = await db
-      .prepare(
-        `SELECT r.id, r.parent_id AS parentId, c.post_id AS postId, c.weibo_id AS weiboId, r.nickname, r.content, r.is_admin AS isAdmin, r.created_at,
-              c.content AS mineContent, p.slug AS postSlug, p.title AS postTitle, w.content AS weiboContent,
-              m2.tier AS rootTier, m2.tier_expires_at AS rootTierExpires
-       FROM comments r INDEXED BY idx_comments_parent
-       JOIN comments c ON c.id = r.parent_id
-       LEFT JOIN members m2 ON m2.id = c.member_id
-       LEFT JOIN posts p ON c.post_id > 0 AND p.id = c.post_id AND p.deleted_at IS NULL
-       LEFT JOIN weibo w ON c.weibo_id > 0 AND w.id = c.weibo_id AND w.deleted_at IS NULL
-       WHERE r.parent_id IN (${ph}) AND r.status = 'approved' AND r.member_id != ? AND r.id != c.id
-       ORDER BY r.created_at DESC LIMIT ?`
-      )
-      .bind(...chunk, memberId, limit)
-      .all<{
-        id: number
-        parentId: number
-        postId: number
-        weiboId: number
-        nickname: string
-        content: string
-        isAdmin: number
-        created_at: number
-        mineContent: string
-        postSlug: string | null
-        postTitle: string | null
-        weiboContent: string | null
-        rootTier: string | null
-        rootTierExpires: number | null
-      }>()
-    out.push(...(res.results ?? []))
-  }
-  out.sort((a, b) => b.created_at - a.created_at)
-  return out.slice(0, limit)
-}
-
-/** 浏览足迹滚动清理（index.ts 备份 cron 顺带）：保留窗口与 visit_log 同为 90 天 */
-export async function purgeMemberVisits(db: D1Database): Promise<void> {
-  await db.prepare('DELETE FROM member_visits WHERE ts < ?').bind(Date.now() - 90 * 86_400_000).run()
-}
