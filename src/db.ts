@@ -90,9 +90,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // 服务端插件「微博同步 Buffer」：Buffer API Key 与目标渠道 ID（X 等，设置页可一键拉取，src/hooks.ts）
   bufferAccessToken: '',
   bufferChannelId: '',
-  // 服务端插件「广场同步」：广场 hub 地址（默认官方 https://bloghao.com/plaza）与站点注册 token（src/hooks.ts，docs/PLAZA.md）
-  plazaEndpoint: 'https://bloghao.com/plaza',
-  plazaToken: '',
   // 一键灰度（哀悼/纪念模式）：所有公开页 CSS 去色，见 src/render.ts page()
   siteGrayscale: '0',
   // 一键闭站：公开页面与公开 API 全部 503，仅后台/登录/图床可用（src/index.ts 闭站中间件）
@@ -116,11 +113,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // 「打开使用手册」的点击记账。两键都进 BOOL_SETTINGS 归一化，后台设置页保存全部不含它们
   onboarding: '',
   onboardingManual: '',
-  // 更新中心（自选更新，机制 src/update.ts）：分站 / 自托管用户自己决定「更新到最新版」还是
-  // 「保持当前版本」。updateIgnoredVersion = 用户点过「保持当前版本」时记下的版本号（只认
-  // x.y.z，脏值清空），出现更高的新版本时该记录自动失效（又会提示更新）。检查更新只读官网
-  // 发布的机器可读清单，不做任何自动更新——真正换版本仍由一次部署动作完成（见 docs/UPDATING.md）
-  updateIgnoredVersion: '',
 }
 
 /** 敏感设置键：GET / PUT 响应一律打码（api.ts），整站包导出整体跳过（sitebundle.ts）。
@@ -134,7 +126,6 @@ export const SECRET_SETTINGS = [
   'telegramBotToken',
   'telegramWebhookSecret',
   'bufferAccessToken',
-  'plazaToken',
   'commentWebhookUrl',
   // 两档访问口令的 hash（src/protect.ts）：hash 本身不可逆，但它就是解锁令牌的签名密钥，
   // 泄漏等于泄漏发卡权——一律不出后台响应，只回显「已设置」

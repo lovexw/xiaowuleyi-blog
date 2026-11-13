@@ -283,7 +283,7 @@ test('sanitizeImportedRow：正文过净化，其余字段不动', () => {
 })
 
 test('BUNDLE_SETTINGS_SKIP：密钥与实例态键一律不进包', () => {
-  for (const k of ['externalToken', 'telegramBotToken', 'telegramWebhookSecret', 'bufferAccessToken', 'plazaToken', 'commentWebhookUrl']) {
+  for (const k of ['externalToken', 'telegramBotToken', 'telegramWebhookSecret', 'bufferAccessToken', 'commentWebhookUrl']) {
     assert.ok(BUNDLE_SETTINGS_SKIP.includes(k), k)
   }
   for (const k of ['siteUrl', 'pageCacheEpoch', 'bundleImport']) assert.ok(BUNDLE_SETTINGS_SKIP.includes(k), k)

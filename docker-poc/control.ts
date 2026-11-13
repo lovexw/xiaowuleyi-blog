@@ -20,225 +20,43 @@ import { randomToken, hashPassword, safeEqual, rateLimit } from '../src/auth'
  *  rateLimit 第一参必须是对象（WeakMap key），别传字符串——smoke 实测会抛
  *  「Invalid value used as weak map key」把整个控制面打成 500（2026-11-05） */
 const CONTROL_SCOPE = {}
-import { parseSemver, updateStatus, validateUpdateManifest, UPDATE_GUIDE_URL, UPDATE_MANIFEST_URL, type UpdateStatus } from '../src/update'
 import { APP_VERSION } from '../src/version'
 
-const CONTROL_PASSWORD = process.env.CONTROL_PASSWORD || ''
-/** 登录账户名（默认 admin）：带用户名的登录表单方便浏览器密码管理器记住整套凭据 */
-const CONTROL_USERNAME = (process.env.CONTROL_USERNAME || 'admin').toLowerCase()
-const SESSION_TTL_MS = 12 * 60 * 60_000 // 12 小时
-const SESSION_COOKIE = 'xw_control_session'
+const OPS_LOG = process.env.OPS_LOG_PATH || path.join(process.env.TENANTS_DIR || 'data/tenants', '..', 'ops.log')
 
-/** DNS 自动化（可选）：容器注入 CF_API_TOKEN + CF_ZONE_ID 后，开站自动建记录（橙云） */
-const CF_API_TOKEN = process.env.CF_API_TOKEN || ''
-const CF_ZONE_ID = process.env.CF_ZONE_ID || ''
-
-/**
- * 官网同步（可选）：把官方仓库 website/public/ 的静态官网纳入控制面托管——
- * 容器挂载宿主机站点目录（SITE_DIR，如 /var/www/bloghao:/site）后，
- * 「同步」= 拉 GitHub tarball → tar 解压 → 校验 → 替换站点目录，成功/失败经 flash 返回。
- * 未设 SITE_DIR 时功能整体不存在（卡片不渲染、端点 404），无官网部署的形态不受影响
- */
-const SITE_DIR = (process.env.SITE_DIR || '').replace(/\/+$/, '')
-const GH_REPO = process.env.SITE_REPO || 'bloghao/bloghao'
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ''
-
-/**
- * 广场 hub 统计（可选）：PLAZA_HUB_URL + PLAZA_ADMIN_TOKEN 都配置后，
- * 仪表盘显示「广场 hub」卡片（接入站点 / 内容量 / feed≈广场页访问 / ingest 上报）。
- * 两个 env 缺任一即卡片整体不存在；hub 是独立 Worker（协议见 docs/PLAZA.md）
- */
-const PLAZA_HUB_URL = (process.env.PLAZA_HUB_URL || '').trim().replace(/\/+$/, '')
-const PLAZA_ADMIN_TOKEN = process.env.PLAZA_ADMIN_TOKEN || ''
-
-// 与 server.ts 的 HOST_RE 同口径（bundle 后共享同一份；源码各自声明防循环导入）
-const HOST_RE = /^[a-z0-9][a-z0-9.-]*$/
-
-// 域名形态守卫（与 /create 同一正则）：host 会拼进 tenants/<host>/ 路径，
-// 不设防的 ../ 会打出 tenants 目录之外（reset / tenant 详情 / 删除都靠它把门）
-const HOST_SHAPE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
-
-/** 浏览器侧真实 scheme（server.ts resolveScheme 的结果经 deps 传入）拼站点地址用 */
-function schemeOf(deps: ControlDeps): string {
-  return deps.scheme === 'https' ? 'https' : 'http'
-}
-
-interface PlazaStats {
-  sites?: { total?: number; active?: number; verified?: number }
-  items?: { total?: number; posts?: number; weibo?: number; last24h?: number }
-  today?: { day?: string; feed?: number; sites?: number; ingest?: number; items?: number }
-  total?: { feed?: number; sites?: number; ingest?: number; items?: number }
-}
-
-/** 拉 hub 全局统计（管理端点）：失败返回 null，卡片降级显示不可达，绝不拖垮仪表盘 */
-async function fetchPlazaStats(): Promise<PlazaStats | null> {
+function opsLog(action: string, detail: string): void {
   try {
-    const res = await fetch(`${PLAZA_HUB_URL}/api/admin/stats`, {
-      headers: { Authorization: `Bearer ${PLAZA_ADMIN_TOKEN}` },
-      signal: AbortSignal.timeout(4_000),
-    })
-    if (!res.ok) return null
-    return (await res.json()) as PlazaStats
+    fs.appendFileSync(OPS_LOG, JSON.stringify({ ts: new Date().toISOString(), action, detail }) + '\n')
   } catch {
-    return null
+    /* 日志失败不阻塞主流程 */
   }
 }
 
-/* ---------------- 分站广场自动收录（可选：PLAZA_HUB_URL + PLAZA_ADMIN_TOKEN 都配置后生效） ----------------
- * 开站/启用即把分站注册进广场 hub（走 hub 管理端点，与人工审核同一入口，只是由面板代劳——
- * 没有 token 配置就整体不生效，第三方自托管站想进官方广场仍走 docs/PLAZA.md 的人工流程）。
- * 注册返回的站点 token 写进租户库 settings.plazaToken：plaza-sync 服务端插件默认开启，
- * 有 token 即自动 push（发布实时进广场、删除/锁文自动下架），hub 的 6 小时 pull 仍是兜底路。
- * 演示租户（种子假数据）与停用租户一律不收录——广场只收真实公开内容，宁缺毋假。
- * 全部失败都只进 flash 提示，绝不阻塞开站/停用/删除主流程。 */
-
-type PlazaEnsureResult = { ok: 'added' | 'known' | 'skip'; note?: string } | { ok: 'error'; note: string }
-
-/** hub 管理 API：8s 超时，data 解析失败为 null；网络异常 status=0（调用方按不可达处理） */
-async function plazaApi(method: string, apiPath: string, body?: unknown): Promise<{ status: number; data: Record<string, unknown> | null }> {
+function readOpsLog(limit = 20): { ts: string; action: string; detail: string }[] {
   try {
-    const res = await fetch(`${PLAZA_HUB_URL}${apiPath}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${PLAZA_ADMIN_TOKEN}`,
-        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-      signal: AbortSignal.timeout(8_000),
-    })
-    let data: Record<string, unknown> | null = null
-    try {
-      data = (await res.json()) as Record<string, unknown>
-    } catch {
-      /* 非 JSON 响应按 null */
-    }
-    return { status: res.status, data }
+    return fs
+      .readFileSync(OPS_LOG, 'utf8')
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .slice(-limit)
+      .map((l) => JSON.parse(l))
+      .reverse()
   } catch {
-    return { status: 0, data: null }
+    return []
   }
 }
 
-/** 租户站点标题（广场展示名）：只读开库取 siteTitle，拿不到回落域名 */
-async function plazaSiteName(host: string): Promise<string> {
-  const file = path.join(tenantDir(host), 'blog.db')
-  if (!fs.existsSync(file)) return host
-  try {
-    const { DatabaseSync } = await import('node:sqlite')
-    const db = new DatabaseSync(file, { readOnly: true })
-    try {
-      const row = db.prepare("SELECT value FROM settings WHERE key = 'siteTitle'").get() as { value?: unknown } | undefined
-      return String(row?.value || '').trim() || host
-    } finally {
-      db.close()
-    }
-  } catch {
-    return host
+function issueSession(): string {
+  const token = randomToken(24)
+  sessions.set(token, Date.now() + SESSION_TTL_MS)
+  // 容量护栏：会话桶异常膨胀（正常单管理员到不了）时丢最旧的
+  if (sessions.size > 100) {
+    const oldest = [...sessions.entries()].sort((a, b) => a[1] - b[1])[0]
+    if (oldest) sessions.delete(oldest[0])
   }
+  return token
 }
-
-/** 站点 token 写进租户库（仅在尚未配置时写，不覆盖站长自己填的）。经租户活连接写，
- *  业务侧下一读即见；写不进只损失 push 路（实时性/下架同步），pull 路不受影响 */
-async function plazaSaveToken(deps: ControlDeps, host: string, token: string): Promise<boolean> {
-  const db = deps.tenants.get(host)?.env?.DB as
-    | { prepare(sql: string): { bind(...args: unknown[]): { run(): Promise<unknown> } } }
-    | undefined
-  if (!db) return false
-  try {
-    await db
-      .prepare(
-        // 条件写：key 已在且值非空则不动（ON CONFLICT … WHERE），按钮连点也安全
-        "INSERT INTO settings (key, value) VALUES ('plazaToken', ?) " +
-          "ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE settings.value = ''",
-      )
-      .bind(token)
-      .run()
-    return true
-  } catch {
-    return false
-  }
-}
-
-/** 确保单个租户已收录进广场：注册（409 = 已在广场）+ token 落库 */
-async function plazaEnsureSite(deps: ControlDeps, host: string, cfg: TenantConfig): Promise<PlazaEnsureResult> {
-  if (!PLAZA_HUB_URL || !PLAZA_ADMIN_TOKEN) return { ok: 'skip' }
-  if (cfg.disabled) return { ok: 'skip' }
-  const { status, data } = await plazaApi('POST', '/api/admin/sites', {
-    url: `https://${host}`,
-    name: (await plazaSiteName(host)).slice(0, 100),
-  })
-  if (status === 409) return { ok: 'known' }
-  if (status === 0) return { ok: 'error', note: '广场 hub 暂不可达，稍后可在仪表盘点「分站收录进广场」重试' }
-  if (status !== 200) {
-    const msg = data && typeof data.error === 'string' ? data.error : `HTTP ${status}`
-    return { ok: 'error', note: `广场收录失败：${msg}` }
-  }
-  const token = typeof data?.token === 'string' ? data.token : ''
-  if (token && (await plazaSaveToken(deps, host, token))) {
-    opsLog('广场收录', `${host}（已注册，token 已写入站点设置）`)
-    return { ok: 'added', note: '已自动收录进广场：新内容实时推送，删除/锁文自动下架' }
-  }
-  opsLog('广场收录', `${host}（已注册，token 未落库——hub 补漏路仍生效）`)
-  return { ok: 'added', note: '已收录进广场（hub 定时补漏生效；站点 token 未能写入，push 路未启用）' }
-}
-
-/** 按站点地址找 hub 站点 id（停用/删除同步用）：hub 没有按 url 查的端点，走列表（≤500 站）比对 */
-async function plazaFindSiteId(url: string): Promise<number | null> {
-  const { status, data } = await plazaApi('GET', '/api/admin/sites')
-  if (status !== 200 || !Array.isArray(data?.sites)) return null
-  for (const s of data.sites as Array<Record<string, unknown>>) {
-    if (String(s.url || '').replace(/\/+$/, '') === url) return Number(s.id) || null
-  }
-  return null
-}
-
-/** 广场收录同步（仪表盘按钮）：非演示、非停用租户逐个对齐进 hub，最后触发一次立即补漏，
- *  让新收录站点的近 30 天内容马上进广场（不等 6 小时 cron）。返回 flash 一句话 */
-async function plazaSyncAll(deps: ControlDeps): Promise<string> {
-  if (!PLAZA_HUB_URL || !PLAZA_ADMIN_TOKEN) return '✗ 未配置 PLAZA_HUB_URL / PLAZA_ADMIN_TOKEN，广场收录不可用'
-  let added = 0
-  let known = 0
-  const errors: string[] = []
-  for (const [host, cfg] of Object.entries(deps.readTenantsConfig().tenants)) {
-    const r = await plazaEnsureSite(deps, host, cfg)
-    if (r.ok === 'added') added++
-    else if (r.ok === 'known') known++
-    else if (r.ok === 'error') errors.push(`${host}：${r.note}`)
-  }
-  opsLog('广场收录', `全量对齐：新收 ${added}、已在 ${known}、失败 ${errors.length}`)
-  const head = added === 0 && known > 0 ? '全部分站均已在广场' : `新收录 ${added} 站`
-  if (errors.length) return `✗ 广场收录同步（新收 ${added}、已在 ${known}）有失败项：${errors.join('；')}`
-  const pull = await plazaApi('POST', '/api/admin/pull')
-  const pulled = pull.status === 200 ? Number(pull.data?.pulled) || 0 : -1
-  return pulled >= 0 ? `✓ ${head}，补漏已触发（本轮拉取 ${pulled} 条进广场）` : `✓ ${head}，但补漏触发失败（6 小时内 cron 会自动补）`
-}
-
-interface Tenant {
-  host: string
-  env: Record<string, unknown>
-}
-
-interface TenantConfig {
-  demo?: boolean
-  storage?: string
-  disabled?: boolean
-}
-
-interface ControlDeps {
-  req: import('node:http').IncomingMessage
-  res: import('node:http').ServerResponse
-  url: URL
-  host: string
-  /** 浏览器侧真实 scheme（server.ts resolveScheme 判定）：https 时会话 Cookie 带 Secure */
-  scheme: string
-  tenants: Map<string, Tenant>
-  readTenantsConfig(): { r2?: Record<string, string>; tenants: Record<string, TenantConfig> }
-  writeTenantsConfig(cfg: { r2?: Record<string, string>; tenants: Record<string, TenantConfig> }): void
-  createTenantFor(host: string, cfg: TenantConfig, r2Shared?: Record<string, string>): Promise<Tenant>
-  log(msg: string): void
-}
-
-// ── 会话 ─────────────────────────────────────────────────────────────────
-const sessions = new Map<string, number>() // token → 过期时刻
 
 /** 一次性操作提示（PRG）：POST 处理完 303 回仪表盘，flash 短命 Cookie 送达后即清——
  *  刷新页面永远是干净的 GET，浏览器不再弹「确认重新提交表单」 */
@@ -277,132 +95,40 @@ function sessionOk(req: import('node:http').IncomingMessage): boolean {
   return true
 }
 
-function issueSession(): string {
-  const token = randomToken(24)
-  sessions.set(token, Date.now() + SESSION_TTL_MS)
-  // 容量护栏：会话桶异常膨胀（正常单管理员到不了）时丢最旧的
-  if (sessions.size > 100) {
-    const oldest = [...sessions.entries()].sort((a, b) => a[1] - b[1])[0]
-    if (oldest) sessions.delete(oldest[0])
-  }
-  return token
+const CONTROL_PASSWORD = process.env.CONTROL_PASSWORD || ''
+/** 登录账户名（默认 admin）：带用户名的登录表单方便浏览器密码管理器记住整套凭据 */
+const CONTROL_USERNAME = (process.env.CONTROL_USERNAME || 'admin').toLowerCase()
+const SESSION_TTL_MS = 12 * 60 * 60_000 // 12 小时
+const SESSION_COOKIE = 'xw_control_session'
+const sessions = new Map<string, number>() // token → 过期时刻
+
+
+/** DNS 自动化（可选）：容器注入 CF_API_TOKEN + CF_ZONE_ID 后，开站自动建记录（橙云） */
+const CF_API_TOKEN = process.env.CF_API_TOKEN || ''
+const CF_ZONE_ID = process.env.CF_ZONE_ID || ''
+
+/**
+ * 官网同步（可选）：把官方仓库 website/public/ 的静态官网纳入控制面托管——
+ * 容器挂载宿主机站点目录（SITE_DIR，如 /var/www/bloghao:/site）后，
+ * 「同步」= 拉 GitHub tarball → tar 解压 → 校验 → 替换站点目录，成功/失败经 flash 返回。
+ * 未设 SITE_DIR 时功能整体不存在（卡片不渲染、端点 404），无官网部署的形态不受影响
+ */
+const SITE_DIR = (process.env.SITE_DIR || '').replace(/\/+$/, '')
+const GH_REPO = process.env.SITE_REPO || 'bloghao/bloghao'
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ''
+
+// 与 server.ts 的 HOST_RE 同口径（bundle 后共享同一份；源码各自声明防循环导入）
+const HOST_RE = /^[a-z0-9][a-z0-9.-]*$/
+
+// 域名形态守卫（与 /create 同一正则）：host 会拼进 tenants/<host>/ 路径，
+// 不设防的 ../ 会打出 tenants 目录之外（reset / tenant 详情 / 删除都靠它把门）
+const HOST_SHAPE_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/
+
+/** 浏览器侧真实 scheme（server.ts resolveScheme 的结果经 deps 传入）拼站点地址用 */
+function schemeOf(deps: ControlDeps): string {
+  return deps.scheme === 'https' ? 'https' : 'http'
 }
 
-// ── 操作日志（JSONL，append-only）─────────────────────────────────────────
-const OPS_LOG = process.env.OPS_LOG_PATH || path.join(process.env.TENANTS_DIR || 'data/tenants', '..', 'ops.log')
-
-function opsLog(action: string, detail: string): void {
-  try {
-    fs.appendFileSync(OPS_LOG, JSON.stringify({ ts: new Date().toISOString(), action, detail }) + '\n')
-  } catch {
-    /* 日志失败不阻塞主流程 */
-  }
-}
-
-function readOpsLog(limit = 20): { ts: string; action: string; detail: string }[] {
-  try {
-    return fs
-      .readFileSync(OPS_LOG, 'utf8')
-      .trim()
-      .split('\n')
-      .filter(Boolean)
-      .slice(-limit)
-      .map((l) => JSON.parse(l))
-      .reverse()
-  } catch {
-    return []
-  }
-}
-
-// ── 更新中心（自选更新，机制见 src/update.ts / docs/UPDATING.md）──────────
-// 运维视角的「更新中心」：显示当前镜像版本、最新可用版本与「更新了什么」，运维自己决定
-// 「更新到最新」（跑一次部署动作）还是「保持当前版本」（记账）。只读官网发布的机器可读清单
-// （固定可信端点，无用户输入入路径），清单按不可信输入严格校验；拿不到就降级为「暂不可检查」。
-// 偏好落 TENANTS_DIR/.update-pref.json（随 data/ 卷持久化，与 ops.log 同域，整机备份一并带走）。
-const UPDATE_PREF_FILE = path.join(process.env.TENANTS_DIR || 'data/tenants', '.update-pref.json')
-
-function readUpdatePref(): { ignored: string } {
-  try {
-    const j = JSON.parse(fs.readFileSync(UPDATE_PREF_FILE, 'utf8')) as { ignored?: unknown }
-    const v = typeof j.ignored === 'string' ? j.ignored.replace(/^v/, '') : ''
-    return { ignored: parseSemver(v) ? v : '' }
-  } catch {
-    return { ignored: '' }
-  }
-}
-
-function writeUpdatePref(ignored: string): void {
-  try {
-    fs.mkdirSync(path.dirname(UPDATE_PREF_FILE), { recursive: true })
-    fs.writeFileSync(UPDATE_PREF_FILE, JSON.stringify({ ignored, at: new Date().toISOString() }, null, 2))
-  } catch {
-    /* 写入失败下次再试，不影响主流程 */
-  }
-}
-
-interface UpdateView {
-  checkable: boolean
-  current: string
-  status?: UpdateStatus
-}
-
-let updateCache: { at: number; view: UpdateView } | null = null
-
-/** 拉官网版本清单并算状态；10 分钟内存缓存（仪表盘反复刷新不刷出一堆出网请求）。失败降级 checkable:false */
-async function fetchUpdateView(): Promise<UpdateView> {
-  const current = APP_VERSION
-  if (updateCache && Date.now() - updateCache.at < 10 * 60_000) return updateCache.view
-  let view: UpdateView = { checkable: false, current }
-  try {
-    const res = await fetch(UPDATE_MANIFEST_URL, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(6_000) })
-    if (res.ok) {
-      const m = validateUpdateManifest(await res.json().catch(() => null))
-      if (m) view = { checkable: true, current, status: updateStatus(current, m, readUpdatePref().ignored) }
-    }
-  } catch {
-    /* 不可达：降级为暂不可检查，不影响其余面板 */
-  }
-  updateCache = { at: Date.now(), view }
-  return view
-}
-
-/** 更新中心卡片：当前版本 / 最新版本 / 更新了什么 / 保持当前版本 / 更新指引 */
-function updateCardHtml(view: UpdateView): string {
-  const st = view.status
-  const head = st
-    ? `当前 v${esc(view.current)} <span class="muted">· 最新 v${esc(st.latest)}${st.date ? `（${esc(st.date)}）` : ''}</span>`
-    : `当前 v${esc(view.current)} <span class="muted">· 官网清单暂不可达</span>`
-  let line: string
-  if (!st) {
-    line = `<p class="tenant-meta">暂时获取不到最新版本信息（官网清单不可达），稍后自动重试。升级动作与手动选择见 <a href="${esc(UPDATE_GUIDE_URL)}" target="_blank" rel="noopener" style="color:var(--accent)">更新指引 ↗</a>。</p>`
-  } else if (!st.hasUpdate) {
-    line = `<p class="tenant-meta">已是最新版本，无需操作。</p>`
-  } else if (st.kept) {
-    line = `<p class="tenant-meta">检测到新版本 <b>v${esc(st.latest)}</b>，你已选择<b>保持当前版本</b>；出现更新的版本时会再次提示。</p>`
-  } else {
-    line = `<p class="tenant-meta">有新版本可用：<b>v${esc(st.latest)}</b>（当前 v${esc(view.current)}）。更新 = 按指引做一次部署动作（拉取代码 + 重建镜像 + 重启），数据与设置都保留。</p>`
-  }
-  const notes = st && st.hasUpdate
-    ? st.releases
-        .map((r) => {
-          const items = r.notes.map((n) => `<li>${esc(n)}</li>`).join('')
-          return `<div style="margin:10px 0"><div><b>v${esc(r.version)}</b>${r.date ? ` <span class="muted">· ${esc(r.date)}</span>` : ''}</div>${
-            items ? `<ul style="margin:6px 0 0;padding-left:18px;line-height:1.8">${items}</ul>` : '<div class="muted">（这一版没有单独要点）</div>'
-          }</div>`
-        })
-        .join('')
-    : ''
-  const keep = st && st.hasUpdate && !st.kept
-    ? `<form method="post" action="/update-keep" style="margin-top:10px"><input type="hidden" name="version" value="${esc(st.latest)}"><button class="btn" type="submit">保持当前版本（v${esc(view.current)}）</button><span class="muted" style="margin-left:8px">不打扰：出现更新的版本时会再次提示。</span></form>`
-    : ''
-  return `<div class="card fade fade-2">
-  <h2>版本与更新 <span class="muted">· ${head}</span></h2>
-  ${line}
-  ${notes}
-  ${keep}
-  <p class="tenant-meta" style="margin-top:10px">本站不做自动更新——升级是一次显式部署动作，见 <a href="${esc(UPDATE_GUIDE_URL)}" target="_blank" rel="noopener" style="color:var(--accent)">更新指引 ↗</a>。</p>
-</div>`
-}
 
 // ── DNS 自动化（Cloudflare）──────────────────────────────────────────────
 async function cfApi(method: string, path: string, body?: unknown): Promise<{ ok: boolean; errors: string; data?: { id?: string } }> {
@@ -1133,17 +859,13 @@ function showcaseCardHtml(): string {
 }
 
 async function dashboard(deps: ControlDeps, flash = ''): Promise<string> {
-  // 广场统计按需拉取（4s 超时）：hub 不可达时卡片降级，不影响其余面板
-  const plazaStats = PLAZA_HUB_URL && PLAZA_ADMIN_TOKEN ? await fetchPlazaStats() : null
-  // 更新中心：拉官网版本清单（10 分钟缓存），拿不到降级显示，不拖垮仪表盘
-  const updateView = await fetchUpdateView()
   const scheme = deps.scheme === 'https' ? 'https' : 'http'
   // 数据列涉及逐租户开库查询，与广场统计一样在 async 上下文取好再进纯渲染
   const statsMap = new Map<string, TenantStats | null>()
   for (const host of Object.keys(deps.readTenantsConfig().tenants)) {
     statsMap.set(host, await tenantStats(host))
   }
-  return page('控制台', dashboardBody(deps, plazaStats, scheme, statsMap, updateView), flash, true)
+  return page('控制台', dashboardBody(deps, scheme, statsMap), flash, true)
 }
 
 /** 仪表盘入口（GET /）：flash 从一次性 Cookie 取（PRG），取到必须带清障头回给浏览器 */
@@ -1157,10 +879,8 @@ async function dashboardRoute(deps: ControlDeps, inlineFlash = ''): Promise<void
 
 function dashboardBody(
   deps: ControlDeps,
-  plazaStats: PlazaStats | null,
   scheme = 'https',
   statsMap?: Map<string, TenantStats | null>,
-  updateView?: UpdateView,
 ): string {
   const cfgAll = deps.readTenantsConfig()
   const rows = Object.entries(cfgAll.tenants)
@@ -1235,31 +955,6 @@ ${
       : '版本未记录（点右侧按钮完成首次同步）'
   }</p>
   <form method="post" action="/website-sync"><button class="btn btn-primary" type="submit">同步 GitHub 最新版本</button></form>
-</div>`
-    : ''
-}
-
-${updateView ? updateCardHtml(updateView) : ''}
-
-${
-  PLAZA_HUB_URL && PLAZA_ADMIN_TOKEN
-    ? `<div class="card fade fade-2">
-  <h2>广场 hub <span class="muted">· ${esc(PLAZA_HUB_URL).replace(/^https?:\/\//, '')} · <a href="https://bloghao.com/plaza/" style="color:var(--accent)">查看广场 ↗</a></span></h2>
-  ${
-    plazaStats
-      ? `<div class="stat-strip" style="margin-bottom:8px">
-    <div class="stat accent"><b>${num(plazaStats.sites?.active)}<span style="font-size:13px;font-weight:600;color:var(--sub)"> / ${num(plazaStats.sites?.total)}</span></b><span>活跃 / 接入站点 · 认证 ${num(plazaStats.sites?.verified)}</span></div>
-    <div class="stat"><b>${num(plazaStats.items?.total)}</b><span>广场内容（文章 ${num(plazaStats.items?.posts)} · 微博 ${num(plazaStats.items?.weibo)}）</span></div>
-    <div class="stat"><b>${num(plazaStats.today?.feed)}</b><span>今日 feed 拉取 ≈ 广场页访问</span></div>
-    <div class="stat"><b>${num(plazaStats.today?.ingest)}<span style="font-size:13px;font-weight:600;color:var(--sub)"> / ${num(plazaStats.total?.ingest)}</span></b><span>今日 / 累计上报 · 今日 ${num(plazaStats.today?.items)} 条</span></div>
-  </div>
-  <p class="muted">统计来自 hub /api/admin/stats（北京日口径）；24 小时新增内容 ${num(plazaStats.items?.last24h)} 条。</p>`
-      : '<p class="tenant-meta">hub 暂时不可达，统计稍后自动恢复。</p>'
-  }
-  <form method="post" action="/plaza-sync" style="margin-top:12px">
-    <button class="btn btn-primary" type="submit">分站收录进广场</button>
-    <span class="muted" style="margin-left:8px">全部启用中的分站对齐进 hub（停用站除外）并触发一次补漏；开通/启用已自动收录，此按钮用于存量站补录与失败重试。</span>
-  </form>
 </div>`
     : ''
 }
@@ -1535,10 +1230,6 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
     } else {
       flash += '；请手动添加 DNS：A 记录指向本机（Cloudflare 橙云）'
     }
-    // 广场自动收录（演示租户不收录）：best-effort，失败只提示不回滚开站
-    const plaza = await plazaEnsureSite(deps, host, cfgAll.tenants[host] || {})
-    if (plaza.ok === 'added' && plaza.note) flash += `；<br>✓ ${esc(plaza.note)}`
-    else if (plaza.ok === 'error') flash += `；<br><span style="color:#b45309">✗ ${esc(plaza.note)}</span>`
     opsLog('开通', host)
     return flashRedirect(res, flash)
   }
@@ -1556,21 +1247,14 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
 
   if (method === 'POST' && path === '/disable' && host) {
     const cfgAll = deps.readTenantsConfig()
-    let plazaNote = ''
     if (cfgAll.tenants[host]) {
       cfgAll.tenants[host].disabled = true
       deps.writeTenantsConfig(cfgAll)
       closeTenantDb(deps.tenants.get(host)?.env)
       deps.tenants.delete(host) // 路由摘除；库与目录原样保留
       opsLog('停用', host)
-      // 广场同步隐藏（best-effort）：站点下线了，广场名录与内容不该继续挂着
-      if (PLAZA_HUB_URL && PLAZA_ADMIN_TOKEN) {
-        const id = await plazaFindSiteId(`https://${host}`)
-        const hid = id ? (await plazaApi('PATCH', `/api/admin/sites/${id}`, { disabled: true })).status === 200 : false
-        plazaNote = hid ? '；广场条目已同步隐藏' : '；广场隐藏未完成（hub 不可达或未收录）'
-      }
     }
-    return flashRedirect(res, `✓ ${host} 已停用（数据保留，可随时启用）${plazaNote}`)
+    return flashRedirect(res, `✓ ${host} 已停用（数据保留，可随时启用）`)
   }
 
   if (method === 'POST' && path === '/enable' && host) {
@@ -1591,10 +1275,6 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
         return flashRedirect(res, `✗ 启用失败：${esc(String(e instanceof Error ? e.message : e))}；已回滚为停用状态`)
       }
       opsLog('启用', host)
-      // 启用即补收录（覆盖「收录功能上线前建的老站」与此前被停用过的站）
-      const plaza = await plazaEnsureSite(deps, host, cfg)
-      if (plaza.ok === 'added' && plaza.note) flash += `；✓ ${esc(plaza.note)}`
-      else if (plaza.ok === 'error') flash += `；✗ ${esc(plaza.note)}`
     }
     return flashRedirect(res, flash)
   }
@@ -1612,14 +1292,7 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
       fs.rmSync(tenantDir(host), { recursive: true, force: true })
       opsLog('删除', host)
       if (cfEnabled()) await dnsDelete(host)
-      // 广场同步移除（best-effort）：hub 删站自带级联清内容；未收录过 = 无需清
-      let plazaNote = ''
-      if (PLAZA_HUB_URL && PLAZA_ADMIN_TOKEN) {
-        const id = await plazaFindSiteId(`https://${host}`)
-        const gone = id ? (await plazaApi('DELETE', `/api/admin/sites/${id}`)).status === 200 : true
-        plazaNote = gone ? '；广场条目已同步清除' : '；广场清除未完成（hub 不可达，可稍后在 hub 管理端手工删）'
-      }
-      return flashRedirect(res, `✓ ${host} 已彻底删除（配置 + 数据目录${cfEnabled() ? ' + DNS 记录' : ''}）${plazaNote}`)
+      return flashRedirect(res, `✓ ${host} 已彻底删除（配置 + 数据目录${cfEnabled() ? ' + DNS 记录' : ''}）`)
     }
     return flashRedirect(res, `✓ ${host} 已彻底删除（配置 + 数据目录${cfEnabled() ? ' + DNS 记录' : ''}）`)
   }
@@ -1633,23 +1306,6 @@ export async function controlApp(deps: ControlDeps): Promise<void> {
     }
     const flash = await resetAdminPassword(host)
     return flashRedirect(res, flash)
-  }
-
-  // 广场收录同步（按钮）：全部真实分站对齐进 hub（演示/停用站除外）+ 触发一次立即补漏。
-  // 日常无需手动点——开通/启用已自动收录，这里是补收录功能上线前的存量站与失败重试
-  if (method === 'POST' && path === '/plaza-sync') {
-    return flashRedirect(res, await plazaSyncAll(deps))
-  }
-
-  // 更新中心「保持当前版本」：记下运维选择的版本号（出现更新的版本时该记录自动失效）。
-  // 只认 x.y.z 形态，脏值拒绝——这是运维偏好，不涉及任何部署动作（升级是一次显式动作）
-  if (method === 'POST' && path === '/update-keep') {
-    const ver = (form?.get('version') || '').trim().replace(/^v/, '')
-    if (!parseSemver(ver)) return flashRedirect(res, '✗ 版本号形态不合法')
-    writeUpdatePref(ver)
-    updateCache = null // 清缓存：下次仪表盘立即反映新偏好
-    opsLog('更新偏好', `保持当前版本 → 忽略 v${ver}`)
-    return flashRedirect(res, `✓ 已选择保持当前版本（忽略 v${ver}）；出现更新的版本时会再次提示。`)
   }
 
   // 官网同步：拉 GitHub 最新 tarball 替换 SITE_DIR；SITE_DIR 未配置时端点不存在

@@ -419,7 +419,7 @@ function onboardCardHtml(s) {
         ${nameDone
           ? `<div class="onboard-title">站点名字「${esc(st.siteName)}」已就绪</div>`
           : `<div class="onboard-title">给站点起个名字</div>
-            <div class="onboard-sub">现在还是默认名，前台、订阅、广场都靠它认人。</div>
+            <div class="onboard-sub">现在还是默认名，前台、订阅源都靠它认人。</div>
             <div class="onboard-inline"><input class="input" id="onboard-name" maxlength="40" placeholder="给你的博客起个名字" value="${esc(st.siteName || '')}"><button class="btn btn-primary btn-sm" data-act="onboard-name">保存</button></div>`}
       </div>
     </div>`,
@@ -427,7 +427,7 @@ function onboardCardHtml(s) {
       <span class="onboard-mark">${avatarDone ? '✅' : '2'}</span>
       <div class="onboard-main">
         <div class="onboard-title">${avatarDone ? `站点头像已就绪 <img class="onboard-thumb" src="${esc(st.avatarUrl)}" alt="">` : '换上站点头像'}</div>
-        ${avatarDone ? '' : '<div class="onboard-sub">出现在首页刊头和你的每条评论旁，发布时自动同步到广场。</div>'}
+        ${avatarDone ? '' : '<div class="onboard-sub">出现在首页刊头和你的每条评论旁。</div>'}
       </div>
       ${avatarDone ? '' : '<button class="btn btn-ghost btn-sm" data-act="onboard-avatar">上传头像</button>'}
     </div>`,
@@ -459,72 +459,6 @@ function onboardCardHtml(s) {
     <div class="onboard-rows">${rows}</div>
     <div class="onboard-foot"><button class="onboard-skip" data-act="onboard-skip" type="button">跳过引导，不再显示</button></div>
   </div>`
-}
-
-/* 更新中心（自选更新，服务端 src/update.ts + api.ts /admin/update）：显示当前版本 / 最新版本与
- * 「更新了什么」，用户自己决定「更新到最新」（按指引做一次部署）还是「保持当前版本」（记账位
- * updateIgnoredVersion）。这里只读清单 + 记偏好，**不存在任何自动更新动作**——安全边界与
- * 自托管部署形态一致（升级动作由部署侧完成，见 docs/UPDATING.md） */
-async function openUpdateCenter(btn) {
-  const orig = btn ? btn.textContent : ''
-  if (btn) { btn.disabled = true; btn.textContent = '检查中…' }
-  let d
-  try {
-    d = await api('/admin/update')
-  } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = orig }
-    return toast(e.message || '检查更新失败，请重试', true)
-  }
-  if (btn) { btn.disabled = false; btn.textContent = orig }
-  if (!d.checkable) {
-    const why = '暂时获取不到最新版本信息，请检查网络后重试。'
-    modal(`<div class="modal-head"><span>检查更新</span><button class="modal-close" data-close>×</button></div>
-      <div class="modal-body">
-        <p style="color:var(--sub);font-size:13px;margin:0 0 6px;">当前版本：博客号 v${esc(d.current || '?')}</p>
-        <p style="font-size:13px;margin:0;">${why}</p>
-      </div>
-      <div class="modal-foot"><button class="btn" data-close>关闭</button></div>`)
-    return
-  }
-  const releasesHtml = (d.releases || []).map((r) => {
-    const notes = (r.notes || []).map((n) => `<li>${esc(n)}</li>`).join('')
-    return `<div style="margin:0 0 14px;">
-      <div style="font-weight:600;font-size:13px;margin-bottom:4px;">v${esc(r.version)}${r.date ? `<span style="color:var(--sub);font-weight:400;"> · ${esc(r.date)}</span>` : ''}</div>
-      ${notes ? `<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.8;">${notes}</ul>` : '<div style="color:var(--sub);font-size:13px;">（这一版没有单独的要点说明）</div>'}
-    </div>`
-  }).join('')
-  const status = !d.hasUpdate
-    ? `<div style="font-size:13px;">已是最新版本 <b>v${esc(d.latest)}</b>。</div>`
-    : d.kept
-      ? `<div style="font-size:13px;">检测到新版本 <b>v${esc(d.latest)}</b>，但你已选择<b>保持当前版本</b>。想升级可随时按下方指引操作。</div>`
-      : `<div style="font-size:13px;">有新版本可用：<b>v${esc(d.latest)}</b>（当前 v${esc(d.current)}）。下面是「更新了什么」。</div>`
-  const keepBtn = d.hasUpdate && !d.kept
-    ? '<button class="btn" id="upd-keep" type="button">保持当前版本</button>'
-    : ''
-  const m = modal(`<div class="modal-head"><span>检查更新</span><button class="modal-close" data-close>×</button></div>
-    <div class="modal-body">
-      ${status}
-      ${d.hasUpdate ? `<div style="margin-top:14px;">${releasesHtml}</div>` : ''}
-      <p style="color:var(--sub);font-size:12px;margin:14px 0 0;">本站不会自动更新。升级 = 按指引做一次部署动作，文章与设置都保留。</p>
-    </div>
-    <div class="modal-foot">
-      <a class="btn btn-ghost" href="${esc(d.guide || 'https://bloghao.com/docs/updating.html')}" target="_blank" rel="noopener">如何更新 ↗</a>
-      ${keepBtn}
-      <button class="btn btn-primary" data-close>知道了</button>
-    </div>`)
-  const keep = document.getElementById('upd-keep')
-  if (keep) keep.addEventListener('click', async () => {
-    keep.disabled = true
-    try {
-      const r = await api('/admin/settings', { method: 'PUT', body: { updateIgnoredVersion: d.latest } })
-      state.settings = r.settings
-      toast('已选择保持当前版本 v' + d.latest)
-      m.close()
-    } catch (e) {
-      toast(e.message || '保存失败，请重试', true)
-      keep.disabled = false
-    }
-  })
 }
 
 async function viewHome() {
@@ -591,13 +525,10 @@ async function viewHome() {
         <div><div class="stat-value" style="font-size:20px;">${s.db.weibo}<small>条微博</small></div></div>
         <div><div class="stat-value" style="font-size:20px;">${s.db.comments}<small>条评论</small></div></div>
         <div style="color:var(--sub);font-size:13px;">最近备份：${esc(backupText)}</div>
-        <div style="color:var(--sub);font-size:13px;">系统版本：博客号 v${esc(s.version || '?')} <button class="btn btn-ghost btn-sm" data-act="check-update" type="button">检查更新</button></div>
+        <div style="color:var(--sub);font-size:13px;">系统版本：博客号 v${esc(s.version || '?')}</div>
       </div>
     </div>`
   )
-  // 更新中心：按需检查（不随概览自动出网），用户自己决定更新还是保持当前版本
-  const updBtn = $app.querySelector('[data-act=check-update]')
-  if (updBtn) updBtn.addEventListener('click', () => openUpdateCenter(updBtn))
   // 一键清理页面缓存（src/pagecache.ts）：换 epoch 让旧边缘副本整代作废，访客即刻看到最新页面
   const purgeBtn = $app.querySelector('[data-act=purge-cache]')
   if (purgeBtn) purgeBtn.addEventListener('click', async () => {
@@ -3010,8 +2941,6 @@ async function viewPlugins() {
     .map((p) => {
       const fields = Array.isArray(p.configFields) ? p.configFields : []
       const cfgBtn = fields.length ? `<button class="btn btn-sm" type="button" data-srv-cfg="${esc(p.id)}">配置</button>` : ''
-      // 广场数据卡（B25 P2.3）：站长看见广场带来的量，是回访广场最强的理由
-      const statsBtn = p.id === 'plaza-sync' ? `<button class="btn btn-sm" type="button" data-srv-stats="${esc(p.id)}" title="广场带来的曝光 / 点击 / 点赞">数据</button>` : ''
       return `<div class="pl-row">
       <span class="pl-ico">${esc((p.title || p.id).charAt(0).toUpperCase())}</span>
       <div class="pl-main">
@@ -3183,48 +3112,6 @@ async function viewPlugins() {
           handleApiErr(e)
         }
       })
-    })
-  )
-
-  // 广场数据卡（B25 P2.3）：代理端点 /admin/plaza-stats 拿本站曝光 / 点击 / 点赞与近 7 日趋势
-  $app.querySelectorAll('[data-srv-stats]').forEach((btn) =>
-    btn.addEventListener('click', async () => {
-      btn.disabled = true
-      let d
-      try {
-        d = await api('/admin/plaza-stats')
-      } catch (e) {
-        btn.disabled = false
-        return handleApiErr(e)
-      }
-      btn.disabled = false
-      const t = d.totals || {}
-      const days = Array.isArray(d.days) ? d.days : []
-      const dayRows = days
-        .map(
-          (x) =>
-            `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;padding:6px 4px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums;">
-          <span>${esc(x.day || '')}</span><span>${x.views - 0}</span><span>${x.clicks - 0}</span><span>${x.likes - 0}</span></div>`
-        )
-        .join('')
-      const m = modal(
-        `<div class="modal-head"><span>广场数据 — ${esc((d.site && d.site.name) || '')}</span><button class="modal-close" data-close>×</button></div>
-        <div class="modal-body" style="padding:16px 20px;max-height:60vh;overflow-y:auto;">
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px;">
-            <div class="stat-card"><div class="stat-label">广场曝光</div><div class="stat-value">${t.views - 0}</div></div>
-            <div class="stat-card"><div class="stat-label">带回点击</div><div class="stat-value">${t.clicks - 0}</div></div>
-            <div class="stat-card"><div class="stat-label">收到点赞</div><div class="stat-value">${t.likes - 0}</div></div>
-          </div>
-          ${
-            dayRows
-              ? `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;padding:0 4px 6px;font-size:12px;color:var(--sub);"><span>日期</span><span>曝光</span><span>点击</span><span>点赞</span></div>${dayRows}
-          <p class="switch-sub" style="margin-top:10px;">曝光 / 点击自广场 2.0 上线起计数（近 7 日逐日），点赞为累计值；「来自广场」的回访在你的统计页看来源域名。</p>`
-              : '<p class="switch-sub">暂无逐日数据——广场页有人逛起来就会出现。已收录条数：' + (d.items - 0) + ' 条。</p>'
-          }
-        </div>
-        <div class="modal-foot"><button class="btn" data-act="close">关闭</button></div>`
-      )
-      m.mask.querySelector('[data-act=close]').addEventListener('click', m.close)
     })
   )
 }
@@ -3526,15 +3413,6 @@ async function viewSettings() {
           </div>
           <div class="sec-desc" id="buffer-channels-status" style="margin-top:6px;">同步时机：微博「发布」时自动推一条到所选渠道（X 免费档 280 字符，超出自动截断；#话题 会转成 X 的话题格式）</div>
         </div>
-        <div class="form-item">
-          <label>广场地址（广场同步插件：文章与微博发布时同步到官网广场 bloghao.com/plaza；留空 = 官方 hub，自建 hub 才填自己的地址）</label>
-          <input class="input" id="st-plazaEndpoint" placeholder="留空 = 官方 hub（https://bloghao.com/plaza）" value="${esc(s.plazaEndpoint || '')}">
-        </div>
-        <div class="form-item">
-          <label>广场站点 Token（在广场 hub 注册站点后发放，见 docs/PLAZA.md；未填 = 不同步）</label>
-          <input class="input" id="st-plazaToken" placeholder="32 位注册 Token" autocomplete="off" value="${esc(s.plazaToken || '')}">
-          <div class="sec-desc" style="margin-top:6px;">同步时机：文章 / 微博「发布」时自动推一条（编辑重发不重推）；加密文与会员专属文不会上广场。启停在「插件」页</div>
-        </div>
       </div>
     </div>
     </div>
@@ -3776,8 +3654,6 @@ async function viewSettings() {
       commentWebhookUrl: g('st-commentWebhookUrl').value.trim(),
       footerHtmlCode: g('st-footerHtmlCode').value,
       bufferAccessToken: g('st-bufferAccessToken').value.trim(),
-      plazaEndpoint: g('st-plazaEndpoint').value.trim(),
-      plazaToken: g('st-plazaToken').value.trim(),
       bufferChannelId: g('st-bufferChannelId').value.trim(),
       notifyNewComment: g('st-notifyNewComment').checked ? '1' : '0',
       rssFullText: g('st-rssFullText').checked ? '1' : '0',

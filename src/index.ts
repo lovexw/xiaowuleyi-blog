@@ -7,7 +7,6 @@ import { siteClosedResponse } from './closed'
 import { clientIp, getCookie, getSessionUser, isSecureRequest, rateLimit } from './auth'
 import { ensureSchema, getPostBySlug, getSettings, listCategories, listPages, listPosts, listPublishedTags, listSitemapCategoryLastmod, listSitemapPages, listSitemapPosts, listWeiboLastmod } from './db'
 import { buildLlmsFullTxt, buildLlmsStub, buildLlmsTxt } from './llms'
-import { mcpRoutes } from './mcp'
 import { goPageHtml, isTrustedOutHost } from './outlink'
 import { htmlEtagMiddleware } from './html-etag'
 import { imageCacheMatch, imageCachePut, pageCacheMiddleware } from './pagecache'
@@ -60,10 +59,10 @@ app.use('*', async (c, next) => {
 
 /* ---------------- 爬虫 / AI 抓取识别（src/bots.ts，统计页新维度） ----------------
  * 爬虫不执行 JS、进不了 visit_log，只能在服务端按 User-Agent 识别后旁路记录。
- * 只拦公开面：/admin、/api、/images、/mcp 不算「抓内容」；识别不命中（浏览器/未知脚本）
+ * 只拦公开面：/admin、/api、/images 不算「抓内容」；识别不命中（浏览器/未知脚本）
  * 直接放行零开销。记录走 waitUntil 异步写，绝不阻塞响应；写入闸（去抖 + 预算）在
  * shouldRecordBot 内部，防穷举路径刷 D1 写配额——见 bots.ts 文件头注释。 */
-const BOT_SKIP_PREFIX = ['/admin', '/api', '/images', '/mcp']
+const BOT_SKIP_PREFIX = ['/admin', '/api', '/images']
 app.use('*', async (c, next) => {
   const ua = c.req.header('User-Agent') || ''
   if (ua) {
@@ -94,13 +93,11 @@ app.use('*', htmlEtagMiddleware())
 /* ---------------- 页面边缘缓存（src/pagecache.ts）：公开页 / 订阅源 / 公开只读 API · 匿名访客 · 30 分钟副本 ----------------
  * 命中直接吐响应跳过 SSR/API 与 D1。登录 Cookie / 灰度一律不进缓存；带 query 走受控
  * 白名单（page/limit/wb/topic/q/sort/tag 镜像服务端 clamp 语义进键，未知参数 / sort=random 回源）。
- * 注册位必须在所有页面路由与 /api、/mcp 子应用之前（终点 handler 不调 next），且在闭站 /
+ * 注册位必须在所有页面路由与 /api 子应用之前（终点 handler 不调 next），且在闭站 /
  * 爬虫统计之后；设置变更 saveSettings 自动换代作废，后台「概览 → 系统」可一键清理 */
 app.use('*', pageCacheMiddleware())
 
 app.route('/api', api)
-// MCP 服务器（AI 助手接入，src/mcp.ts）：复用 externalToken 鉴权；闭站中间件自动覆盖（不进白名单）
-app.route('/mcp', mcpRoutes)
 
 /* ---------------- 公开页面（SSR + 主题渲染） ---------------- */
 /** 公开页 handler 的统一签名：RSS / sitemap 这类需要复用同一份上下文类型 */

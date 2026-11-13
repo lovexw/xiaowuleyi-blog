@@ -359,14 +359,7 @@ export async function listBufferChannels(
   }
 }
 
-/* ---------------- 广场同步（roadmap B17：官网 bloghao.com/plaza 内容聚合流） ----------------
- * push 主路：文章/微博发布时把公开条目推给广场 hub（独立 Worker，协议见 docs/PLAZA.md）。
- * 「是否同步到广场」的开关就是后台「插件」页启停本插件（opt-in），配置在「设置 → 服务端插件」：
- * 广场地址（默认官方 hub）+ 注册 token（hub 站长审核发放）。加密文 / 会员锁文不上广场。
- * pull 补漏路（hub 定时抓 /rss.xml 文章）在 hub 侧，见 plaza/。
- */
-
-/** 广场 ingest 签名：HMAC-SHA256(token, `ts.rawBody`) → hex。与 hub 校验端同一算法（tests 双端镜像） */
+/** Webhook 签名：HMAC-SHA256(secret, `ts.rawBody`) → hex（outboundWebhook 用；与已退役的广场同步同算法） */
 export async function plazaSign(token: string, ts: string, rawBody: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
@@ -377,102 +370,14 @@ export async function plazaSign(token: string, ts: string, rawBody: string): Pro
   )
   const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${ts}.${rawBody}`))
   const v = new Uint8Array(sig)
-  let s = ''
-  for (let i = 0; i < v.length; i++) s += v[i].toString(16).padStart(2, '0')
-  return s
-}
-
-/** 官方广场 hub（唯一官方入口）：plazaEndpoint 留空时回落到这里。页面与数据面同域，API 挂在 /plaza 路径下。
- *  导出给 api.ts 的广场数据卡代理端点（/admin/plaza-stats）复用同一回落口径 */
-export const PLAZA_OFFICIAL_HUB = 'https://bloghao.com/plaza'
-
-const plazaSync: ServerPlugin = {
-  id: 'plaza-sync',
-  title: '广场同步（bloghao.com）',
-  description:
-    '文章与微博发布时自动同步到官网广场（bloghao.com/plaza），让更多博主看到你的更新。需要在广场 hub 注册站点拿到 token（见 docs/PLAZA.md），填进「设置 → 服务端插件」；加密文与会员专属文不会同步。',
-  version: '1.0.0',
-  author: '官方',
-  async onPostPublished(p, ctx) {
-    if (p.locked) return
-    const endpoint = (ctx.settings.plazaEndpoint || PLAZA_OFFICIAL_HUB).trim().replace(/\/+$/, '')
-    const token = (ctx.settings.plazaToken || '').trim()
-    if (!/^https:\/\//i.test(endpoint) || !token) return
-    await plazaIngest(endpoint, token, {
-      // 站点头像随上报更新（hub 端 https 校验，空/非法忽略）：后台「站点头像」改了，下一条发布即同步
-      avatar: (ctx.settings.avatarUrl || '').trim(),
-      items: [
-        {
-          kind: 'post',
-          ref: p.slug,
-          title: p.title,
-          summary: excerpt(p.summary, 500),
-          url: ctx.base ? `${ctx.base}/post/${p.slug}` : '',
-          image: '',
-          publishedAt: Date.now(),
-        },
-      ],
-    })
-  },
-  async onWeiboPublished(p, ctx) {
-    const endpoint = (ctx.settings.plazaEndpoint || PLAZA_OFFICIAL_HUB).trim().replace(/\/+$/, '')
-    const token = (ctx.settings.plazaToken || '').trim()
-    if (!/^https:\/\//i.test(endpoint) || !token) return
-    // 既无正文也无任何图（含视频封面帧）的微博在广场上是一张空卡：跳过（B19）
-    if (!p.content && !p.images.length && !p.video?.poster) return
-    await plazaIngest(endpoint, token, {
-      // 站点头像随上报更新（hub 端 https 校验，空/非法忽略）：后台「站点头像」改了，下一条发布即同步
-      avatar: (ctx.settings.avatarUrl || '').trim(),
-      items: [
-        {
-          kind: 'weibo',
-          ref: String(p.id),
-          title: excerpt(p.content, 80),
-          summary: excerpt(p.content, 500),
-          url: ctx.base ? `${ctx.base}/weibo#wb-${p.id}` : '',
-          // hub 只收 https 绝对地址：站内 /images/ 补 base 前缀，外链原样，其余置空。
-          // 视频不出站，但封面帧可当缩略图（与开放接口 /api/public/weibo 同口径）
-          image: plazaHttpsImage(p.images[0] || p.video?.poster || '', ctx.base),
-          publishedAt: Date.now(),
-        },
-      ],
-    })
-  },
-}
-
-/** 广场缩略图口径：站内 /images/ 补 base 前缀、https 绝对地址原样、其余置空（hub 只收 https） */
-function plazaHttpsImage(u: string, base?: string): string {
-  if (!u) return ''
-  if (u.startsWith('/images/') && base) return base + u
-  return /^https:\/\//i.test(u) ? u : ''
-}
-
-/** 签名上报（fireHook 已吞错，这里失败抛出也只丢这一条同步，不影响发布主流程） */
-async function plazaIngest(endpoint: string, token: string, body: Record<string, unknown>): Promise<void> {
-  const ts = String(Date.now())
-  const raw = JSON.stringify(body)
-  // 统一出网入口：公网地址起点 + 每一跳复查（防「302 到内网」）；失败一律 null（不透状态码）
-  const r = await fetchPublicResource(`${endpoint}/api/ingest`, {
-    maxBytes: 64 * 1024,
-    timeoutMs: 15_000,
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-plaza-token': token,
-      'x-plaza-timestamp': ts,
-      'x-plaza-signature': await plazaSign(token, ts, raw),
-    },
-    body: raw,
-    expectBody: false,
-  })
-  if (!r) console.error('[plaza-sync] ingest 上报失败')
+  return [...v].map((x) => x.toString(16).padStart(2, '0')).join('')
 }
 
 /* ---------------- 通用出站 Webhook ----------------
  * 把「事件 → POST 外部地址」做成一个官方插件：站长自选事件清单与目标 URL，
  * n8n / IFTTT / 自建系统等自动化集成一个地址全接走，不再为每个平台单写同步插件。
  * body: { event, site, at, data }；配置了签名密钥时带 X-Bloghao-Timestamp /
- * X-Bloghao-Signature（HMAC-SHA256(密钥, ts + '.' + rawBody)，与广场同步 plazaSign 同口径）。
+ * X-Bloghao-Signature（HMAC-SHA256(密钥, ts + '.' + rawBody)，签名函数见上方 plazaSign——名字沿用历史口径）。
  * URL 落配置即过公网校验（fetchableUrl，与 commentWebhookUrl 同标准），触发时再复核一遍。
  */
 
@@ -895,7 +800,7 @@ const indexNowPlugin: ServerPlugin = {
 }
 
 /** 注册表：第三方服务端插件在此登记（顺序即后台展示顺序） */
-export const SERVER_PLUGINS: ServerPlugin[] = [tgChannel, commentWebhook, bufferSync, plazaSync, outboundWebhook, feishuNotify, wecomNotify, barkNotify, indexNowPlugin, footerHtmlPlugin, keywordLinkPlugin]
+export const SERVER_PLUGINS: ServerPlugin[] = [tgChannel, commentWebhook, bufferSync, outboundWebhook, feishuNotify, wecomNotify, barkNotify, indexNowPlugin, footerHtmlPlugin, keywordLinkPlugin]
 
 /** 后台「插件」页列表用：只出元数据与配置表单描述，不带处理函数 */
 export function listServerPlugins(): {
@@ -1002,30 +907,15 @@ export async function fireCommentCreated(env: Env, p: CommentCreatedPayload): Pr
  *  把对应条目从广场 hub 摘除（hub 的 deleted 协议字段，docs/PLAZA.md）——防「已加密/已删」
  *  的标题与摘要永久滞留公开广场。锁文的 RSS 条目同时带 bloghao:locked 标志（src/rss.ts），
  *  pull 补漏不会再捞回；解锁/恢复后 6h 内 pull 自愈补回。失败只丢一条下架，不影响主流程。
- *  下架同样改变公开可见面 → 先清页面边缘缓存再走广场同步（plaza-sync 停用也不能跳过清理） */
-export async function firePlazaRetract(env: Env, entries: { kind: 'post' | 'weibo'; ref: string }[]): Promise<void> {
-  if (!entries.length) return
-  await purgePageCache(env.DB).catch(() => {})
-  try {
-    const settings = await getSettings(env.DB)
-    if (!enabledPlugins(settings).some((p) => p.id === 'plaza-sync')) return
-    const endpoint = (settings.plazaEndpoint || PLAZA_OFFICIAL_HUB).trim().replace(/\/+$/, '')
-    const token = (settings.plazaToken || '').trim()
-    if (!/^https:\/\//i.test(endpoint) || !token) return
-    await plazaIngest(endpoint, token, { deleted: entries })
-  } catch {
-    /* 读不到设置 / 上报失败都放弃（与 fireHook 同口径吞错） */
-  }
-}
-
+ *  下架同样改变公开可见面 → 先清页面边缘缓存再广播（停用插件也不能跳过清理） */
 /** 编辑已发布文章广播（编辑后仍处于发布态才触发；状态跃迁分别走 firePostPublished /
- *  firePlazaRetract，不在此列）。页面边缘缓存由 PUT 端点自己清（编辑必变公开面），
+ *  软删广播，不在此列）。页面边缘缓存由 PUT 端点自己清（编辑必变公开面），
  *  这里只广播——IndexNow 类「编辑也让搜索引擎重抓」的需求接这个槽 */
 export async function firePostUpdated(env: Env, p: PostUpdatedPayload): Promise<void> {
   return fireHook(env, (plugin) => plugin.onPostUpdated, p)
 }
 
-/** 文章软删广播：与 firePlazaRetract 同点触发（软删端点两条都会挂）。
+/** 文章软删广播（软删端点触发）。
  *  这里也清一次页面边缘缓存——幂等兜底，防未来某个删除入口只挂事件漏挂下架 */
 export async function firePostDeleted(env: Env, p: PostDeletedPayload): Promise<void> {
   await purgePageCache(env.DB).catch(() => {})

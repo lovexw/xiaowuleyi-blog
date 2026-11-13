@@ -32,3 +32,6 @@ demo/hub-node/public/
 
 # 本地 D1 状态备份（手工快照，不进库）
 .wrangler-state-backup*/
+
+# docker-poc 本地测试运行时产物（uploads/数据库快照，不进库）
+docker-poc/.test-rc/

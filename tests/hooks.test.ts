@@ -5,7 +5,6 @@ import {
   cleanServerPluginConfig,
   fireBackupCompleted,
   fireCommentCreated,
-  firePlazaRetract,
   firePostDeleted,
   firePostPublished,
   firePostUpdated,
@@ -16,7 +15,6 @@ import {
   plazaSign,
   renderFooterHtml,
 } from '../src/hooks.ts'
-import { verifyPlazaSignature } from '../plaza/src/core.ts'
 import { DEFAULT_SETTINGS } from '../src/db.ts'
 import type { Env, SettingsMap } from '../src/types.ts'
 
@@ -221,133 +219,10 @@ test('注册表元数据：id/标题/版本齐全，不带处理函数，id 全�
   }
 })
 
-// ── 广场同步插件（roadmap B17）：配置齐才发 / 签名头齐全 / locked 跳过 / 可停用 ──
-
-test('广场同步：endpoint+token 齐才发，签名三头齐全，文章与微博各推一条', async () => {
-  const cap = captureFetch()
-  try {
-    const env = fakeEnv([
-      { key: 'plazaEndpoint', value: 'https://plaza.example.com/' },
-      { key: 'plazaToken', value: 'a'.repeat(32) },
-      { key: 'siteUrl', value: 'https://blog.example.com/' },
-    ])
-    await firePostPublished(env, { slug: 'hello', title: '新文章', summary: '摘要', via: 'admin' })
-    assert.equal(cap.calls.length, 1)
-    const post = cap.calls[0]
-    assert.equal(post.url, 'https://plaza.example.com/api/ingest')
-    const h = post.init?.headers as Record<string, string>
-    assert.equal(h['x-plaza-token'], 'a'.repeat(32))
-    assert.match(h['x-plaza-timestamp'], /^\d+$/)
-    assert.match(h['x-plaza-signature'], /^[0-9a-f]{64}$/)
-    // 签名可被 hub 校验端复算通过（双端镜像）
-    const body = JSON.parse(String(post.init?.body))
-    assert.equal(await verifyPlazaSignature('a'.repeat(32), h['x-plaza-timestamp'], h['x-plaza-signature'], String(post.init?.body)), true)
-    assert.equal(body.items[0].kind, 'post')
-    assert.equal(body.items[0].ref, 'hello')
-    assert.equal(body.items[0].url, 'https://blog.example.com/post/hello')
-
-    // 微博：深链 /weibo#wb-{id}，站内 /images/ 补 base，外链原样
-    await fireWeiboPublished(env, { id: 12, content: '随手记', images: ['/images/x.webp'], via: 'admin' })
-    const wb = JSON.parse(String(cap.calls[1].init?.body))
-    assert.equal(wb.items[0].kind, 'weibo')
-    assert.equal(wb.items[0].ref, '12')
-    assert.equal(wb.items[0].url, 'https://blog.example.com/weibo#wb-12')
-    assert.equal(wb.items[0].image, 'https://blog.example.com/images/x.webp')
-  } finally {
-    cap.restore()
-  }
-})
-
-test('广场同步：locked（加密/会员锁文）不上广场，微博外链图原样、http 图置空', async () => {
-  const cap = captureFetch()
-  try {
-    const env = fakeEnv([
-      { key: 'plazaEndpoint', value: 'https://plaza.example.com' },
-      { key: 'plazaToken', value: 'a'.repeat(32) },
-      { key: 'siteUrl', value: 'https://blog.example.com' },
-    ])
-    await firePostPublished(env, { slug: 'locked', title: '锁文', summary: 's', via: 'admin', locked: true })
-    assert.equal(cap.calls.length, 0)
-    await fireWeiboPublished(env, { id: 3, content: '带外链图', images: ['https://cdn.example.com/a.png'], via: 'external' })
-    assert.equal(JSON.parse(String(cap.calls[0].init?.body)).items[0].image, 'https://cdn.example.com/a.png')
-    await fireWeiboPublished(env, { id: 4, content: '纯文字', images: [], via: 'telegram' })
-    assert.equal(JSON.parse(String(cap.calls[1].init?.body)).items[0].image, '')
-  } finally {
-    cap.restore()
-  }
-})
-
-test('广场同步：只填 token 即默认同步官方 hub，未填 token 静默不发；停用名单可关；站点链接未配置时 url 为空', async () => {
-  const cap = captureFetch()
-  try {
-    // plazaEndpoint 默认就是官方 hub：填 token 即同步，无需另配地址（docs/PLAZA.md 口径）
-    const env = fakeEnv([{ key: 'plazaToken', value: 'a'.repeat(32) }])
-    await firePostPublished(env, { slug: 'a', title: 'b', summary: '', via: 'admin' })
-    assert.equal(cap.calls.length, 1)
-    assert.equal(cap.calls[0].url, 'https://bloghao.com/plaza/api/ingest')
-    // 未填 token（未在 hub 注册）：静默不发
-    const env0 = fakeEnv([{ key: 'plazaEndpoint', value: 'https://plaza.example.com' }])
-    await firePostPublished(env0, { slug: 'a', title: 'b', summary: '', via: 'admin' })
-    assert.equal(cap.calls.length, 1)
-    // 停用名单可关
-    const env2 = fakeEnv([
-      { key: 'plazaEndpoint', value: 'https://plaza.example.com' },
-      { key: 'plazaToken', value: 'a'.repeat(32) },
-      { key: 'serverPluginsDisabled', value: 'plaza-sync' },
-    ])
-    await firePostPublished(env2, { slug: 'a', title: 'b', summary: '', via: 'admin' })
-    assert.equal(cap.calls.length, 1)
-    // siteUrl 未配置：条目照推，url 留空由 hub 侧拒收（validateIngest 只收 https）
-    const env3 = fakeEnv([
-      { key: 'plazaEndpoint', value: 'https://plaza.example.com' },
-      { key: 'plazaToken', value: 'a'.repeat(32) },
-    ])
-    await firePostPublished(env3, { slug: 'a', title: 'b', summary: '', via: 'admin' })
-    assert.equal(cap.calls.length, 2)
-    assert.equal(JSON.parse(String(cap.calls[1].init?.body)).items[0].url, '')
-  } finally {
-    cap.restore()
-  }
-})
-
-test('firePlazaRetract：下架广播带 deleted 载荷；未配置 / 停用插件不外发', async () => {
-  const cap = captureFetch()
-  try {
-    // 配置齐全：deleted 进 ingest body，不携带 items（下架与上架是两种载荷）
-    const env = fakeEnv([
-      { key: 'plazaToken', value: 'a'.repeat(32) },
-      { key: 'plazaEndpoint', value: 'https://hub.example.com/plaza' },
-    ])
-    await firePlazaRetract(env, [{ kind: 'post', ref: 'hello-world' }])
-    assert.equal(cap.calls.length, 1)
-    assert.ok(cap.calls[0].url.startsWith('https://hub.example.com/plaza/api/ingest'), cap.calls[0].url)
-    const body = JSON.parse(String(cap.calls[0].init?.body))
-    assert.deepEqual(body.deleted, [{ kind: 'post', ref: 'hello-world' }])
-    assert.ok(!('items' in body), '下架广播不携带 items')
-
-    // 未配置 token：静默不外发
-    await firePlazaRetract(fakeEnv([]), [{ kind: 'weibo', ref: '9' }])
-    assert.equal(cap.calls.length, 1)
-
-    // plaza-sync 被停用：同口径不外发（下架跟随插件开关）
-    await firePlazaRetract(
-      fakeEnv([
-        { key: 'plazaToken', value: 'a'.repeat(32) },
-        { key: 'serverPluginsDisabled', value: 'plaza-sync' },
-      ]),
-      [{ kind: 'post', ref: 'x' }]
-    )
-    assert.equal(cap.calls.length, 1)
-  } finally {
-    cap.restore()
-  }
-})
-
-// ── 事件槽扩面（B 通道）：onPostUpdated / onPostDeleted / onWeiboDeleted / onBackupCompleted ──
+// ── 出站 Webhook ──
 
 const OUTBOUND_URL = 'https://hooks.example/x'
 
-/** 出站 Webhook 配置行（fakeEnv rows 用） */
 function outboundRows(extra: Record<string, string> = {}): { key: string; value: string }[] {
   return [
     { key: 'serverPluginConfig', value: JSON.stringify({ 'outbound-webhook': { url: OUTBOUND_URL, ...extra } }) },
@@ -356,6 +231,7 @@ function outboundRows(extra: Record<string, string> = {}): { key: string; value:
       .map(([k, v]) => ({ key: k, value: v })),
   ]
 }
+
 
 test('出站 Webhook：四类新事件全通——post_updated / post_deleted / weibo_deleted / backup_completed', async () => {
   const cap = captureFetch()
@@ -400,24 +276,6 @@ test('出站 Webhook：未配置 / 无 url / 非公网地址不外发；停用�
     const env = fakeEnv([{ key: 'serverPluginConfig', value: JSON.stringify({ 'outbound-webhook': { url: OUTBOUND_URL } }) }, { key: 'serverPluginsDisabled', value: 'outbound-webhook' }])
     await firePostUpdated(env, { slug: 'x', title: 'y', via: 'admin' })
     assert.equal(cap.calls.length, 0)
-  } finally {
-    cap.restore()
-  }
-})
-
-test('出站 Webhook：events 白名单过滤 + 签名头（HMAC 与广场同步同口径，可被 verifyPlazaSignature 验证）', async () => {
-  const cap = captureFetch()
-  try {
-    const env = fakeEnv(outboundRows({ secret: 'shhh', events: 'post_published,backup_completed' }))
-    await firePostUpdated(env, { slug: 'x', title: 'y', via: 'admin' })
-    await fireBackupCompleted(env, { key: 'k.json', bytes: 1, tables: 1, at: 1 })
-    assert.equal(cap.calls.length, 1, 'events 之外的静默跳过')
-    const call = cap.calls[0]
-    const headers = new Headers(call.init?.headers)
-    const ts = headers.get('x-bloghao-timestamp') || ''
-    const sig = headers.get('x-bloghao-signature') || ''
-    assert.ok(ts && sig)
-    assert.equal(await verifyPlazaSignature('shhh', ts, sig, String(call.init?.body)), true, '签名与广场 hub 校验同口径')
   } finally {
     cap.restore()
   }

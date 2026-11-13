@@ -32,7 +32,7 @@ import type { Env, SessionUser } from './types'
  * 改设置 = 全站页面即刻作废）；后台「概览 → 系统」一键清理 = purgePageCache 显式写一次。
  * 内容变更即时失效（2026-10-14，TTL 随之放宽到 30 分钟）：发布 / 下架 / 评论走 hooks 总线
  * 单点挂 purgePageCache（firePostPublished / fireWeiboPublished / fireCommentCreated /
- * firePlazaRetract 四个出口覆盖后台、开放 API、TG、MCP、定时发布全部入口），散口（编辑
+ * fireWeiboDeleted 等出口覆盖后台、开放 API、TG、定时发布全部入口），散口（编辑
  * 已发布内容、置顶、页面增删改、回收站恢复、评论审核与删除、媒体合并）在 api.ts 各端点
  * 写库成功后补一次 purge——访客滞后只出现在未挂 purge 的装饰性变化（点赞数等），最长 30 分钟。
  *

@@ -17,7 +17,6 @@ import {
   isSecureRequest,
   tokenHash,
 } from './auth'
-import { updateStatus, validateUpdateManifest, UPDATE_GUIDE_URL, UPDATE_MANIFEST_URL } from './update'
 import { APP_VERSION } from './version'
 import {
   countUsers,
@@ -96,7 +95,6 @@ import {
   cleanServerPluginConfig,
   fireBackupCompleted,
   fireCommentCreated,
-  firePlazaRetract,
   firePostDeleted,
   firePostPublished,
   firePostUpdated,
@@ -104,7 +102,6 @@ import {
   fireWeiboPublished,
   listBufferChannels,
   listServerPlugins,
-  PLAZA_OFFICIAL_HUB,
 } from './hooks'
 import { SITE_MODE_VALUES, siteBase, toHomePost, type SiteMode } from './render'
 import { suggestSearch } from './fts'
@@ -469,24 +466,6 @@ api.get('/admin/stats', async (c) => {
  * 更新**：这里只读清单 + 报状态，真正换版本靠一次部署动作（Cloudflare 重新部署 / Docker 重建，
  * 见 docs/UPDATING.md）。出网端点是固定可信地址（同 api.telegram.org 口径），仅 https、无用户
  * 输入进路径；响应按不可信输入严格校验，拿不到就降级为「暂不可检查」。 */
-api.get('/admin/update', async (c) => {
-  const current = APP_VERSION
-  const settings = await getSettings(c.env.DB)
-  let manifest = null
-  try {
-    const res = await fetch(UPDATE_MANIFEST_URL, {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(6_000),
-    })
-    if (res.ok) manifest = validateUpdateManifest(await res.json().catch(() => null))
-  } catch {
-    /* 网络异常 / 超时 / 非 JSON：一律按「拿不到最新版本信息」降级，不打扰用户 */
-  }
-  if (!manifest) return c.json({ ok: true, checkable: false, reason: 'unreachable', current, guide: UPDATE_GUIDE_URL })
-  return c.json({ ok: true, checkable: true, ...updateStatus(current, manifest, settings.updateIgnoredVersion || ''), guide: UPDATE_GUIDE_URL })
-})
-
-/* 访客统计（后台「统计」页），聚合见 src/stats.ts；bot 为爬虫/AI 抓取维度（src/bots.ts） */
 api.get('/admin/visits', async (c) => {
   const days = clampInt(c.req.query('days'), 1, 365, 30)
   const [visits, bot] = await Promise.all([getVisitStats(c.env.DB, days), getBotStats(c.env.DB, days)])
@@ -567,39 +546,6 @@ async function readPostPayload(c: { req: { json: () => Promise<unknown> } }) {
 }
 
 // 服务端插件列表（后台「插件」页展示与启停，见 src/hooks.ts）
-api.get('/admin/server-plugins', (c) => c.json({ plugins: listServerPlugins() }))
-
-/* 广场数据卡（B25 P2.3）：后台「插件 → 广场同步」的「数据」按钮拉 hub /api/site-stats。
- * 站点 token 服务端代理（不出浏览器网络面板，demo 短路与其他外呼工具同口径）；
- * hub 地址走 plazaEndpoint（留空 = 官方 hub）。传 502 让前台展示「hub 连不上」而非 500 */
-api.get('/admin/plaza-stats', async (c) => {
-  const settings = await getSettings(c.env.DB)
-  const token = (settings.plazaToken || '').trim()
-  if (!token) return jsonError('还没填广场站点 Token（设置 → 服务端插件）')
-  const endpoint = (settings.plazaEndpoint || PLAZA_OFFICIAL_HUB).trim().replace(/\/+$/, '')
-  // 运行时复核公网地址并走 fetchPublicResource 逐跳复查（裸 fetch 自动跟跳是 SSRF 面，
-  // 与出网安全防线同口径；也兜住配置被旁路写脏的形态——落库校验不是最后防线）
-  const target = fetchableUrl(`${endpoint}/api/site-stats`)
-  if (!target) return jsonError('广场地址无效（需公网 https 地址）', 502)
-  const r = await fetchPublicResource(target.href, {
-    maxBytes: 256 * 1024,
-    timeoutMs: 10_000,
-    headers: { 'x-plaza-token': token },
-  })
-  // fetchPublicResource 失败一律 null（网络异常与非 2xx 不区分），文案合并保证可行动
-  if (!r) return jsonError('广场 hub 连不上或 Token 无效，请检查 Token 后稍后再试', 502)
-  try {
-    return c.json(JSON.parse(new TextDecoder().decode(r.buf)) as Record<string, unknown>)
-  } catch {
-    return jsonError('广场 hub 返回异常，稍后再试', 502)
-  }
-})
-
-/* ---------------- 编辑器插件远程安装（B8 插件半边，机制 src/pluginpkg.ts） ----------------
- * 安装 = 抓 https 插件文件 → 内容安检 → 落 R2 → 登记 settings.pluginsInstalled；
- * 下发走 /plugins/installed.json 与 /plugin-files/:id（index.ts，管理员会话门槛）。
- */
-
 api.post('/admin/plugins/install', async (c) => {
   if (!rateLimit(c.env, `plugin-install:${clientIp(c.req.raw)}`, 5, 60_000)) return jsonError('安装太频繁，请一分钟后再试', 429)
   const body = await c.req.json<{ url?: string; id?: string }>().catch(() => null)
@@ -855,7 +801,6 @@ api.put('/admin/posts/:id', async (c) => {
     (status !== 'published' ||
       (minTier !== 'all' && normalizeAccess(existing.min_tier) === 'all'))
   ) {
-    c.executionCtx.waitUntil(firePlazaRetract(c.env, [{ kind: 'post', ref: existing.slug }]))
   }
   return c.json({ ok: true, post: row ? { ...postAdminView(row), tagList: parseTags(row), categoryId } : null })
 })
@@ -887,7 +832,6 @@ api.delete('/admin/posts/:id', async (c) => {
   await c.env.DB.prepare('UPDATE posts SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').bind(Date.now(), id).run()
   // 广场下架广播：软删后 RSS 里不再有这条，hub 若曾收录会永久滞留——deleted 同步摘除
   if (row?.slug) {
-    c.executionCtx.waitUntil(firePlazaRetract(c.env, [{ kind: 'post', ref: row.slug }]))
     // 删除事件广播（通用出站 Webhook 等同步类插件消费；内置 purge 幂等兜底）
     c.executionCtx.waitUntil(firePostDeleted(c.env, { slug: row.slug, title: row.title, via: 'admin' }))
   }
@@ -1060,7 +1004,6 @@ api.delete('/admin/weibo/:id', async (c) => {
   // 软删进回收站（src/trash.ts）：评论保留，恢复时一并跟回；彻底删除才级联清掉
   await c.env.DB.prepare('UPDATE weibo SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').bind(Date.now(), id).run()
   // 广场下架广播：微博若曾同步 hub（ref = 微博 id），软删后摘除（未收录时 hub 空删幂等）
-  c.executionCtx.waitUntil(firePlazaRetract(c.env, [{ kind: 'weibo', ref: String(id) }]))
   // 删除事件广播（通用出站 Webhook 等同步类插件消费）
   c.executionCtx.waitUntil(fireWeiboDeleted(c.env, { id, via: 'admin' }))
   return c.json({ ok: true })
@@ -2006,14 +1949,6 @@ api.put('/admin/settings', async (c) => {
       if (!u) patch[key] = ''
       else if (/^https?:\/\//i.test(u) && fetchableUrl(u)) patch[key] = u
       else return jsonError('评论 Webhook 地址无效（需公网 http(s) 地址）')
-      continue
-    }
-    if (key === 'plazaEndpoint') {
-      // 广场上报端点：落配置时收敛为公网 https 地址（与发送侧 hooks.ts 的 https 前缀同口径）
-      const u = v.trim().slice(0, 500)
-      if (!u) patch[key] = ''
-      else if (u.startsWith('https://') && fetchableUrl(u)) patch[key] = u
-      else return jsonError('广场同步端点无效（需公网 https 地址）')
       continue
     }
     if (key === 'customCss') {
