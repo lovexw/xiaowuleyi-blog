@@ -31,7 +31,7 @@ import css from './mytheme.css'
 const id = 'mytheme'
 
 // 入参类型全部来自 registry 的命名类型（HomeData / WeiboData / …，字段含义以 registry.ts 注释为准），
-// 七套官方主题（wechat.ts 最完整）是现成参照。这里示范最常用的 home()：
+// 两套官方主题（wechat.ts 最完整）是现成参照。这里示范最常用的 home()：
 export function home(d: HomeData): string {
   return `<div class="my-page">
     ${siteNav({ cls: 'my-snav', categories: d.categories, tags: d.tags, pages: d.pages, active: d.navActive })}
@@ -114,7 +114,7 @@ export const THEMES: Record<string, ThemeModule> = {
 }
 ```
 
-保存后（本地 `npm run dev` 即时生效）到后台「皮肤」页（「系统」分组下）就能看到并一键启用；同时可把它登记进 `public/market/catalog.json`，让它出现在「皮肤市场」。**入参的权威定义**是 `registry.ts` 的各 `*Data` 命名类型（字段注释就在那里）与 `pages.ts` 的调用处——改版后以它们为准，抄现成主题（如 `wechat.ts`）最省事。
+保存后（本地 `npm run dev` 即时生效）到后台「皮肤」页（「系统」分组下）就能看到并一键启用。2026-11-13 精简后已没有「皮肤市场 / 皮肤包」通道（`public/market/catalog.json` 只剩编辑器插件），主题只来自仓库内的 `src/themes/`。**入参的权威定义**是 `registry.ts` 的各 `*Data` 命名类型（字段注释就在那里）与 `pages.ts` 的调用处——改版后以它们为准，抄现成主题（如 `wechat.ts`）最省事。
 
 ## 公共积木（来自 `src/render.ts`，鼓励复用）
 

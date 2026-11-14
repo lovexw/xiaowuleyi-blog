@@ -53,7 +53,7 @@
 1. **`/opt/xwblog-app` 就是仓库目录**。服务器靠 `git reset --hard` 同步，删掉 `website/` 这类目录，
    pull 之后目录就真的消失了。官网目前仍在线（2026-11-13 实测 200），删源码等于
    给线上留一颗定时炸弹——**先在服务器上停掉 openresty 的官网站点，再删目录**。
-2. **引用面太广**。`docs/GUIDE.md`、`docs/CLOUDFLARE-BASICS.md`、`docs/UPDATING.md` 里共 6 处
+2. **引用面太广**。`docs/GUIDE.md`、`docs/CLOUDFLARE-BASICS.md` 里有多处
    相对链接指向 `docs/DEPLOY.md`，`package.json` 里有 `deploy:site` / `build:docs` 指向 `website/`。
    删文件要连带改一圈，收益只有几 MB 仓库体积——不划算。
 
@@ -111,8 +111,7 @@ git show xw-20261105-before-freeze --stat
 2. **发现冻结目录里的 bug，记录不修**。在提交信息或文档里留一句即可，除非站长明确说「这个要修」。
 3. **不要为兼容 Workers 而增加复杂度**。Node 下能直写的就直写；反之，也不要去「清理」那些只为 Workers 存在的分支——
    它们现在无害，清理要连带改测试，属于负收益。
-4. **部署相关的文档只认 `docs/DEPLOY-ORACLE.md`**。`docs/DEPLOY.md`、`docs/PLAZA.md`
-   已挂冻结横幅，读到它们时要意识到那是历史形态。
+4. **部署相关的文档只认 `docs/DEPLOY-ORACLE.md`**。`docs/DEPLOY.md` 已挂冻结横幅，读到它时要意识到那是历史形态（`docs/PLAZA.md` / `docs/UPDATING.md` / `docs/PARTNER.md` 已随功能删除）。
 
 ---
 

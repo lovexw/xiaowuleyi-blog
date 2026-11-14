@@ -23,8 +23,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   // 旧键 contentVisibleRange 只作升级期回落（见 utils.visibleRangeOf），保存新键时由 PUT 清空。
   contentVisibleRangePosts: '',
   contentVisibleRangeWeibo: '',
-  // 窗口是否同样限制会员：'1' = 会员也受限（默认，与旧版一致）；'0' = 只挡游客，会员登录后可见全部
-  contentVisibleForMembers: '1',
   contentVisibleRange: '',
   siteUrl: '',
   // 主题外观变量（B9 · 内测）：扁平 JSON（角色键 → 色值 + font/fontSize），渲染期按当前主题

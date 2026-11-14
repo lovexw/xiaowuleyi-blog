@@ -310,7 +310,6 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
 | POST | `/api/admin/tools/linkmeta` | Body `{url}` → `{meta:{title, description, image, siteName}}`，编辑器「网址卡片」抓取目标页 og 元数据；只抓 http(s) 公网地址（私有网段/非常规端口拒绝，限长限时），抓不到时字段为空（前端用域名占位组卡）。限频 10 次/分钟/IP |
 | POST | `/api/admin/tools/sanitize` | Body `{html}` → `{html}`，白名单净化（粘贴用） |
 | POST | `/api/admin/cache/purge` | 一键清理页面边缘缓存：换 settings `pageCacheEpoch` 让旧副本整代作废（浏览器侧响应不变）；后台「概览 → 系统」按钮消费 |
-| GET | `/api/admin/update` | 更新中心检查（后台概览「系统」卡「检查更新」）：单向拉取官网公开清单 `bloghao.com/version.json`（固定可信端点，6s 超时，10 分钟内存缓存），返回 `{checkable, current, latest, notes?, guide?}` 与「保持当前版本」判定（`kept`）——**不上报任何本站信息**；网络异常 / 校验不过一律降级 `checkable:false`，绝不 500。偏好写入走 settings 的 `updateIgnoredVersion` 键。机制见 `src/update.ts` 与 docs/UPDATING.md |
 
 ### 插件（编辑器插件远程安装 + 服务端插件，B8）
 | 方法 | 路径 | 说明 |

@@ -6,7 +6,7 @@
  * 历史版本字节级一致；主题不支持的角色（如 minimal 无主色）自动跳过。
  * 安全面：<style> 里的一切都由本模块生成——颜色只收 #rgb / #rrggbb；字体栈逐段白名单
  * 字符集校验后重新包裹双引号（generic 关键词不加引号），站长输入到不了 CSS 语法位。
- * 深浅衍生色（bitcoin / rednote 的 accent-deep 与 soft 底）用 color-mix 从主色推导，
+ * 深浅衍生色（accent-deep 与 soft 底）用 color-mix 从主色推导，
  * 不支持的旧浏览器丢弃该声明、回落主题原值，属优雅降级。
  * 默认值镜像守卫：THEME_APPEARANCE 里每个默认值由 tests/appearance.test.ts 对着主题 CSS
  * 的 :root 块逐一核对——主题改色忘了同步这张表，测试会红。

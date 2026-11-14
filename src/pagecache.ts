@@ -177,7 +177,7 @@ function isStorable(res: Response): boolean {
 
 type AppEnv = { Bindings: Env; Variables: { user: SessionUser | null } }
 
-/** 页面缓存中间件：注册位必须在所有页面路由与 /api、/mcp 子应用之前（终点 handler 不调
+/** 页面缓存中间件：注册位必须在所有页面路由与 /api 子应用之前（终点 handler 不调
  *  next），且在闭站 / 爬虫统计之后（503 与 bot_log 优先） */
 export function pageCacheMiddleware(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {

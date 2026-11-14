@@ -280,7 +280,6 @@ api.post('/auth/login', async (c) => {
     salt: string
     display_name: string
     avatar: string
-    role?: 'admin' | 'author'
   }>()
   if (user) {
     const { hash } = await hashPassword(password, user.salt)

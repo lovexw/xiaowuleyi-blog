@@ -3357,7 +3357,7 @@ async function viewSettings() {
     </div>
 
     <div class="panel" style="padding:20px;" data-adv="1">
-      <div class="form-section"><h3>外部发布</h3><div class="sec-desc">用 Telegram 机器人或开放 API 远程发微博（文字 / 图片 / 相册都可以），或让 AI 助手经 MCP 发文、查评论</div>
+      <div class="form-section"><h3>外部发布</h3><div class="sec-desc">用 Telegram 机器人或开放 API 远程发微博（文字 / 图片 / 相册都可以）</div>
         <div class="form-item">
           <label>API Token（开放接口密钥，重新生成后旧 Token 立即失效）</label>
           <div class="fav-row">
@@ -3365,7 +3365,7 @@ async function viewSettings() {
             <button class="btn btn-sm" id="btn-token-gen" type="button">${s.externalToken ? '重新生成' : '生成 Token'}</button>
             <button class="btn btn-sm btn-ghost" id="btn-token-copy" type="button" ${s.externalToken ? '' : 'disabled'}>复制</button>
           </div>
-          <div class="sec-desc" style="margin-top:6px;">接口：<code>POST ${esc(location.origin)}/api/external/weibo</code>；MCP（AI 助手）：<code>${esc(location.origin)}/mcp</code>，用法见 docs/GUIDE.md 第 8 节</div>
+          <div class="sec-desc" style="margin-top:6px;">接口：<code>POST ${esc(location.origin)}/api/external/weibo</code>，用法见 docs/GUIDE.md 第 8 节</div>
         </div>
         <div class="form-item">
           <label>Telegram Bot Token（找 @BotFather 发 /newbot 创建机器人后获得）</label>
@@ -3454,7 +3454,7 @@ async function viewSettings() {
     </div>
 
     <div class="panel" style="padding:20px;" data-adv="1">
-      <div class="form-section"><h3>整站搬家</h3><div class="sec-desc">把整站原样打成一个包带走：全部文章 / 微博 / 页面 / 评论 / 会员 / 分类标签 / 友链 / 图床图片。<b>只允许还原到「没有内容的站」</b>（没有未删除的文章 / 微博 / 页面；刚装好的新站请先把自带的「示例文章」与「关于我」页面删进回收站，或直接用下面的「清空本站内容」），<b>不会覆盖、不会合并</b>；包与系统版本不匹配会明确报错，不猜。包里不含管理员账号与各类密钥（新站自己登录、自己填）。换服务器 / 换域名 / 重新部署时用它。</div>
+      <div class="form-section"><h3>整站搬家</h3><div class="sec-desc">把整站原样打成一个包带走：全部文章 / 微博 / 页面 / 评论 / 分类标签 / 友链 / 图床图片。<b>只允许还原到「没有内容的站」</b>（没有未删除的文章 / 微博 / 页面；刚装好的新站请先把自带的「示例文章」与「关于我」页面删进回收站，或直接用下面的「清空本站内容」），<b>不会覆盖、不会合并</b>；包与系统版本不匹配会明确报错，不猜。包里不含管理员账号与各类密钥（新站自己登录、自己填）。换服务器 / 换域名 / 重新部署时用它。</div>
         <div class="fav-row">
           <a class="btn" href="/api/admin/bundle/export" download>导出整站包</a>
           <span class="sec-desc">含全部图片，包可能较大，生成需要等一会儿</span>
@@ -3472,7 +3472,7 @@ async function viewSettings() {
         <div class="sec-desc" id="bundle-progress"></div>
         <div class="fav-row" style="margin-top:14px;">
           <button class="btn btn-danger" id="btn-site-reset" type="button">清空本站内容</button>
-          <span class="sec-desc">把本站变回「没有内容的空站」：清空全部文章 / 微博 / 页面 / 评论 / 会员等内容 <b>+ 图床里的图片文件</b>，保留站点设置、管理员账号与各类密钥（已上传的整站包也不会被误删）。<b>不可撤销</b>（不是进回收站）。还原前需要清空时用它；想留底请先「导出整站包」。</span>
+          <span class="sec-desc">把本站变回「没有内容的空站」：清空全部文章 / 微博 / 页面 / 评论等内容 <b>+ 图床里的图片文件</b>，保留站点设置、管理员账号与各类密钥（已上传的整站包也不会被误删）。<b>不可撤销</b>（不是进回收站）。还原前需要清空时用它；想留底请先「导出整站包」。</span>
         </div>
       </div>
     </div>
@@ -3483,7 +3483,7 @@ async function viewSettings() {
   // 各页签的输入控件始终留在 DOM，「保存全部」跨页签照常收齐，PUT 缺键保留语义不受影响
   const STAB_HINTS = {
     site: '站名、头像、首页形态这些门面事，以及登录密码',
-    social: '留言规则、内容可见范围与访客统计（会员已冻结，需要时去「会员」页开）',
+    social: '留言规则、内容可见范围与访客统计',
     advance: '闭站等特殊开关与外部服务对接——不确定的先别动',
     data: '备份与导出：把数据完整地交回自己手里',
   }
@@ -3505,7 +3505,7 @@ async function viewSettings() {
   applyStab()
 
   // 常用 / 全部：设置页分组里，日常真正会动的只有站名头像、留言规则、可见范围、闭站开关
-  // 这几组；其余（SEO、两步验证、会员、访客统计、外部发布、服务端插件、WordPress 导入、
+  // 这几组；其余（SEO、两步验证、访客统计、外部发布、服务端插件、WordPress 导入、
   // 整站搬家）都是「装站时配一次，之后一年不碰」，默认折起来。只 hidden 不移除：输入框还在
   // DOM 里，跨页签的「保存全部」照旧一次收齐，保存语义一个字没变。
   const advPanels = Array.prototype.slice.call(document.querySelectorAll('.stab-pane .panel[data-adv]'))
@@ -4142,7 +4142,7 @@ async function viewSettings() {
   document.getElementById('btn-site-reset').addEventListener('click', () => {
     const m = modal(`<div class="modal-head"><span>清空本站内容</span><button class="modal-close" data-close type="button" aria-label="关闭">×</button></div>
       <div class="modal-body">
-        <p style="margin:0 0 10px;">这会把本站<b>全部内容彻底清空</b>：文章 / 微博 / 独立页面 / 评论 / 分类标签 / 友链 / 会员与积分记录，以及<b>图床里的图片文件</b>（含微博视频）。<b>不可撤销</b>（不是移入回收站，没有 30 天可恢复）。</p>
+        <p style="margin:0 0 10px;">这会把本站<b>全部内容彻底清空</b>：文章 / 微博 / 独立页面 / 评论 / 分类标签 / 友链，以及<b>图床里的图片文件</b>（含微博视频）。<b>不可撤销</b>（不是移入回收站，没有 30 天可恢复）。</p>
         <p style="margin:0 0 10px;">会<b>保留</b>：站点设置、管理员账号与登录密码、各类密钥，以及<b>已上传的整站包</b>（R2 的 <code>bundles/</code>，清空不会误删你要用来还原的包）。<b>站点头像与管理员头像的图片也会保留</b>（它们跟着设置 / 账号一起留着）。</p>
         <p style="margin:0 0 6px;">确定要继续，请在下面原样输入 <code>${esc(RESET_PHRASE)}</code>：</p>
         <input class="input" id="site-reset-confirm" style="width:100%;" autocomplete="off" placeholder="${esc(RESET_PHRASE)}">

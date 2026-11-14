@@ -1042,7 +1042,7 @@ export async function mountEditor(root, postId, opts = {}) {
     // 选了需要密码的档位但站长还没配对应口令：当场提醒，别等读者打不开才发现
     const tierSel = document.getElementById('ed-min-tier').value
     if (tierSel !== 'all' && !edGateState[tierSel]) {
-      return toast(`「${tierSel === 'fixed' ? '固定密码' : '会员密码'}」还没设置，去「设置 → 访问密码」配一把再发布`, true)
+      return toast(`「${tierSel === 'fixed' ? '固定密码' : '会员密码'}」还没设置，去「设置 → 站点 → 访问密码」配一把再发布`, true)
     }
     if (mdMode) {
       // Markdown → HTML 转换失败要明确告知（弱网/接口 500 时不能「点了没反应」）
