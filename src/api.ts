@@ -571,6 +571,11 @@ api.post('/admin/plugins/install', async (c) => {
   return c.json({ ok: true, id: derived, bytes })
 })
 
+/* 服务端插件清单（随内核编译，见 src/hooks.ts）：后台「插件」页按 id 启停，
+ * 停用集合存 settings.serverPluginsDisabled。精简批次误删过这条路由，
+ * 前端仍会 GET 它——缺了插件页就整块服务端插件区报 404 */
+api.get('/admin/server-plugins', (c) => c.json({ plugins: listServerPlugins() }))
+
 api.post('/admin/plugins/uninstall', async (c) => {
   const body = await c.req.json<{ id?: string }>().catch(() => null)
   const id = cleanPluginId(String(body?.id ?? ''))

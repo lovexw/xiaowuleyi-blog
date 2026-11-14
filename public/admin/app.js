@@ -1877,6 +1877,47 @@ async function viewPages() {
   })
 }
 
+/* 新建 / 编辑页面弹窗：页面管理的唯一写入口（沿用精简前的实现，勿再误删） */
+function pageModal(page) {
+  const isNew = !page
+  const m = modal(`<div class="modal-head"><span>${isNew ? '新建页面' : '编辑页面'}</span><button class="modal-close" data-close>×</button></div>
+    <div class="modal-body">
+      <label class="auth-field"><label>标题</label><input class="input" id="pg-title" value="${esc(page?.title || '')}" maxlength="60" placeholder="如：我的项目"></label>
+      <label class="auth-field" style="margin-top:10px;"><label>链接标识（留空按标题生成，字母 / 数字 / 中文 / 短横线）</label><input class="input" id="pg-slug" value="${esc(page?.slug || '')}" placeholder="如 projects"></label>
+      <div class="switch-row" style="margin-top:12px;">
+        <div><div class="switch-label">已发布</div><div class="switch-sub">关闭则保存为草稿，前台不可见</div></div>
+        <label class="switch"><input type="checkbox" id="pg-status" ${!isNew && page.status === 'published' ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <div class="switch-row">
+        <div><div class="switch-label">显示在顶部导航</div><div class="switch-sub">开启后前台导航「友情链接」与「关于我」之间会出现此页面</div></div>
+        <label class="switch"><input type="checkbox" id="pg-nav" ${!isNew && page.show_in_nav ? 'checked' : ''}><span class="track"></span></label>
+      </div>
+      <label class="auth-field" style="margin-top:12px;"><label>正文（HTML，支持粘贴富文本源码）</label><textarea class="textarea" id="pg-content" rows="12" placeholder="<p>在这里写页面内容…</p>">${esc(page?.content || '')}</textarea></label>
+    </div>
+    <div class="modal-foot"><button class="btn" data-close>取消</button><button class="btn btn-primary" id="pg-save">保存</button></div>`)
+  m.mask.querySelector('#pg-save').addEventListener('click', async () => {
+    const btn = m.mask.querySelector('#pg-save')
+    btn.disabled = true
+    try {
+      const body = {
+        title: m.mask.querySelector('#pg-title').value.trim(),
+        slug: m.mask.querySelector('#pg-slug').value.trim(),
+        content: m.mask.querySelector('#pg-content').value,
+        status: m.mask.querySelector('#pg-status').checked ? 'published' : 'draft',
+        show_in_nav: m.mask.querySelector('#pg-nav').checked,
+      }
+      if (isNew) await api('/admin/pages', { method: 'POST', body })
+      else await api(`/admin/pages/${page.id}`, { method: 'PUT', body })
+      toast('已保存')
+      m.close()
+      navigate() // 操作后重渲染当前路由（经 navigate 守卫，用户已切页时不拽回）
+    } catch (e) {
+      toast(e.message, true)
+      btn.disabled = false
+    }
+  })
+}
+
 /* ---------------- 回收站（文章 / 微博 / 页面软删统一管理，30 天后自动彻底清除） ---------------- */
 const TRASH_TYPE_LABEL = { post: '文章', weibo: '微博', page: '页面' }
 
@@ -2422,11 +2463,12 @@ async function renderAuditReport(body) {
       const bytes = free.filter((u) => selected.has(u.key)).reduce((s, u) => s + u.size, 0)
       if (!(await confirmBox(`删除 ${keys.length} 个未引用文件（共 ${fmtSize(bytes)}）？站内没有内容引用它们，删除后不可恢复。`))) return
       cleanBtn.disabled = true
+      // 进度计数声明在 try 之外：catch 里要用它如实回告「已删掉几批」
+      let deleted = 0
+      let freedBytes = 0
+      const blocked = []
       try {
         // 服务端单次最多收 100 个 key：多批提交并汇总（每批执行前都会重验引用，被新内容引用的会留在 blocked 里）
-        let deleted = 0
-        let freedBytes = 0
-        const blocked = []
         for (let i = 0; i < keys.length; i += 100) {
           const r = await api('/admin/uploads/cleanup', { method: 'POST', body: { keys: keys.slice(i, i + 100) } })
           deleted += r.deleted || 0
@@ -2507,10 +2549,11 @@ async function renderAuditReport(body) {
       const remove = g.items.map((u) => u.key).filter((k) => k !== keep)
       if (!(await confirmBox(`保留这张，把其余 ${remove.length} 个相同副本的引用改到它并删除副本？改写的是站内数据库引用，前台内容照常可用。`))) return
       btn.disabled = true
+      // 同上：计数要在 catch 里可用
+      let updated = 0
+      let freedBytes = 0
       try {
         // 服务端单次最多合并 20 个副本：超大重复组分批提交（同一 keep，REPLACE 改写幂等）
-        let updated = 0
-        let freedBytes = 0
         for (let i = 0; i < remove.length; i += 20) {
           const r = await api('/admin/uploads/merge', { method: 'POST', body: { keep, remove: remove.slice(i, i + 20) } })
           updated += r.updated || 0
@@ -2947,7 +2990,7 @@ async function viewPlugins() {
         <div class="pl-name">${esc(p.title || p.id)}${p.version ? `<span class="pl-ver">v${esc(p.version)}</span>` : ''}</div>
         <div class="pl-desc">${esc(p.description || '暂无介绍')}${p.author ? ` · ${esc(p.author)}` : ''}</div>
       </div>
-      ${statsBtn}${cfgBtn}
+      ${cfgBtn}
       <label class="switch"><input type="checkbox" data-srv-id="${esc(p.id)}" ${srvOff.has(p.id) ? '' : 'checked'}><span class="track"></span></label>
     </div>`
     })
@@ -4358,7 +4401,6 @@ async function navigate() {
     return
   }
   clearTimeout(postsSearchTimer)
-  clearTimeout(membersSearchTimer)
   // 离开编辑器：有未保存修改先自动保存再切页（此时编辑器 DOM 还在，能取到最新内容）；
   // 保存失败只提示不阻塞导航，避免把用户困在编辑器里。随后摘除编辑器的全局监听与挂起定时器
   if (currentRoute === 'editor' && name !== 'editor') {

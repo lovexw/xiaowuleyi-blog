@@ -286,12 +286,14 @@ function renderPluginButtons(ctx) {
 
 async function loadPlugins(ctx, disabledIds) {
   let activeIds = null // 本次 manifest 里未停用的插件 id；manifest 拉取失败时保持 null（不补注册也不清场）
+  // 停用集合：manifest 插件与远程安装插件两段共用，必须定义在第一个 try 之外
+  // （曾在 try 内声明，第二段 try 引用 → ReferenceError，远程插件永远加载不上）
+  const off = new Set(disabledIds || [])
   try {
     const res = await fetch('/plugins/manifest.json', { credentials: 'same-origin' })
     if (!res.ok) return
     const list = await res.json()
     if (!Array.isArray(list)) return
-    const off = new Set(disabledIds || [])
     activeIds = new Set()
     for (const entry of list) {
       // 清单兼容两种形态：旧版纯文件名字符串，新版对象 { id, file, ... }（后台「插件」页按 id 启停）
@@ -465,7 +467,9 @@ function applyAutoFixes() {
     const fixed = s.replace(/\s*!important/gi, '').replace(/text-align\s*:\s*(start|end)/gi, 'text-align: left')
     if (fixed !== s) el.setAttribute('style', fixed)
   })
-  markDirty()
+  // 走编辑区既有的 input 链路触发 markDirty + 字数刷新：markDirty 是 mountEditor 的私有函数，
+  // 这个顶层函数拿不到它（曾直接调用，导致「一键修复」必抛 ReferenceError）
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
 /* ---------------- HTML → Markdown ---------------- */

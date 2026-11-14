@@ -10,6 +10,7 @@
 
 ### 修正
 
+- **后台白屏（2026-11-14 紧急修复）**：精简批次删代码时把「定义删了、引用留着」的地方带进了线上——`navigate()` 里残留 `clearTimeout(membersSearchTimer)`，每次进后台第一行就 `ReferenceError: membersSearchTimer is not defined`，整页白屏。同批还有三处：**页面管理整个 `pageModal` 函数被误删**（「新建页面 / 编辑」点了必崩）、插件页模板还在用已删的 `statsBtn`（整页插件列表渲染失败）、**`GET /api/admin/server-plugins` 路由被误删**（后台插件页 404、服务端插件区永远空）。另修两处只在特定路径引爆的老账：媒体页清理 / 合并的计数变量声明在 `try` 内却被 `catch` 引用（出错时二次崩），编辑器「一键修复」调用了私有 `markDirty`（必抛 ReferenceError）。同时新增 `npm run ui:audit`——headless Chrome 登录后遍历后台全部路由抓运行时错误，补上 typecheck 与 `node --check` 都覆盖不到的前端盲区
 - **精简批次的残留收尾（2026-11-14 审计）**：删干净上一批「只删了主模块、忘掉周边引用」的地方——后台「外部发布」面板不再宣传已删的 `/mcp` 接口，整站搬家 / 清空本站文案不再提「会员与积分记录」，设置页分组提示不再指路已删的「会员」页；`settings.contentVisibleForMembers`（会员豁免可见窗口）孤儿键从默认值表移除；`docs/API.md` 的 `/api/admin/update` 端点行、`GUIDE §18` 的更新中心与 Cloudflare 升级流程（生产早已是 systemd 拉 main 自动重建）、`THEMES/PLUGINS` 的皮肤市场与七套主题、`docker-poc/README` 的广场 hub 接线说明一并校正；`.gitignore` 里两行 GBK 乱码注释与已删预览脚本的忽略项清理。**无行为变化**，纯文档 / 文案 / 死键
 
 ### 移除

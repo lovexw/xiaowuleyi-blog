@@ -37,6 +37,8 @@ npm run dev            # 本地开发（端口被占用时自动 +1）
 npm run typecheck      # TypeScript 类型检查，提交前必须通过
 npm test               # 回归测试（tests/，700+ 用例），提交前必须通过；CI（.github/workflows/ci.yml）每次推送强制执行
 npm run smoke          # 本地冒烟：起 wrangler dev 逐路由断言 200（含多标签文章页回归守卫），改 SQL 拼接/渲染后必跑
+npm run ui:audit       # 后台前端巡检：headless Chrome 登录后遍历全部路由，抓运行时错误。改 public/admin/** 后必跑——
+                       # typecheck 不含 public/、node --check 只查语法，「定义删了引用留着」这类白屏事故只有它能拦住
 npm run db:init:local  # 初始化本地 D1（.wrangler/state，幂等）
 npm run videos:fix-hevc -- --site https://blog.xiaowuleyi.com --user 管理员 --password '***' --dry-run
                        # 把站上放不出来的 HEVC 视频批量转 H.264（需要本地 ffmpeg，见「微博视频」节）
