@@ -32,7 +32,6 @@
 
 ### 随缘小件（有富余再做，不排期）
 
-- emlog / Typecho 迁入（scripts/emlog-migrate 可复活；WordPress WXR 已上线）
 - Server酱推送（通知渠道抽象已落地，照 Bark 的样子补一个插件的事）
 - 创作增强：代码块语法高亮 / KaTeX 公式 / mermaid 图表 / 文章目录（手写小型 tokenizer 或插件形态，不引全家桶）
 - 404 自定义页打磨与无障碍（a11y）小改进

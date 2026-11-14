@@ -342,7 +342,7 @@ AI 可获取面（`src/llms.ts`，`text/plain; charset=utf-8`，`public, max-age
 | --- | --- | --- |
 | POST | `/api/admin/backup` | 手动触发一次全量备份（与每晚 Cron 同一逻辑）：全部业务表导成 JSON 存进 R2 `backups/` 目录，返回 `{ok, key, bytes}`（开关关闭时 `skipped:true`）。结果同时写入设置 `lastBackupAt` / `lastBackupKey` / `lastBackupBytes`。Cron 由 wrangler.jsonc `triggers.crons` 配置（北京时间 00:30），失败时经 Telegram 提醒站长 |
 | GET | `/api/admin/export/markdown` | 下载 Markdown 包 zip：`posts/*.md`（YAML front-matter 含 title/slug/date/status/tags/category/cover/summary，正文 HTML→MD）、`weibo.md`、`pages/*.md`、`images/…`（正文/封面/微博引用的站内图，从 R2 流式打包）、`manifest.json`（含 missingImages 清单）。未被引用的图床文件不打包 |
-| GET | `/api/admin/export/wxr` | 下载 WordPress WXR 1.2 单文件：文章（HTML 正文、publish/draft 状态、分类与标签），供 WordPress / emlog 导入器使用；微博不进 WXR |
+| GET | `/api/admin/export/wxr` | 下载 WordPress WXR 1.2 单文件：文章（HTML 正文、publish/draft 状态、分类与标签），供 WordPress 导入器使用；微博不进 WXR |
 
 ### WordPress 导入（B5：WXR 1.2 迁入，src/import-wxr.ts）
 | 方法 | 路径 | 说明 |

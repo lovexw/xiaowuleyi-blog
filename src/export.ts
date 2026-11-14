@@ -3,7 +3,7 @@
  *
  * - Markdown 包：全部文章（含草稿，front-matter 带 status）+ 微博 + 独立页面 + 被引用的图片。
  *   正文服务端 HTML→MD（src/html-md.ts），图片从 R2 流式打进 zip（src/zip.ts），整包不过内存。
- * - WXR：WordPress eXtended RSS 1.2，文章（HTML 正文）+ 分类 + 标签，供 WordPress / emlog 等导入器使用；
+ * - WXR：WordPress eXtended RSS 1.2，文章（HTML 正文）+ 分类 + 标签，供 WordPress 等导入器使用；
  *   微博（含 B19 视频）不进 WXR（两边无对应模型），用 Markdown 包携带（视频文件与封面帧进 zip 的 images/）。
  * 挂载于 /api/admin/export（api.ts），受登录中间件保护，GET + 会话 Cookie 即下载。
  */

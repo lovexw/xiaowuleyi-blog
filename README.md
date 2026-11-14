@@ -192,7 +192,7 @@ bloghao-xwblog/
 │   ├── site.js         # 前台交互（点赞/评论/楼中楼/灯箱/微博发布/折叠菜单）
 │   └── plugins/        # 编辑器插件（hello-plugin / wechat-collect / douban-media）
 ├── tests/              # 回归测试（npm test，CI 强制执行）
-├── scripts/            # smoke.mjs 本地冒烟；deploy-oracle.sh 服务器部署；emlog-migrate（留档）
+├── scripts/            # smoke.mjs 本地冒烟；deploy-oracle.sh 服务器部署；build-release.mjs 发布清单
 ├── docker-poc/         # ★ 现行部署：Node 单进程多站点（SQLite + 磁盘 / R2 图床）
 ├── docs/               # 全部文档（部署看 DEPLOY-ORACLE.md，边界看 MAINTENANCE.md）
 ├── website/            # 官网源码（⚠️ 已冻结，不再更新）

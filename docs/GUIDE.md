@@ -504,7 +504,7 @@ npx wrangler r2 object get xwblog-images/ --file=?   # 图片按需从媒体库�
 **数据导出**（后台「设置 → 数据导出」，随时可点）：
 
 - **导出 Markdown 包**：`xwblog-markdown-<日期>.zip`，内含全部文章（含草稿，front-matter 带 `title/slug/date/status/tags/category/cover/summary`，正文转成 Markdown）、`weibo.md`、全部独立页面、以及正文 / 封面 / 微博引用到的站内图片（包内 `images/` 目录，正文链接已改写为相对路径可直接本地渲染），`manifest.json` 记录数量与缺失图片清单。未被引用的图床文件不打包（可在「媒体」查看）。
-- **导出 WordPress WXR**：`xwblog-wxr-<日期>.xml`，WordPress / emlog 等系统的标准导入格式（含 HTML 正文、发布状态、分类与标签）；微博不进 WXR，用 Markdown 包携带。
+- **导出 WordPress WXR**：`xwblog-wxr-<日期>.xml`，WordPress 的标准导入格式（含 HTML 正文、发布状态、分类与标签）；微博不进 WXR，用 Markdown 包携带。
 
 数据始终是你的：SQL 备份（上面）、Markdown 包、WXR 三条路，随时搬家不留钳制。
 
@@ -536,7 +536,7 @@ npx wrangler r2 object get xwblog-images/ --file=?   # 图片按需从媒体库�
 - **留的是身份与配置**：站点设置（站名 / 主题 / 页脚等）、**管理员账号与登录密码**（不会把你锁在外面）、各类密钥，以及**已上传的整站包**（R2 的 `bundles/`，清空不会误删你要用来还原的包）。
 - **不可撤销**：这是**硬删除**，不是进回收站（没有 30 天可恢复）。所以确认时要你在弹窗里原样输入「清空本站」才放行——想留底请先「导出整站包」。
 
-与上面三条路的区别：**Markdown 包 / WXR 是「带走文章」**（给 WordPress、emlog 之类别的系统用，格式要转换）；**整站包是「原样搬家」**（还是博客号，数据一个不少）；**自动备份 / SQL 导出**是「兜底快照」（只导出，不提供导入界面）。
+与上面三条路的区别：**Markdown 包 / WXR 是「带走文章」**（给 WordPress 之类别的系统用，格式要转换）；**整站包是「原样搬家」**（还是博客号，数据一个不少）；**自动备份 / SQL 导出**是「兜底快照」（只导出，不提供导入界面）。
 
 ---
 

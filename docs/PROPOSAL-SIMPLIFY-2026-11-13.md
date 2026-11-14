@@ -125,8 +125,9 @@ docker-poc/smoke.sh      ✓ 59/59（控制面广场收录链路段随功能删�
    回滚任一提交即可重新读写。备份清单不再含会员表 → **恢复旧备份到新版代码时，会员表会被忽略**（预期行为）。
 3. **lottery 抽奖原型**：2026-11-08 的未提交原型已完整存档到分支 `wip/lottery-prototype-20261113`
    （含提案文档与 2026-11-08 审计报告）。它依赖会员体系，复活需先回滚会员删除。
-4. **blog.xiaowuleyi.com 的 emlog 并行**：实测该域名首页走 emlog（旧站）、`/rss.xml` `/feed.json` `/admin/`
-   走 xwblog 容器——两套系统同域并存，与本次精简无关，站长知悉即可。
+4. **blog.xiaowuleyi.com 与 emlog 彻底切割（2026-11-14 站长指令）**：仓库侧 emlog 迁移脚本
+   （scripts/emlog-migrate）与全部 emlog 提法已删除；该域名线上仍有 emlog 旧站占着首页路径，
+   由站长另行安排服务器侧下线（openresty 路由 / emlog 容器），仓库不再保留任何迁移通道。
 5. **website/ 与官网**：未删（见「三」）。哪天决定关停 bloghao.com：先停 openresty 站点 → 再删目录 →
    连带删 website-docs / website-sitemap 测试与 build:docs / deploy:site 脚本。
 6. **文档**：GUIDE.md 的会员章节还带着历史描述（本次未逐节重写，加横幅指路本文档）；
