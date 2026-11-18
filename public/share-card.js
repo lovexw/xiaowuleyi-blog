@@ -2,10 +2,13 @@
  * 纯 Canvas 2D 手绘，无任何依赖：暖纸底 + 白色浮卡，头像/站名 → 正文（#话题高亮）→ 九宫格配图 → 时间 + 域名。
  * 图片全部先经 loadImage（跨域强制 crossOrigin='anonymous'，失败返回 null 画占位），
  * 保证画布永不被跨域内容污染，toBlob 导出必成功。
- * 产出 1280px 宽 PNG：弹窗内 <img> 预览（手机长按可存），「保存到相册」在手机端走系统分享面板
+ * 产出 1280px 宽 PNG：弹窗内 <img> 预览（手机长按可存），「保存图片」在手机端走系统分享面板
  * （iOS「存储图像」、安卓/鸿蒙「保存到相册」直达系统相册——a[download] 在手机上只会落「文件/下载」），
- * 桌面端与不支持带文件分享的浏览器退回 download；支持 navigator.share 带文件的设备可「分享给朋友」直发朋友圈，
- * 支持 Clipboard API 的浏览器（桌面 Chrome/Edge/Safari 16+/Firefox 127+）可「复制图片」直接粘贴。 */
+ * 桌面端退回 download；支持 Clipboard API 的浏览器（桌面 Chrome/Edge/Safari 16+/Firefox 127+）可「复制图片」直接粘贴。
+ *
+ * 按钮固定三件套，微博与文章一致：复制链接 / 复制图片 / 保存图片。
+ * 曾经的「分享给朋友」已移除——它依赖 navigator.share 带文件，桌面浏览器基本调不起来（点了没反应），
+ * 是三个动作里唯一没有确定行为的那个；手机端要直接分享仍可走「保存图片」弹出的系统面板。 */
 
 /* 手机端判定：UA 常规识别 + iPadOS（Mac 桌面 UA + 多点触控）。
  * 手机上 a[download] 只会落「文件/下载」，进相册的唯一 Web 通道是带文件的系统分享面板 */
@@ -457,9 +460,6 @@ function ensureModal() {
     '@keyframes sc-fade{from{opacity:0}}' +
     '.sc-tip{padding:8px 16px 0;text-align:center;font-size:12px;color:#a29a89}' +
     '.sc-foot{padding:12px 16px calc(14px + env(safe-area-inset-bottom));display:flex;gap:10px}' +
-    /* 文章模式四按钮两行排（复制链接/保存图片 + 分享给朋友/复制图片），微博模式仍是单行三键 */
-    '.sc-foot.is-grid{flex-wrap:wrap}' +
-    '.sc-foot.is-grid .sc-btn{flex:1 1 calc(50% - 5px)}' +
     '.sc-btn{flex:1;border:0;border-radius:10px;padding:11px 0;font-size:15px;cursor:pointer;font-family:inherit}' +
     '.sc-btn:disabled{opacity:.45;cursor:default}' +
     '.sc-btn-main{background:#2f2a24;color:#fff}' +
@@ -479,7 +479,6 @@ function ensureModal() {
     '<div class="sc-foot">' +
     '<button type="button" class="sc-btn sc-btn-alt" data-act="link" hidden>' + '复制链接' + '</button>' +
     '<button type="button" class="sc-btn sc-btn-alt" data-act="copy" hidden>' + '复制图片' + '</button>' +
-    '<button type="button" class="sc-btn sc-btn-alt" data-act="share" hidden>' + '分享给朋友' + '</button>' +
     '<button type="button" class="sc-btn sc-btn-main" data-act="save" disabled>' + '生成中…' + '</button>' +
     '</div>' +
     '</div>'
@@ -500,15 +499,6 @@ function ensureModal() {
     a.href = state.url
     a.download = state.file.name
     a.click()
-  })
-  overlay.querySelector('[data-act=share]').addEventListener('click', function () {
-    if (!state) return
-    // 能带图带图（直发聊天/朋友圈，文章标题做文案）；带不动图时分享纯链接（文章）
-    if (state.file && navigator.canShare && navigator.canShare({ files: [state.file] })) {
-      navigator.share({ files: [state.file], title: state.title || (state.site + '的微博'), text: state.text }).catch(function () {})
-      return
-    }
-    if (state.link) navigator.share({ title: state.title || state.site, text: state.text, url: state.link }).catch(function () {})
   })
   // 复制图片：state.file 本身就是 PNG Blob，同步塞进 ClipboardItem 不破坏用户手势（Safari 硬性要求）
   overlay.querySelector('[data-act=copy]').addEventListener('click', function () {
@@ -571,7 +561,7 @@ function ensureModal() {
     }
   })
 
-  modal = { overlay: overlay, body: overlay.querySelector('.sc-body'), save: overlay.querySelector('[data-act=save]'), share: overlay.querySelector('[data-act=share]'), copy: overlay.querySelector('[data-act=copy]'), link: overlay.querySelector('[data-act=link]'), title: overlay.querySelector('.sc-title'), tip: overlay.querySelector('.sc-tip'), foot: overlay.querySelector('.sc-foot') }
+  modal = { overlay: overlay, body: overlay.querySelector('.sc-body'), save: overlay.querySelector('[data-act=save]'), copy: overlay.querySelector('[data-act=copy]'), link: overlay.querySelector('[data-act=link]'), title: overlay.querySelector('.sc-title'), tip: overlay.querySelector('.sc-tip') }
   return modal
 }
 
@@ -605,13 +595,12 @@ export async function openShareCard(card) {
   const d = collect(card)
   const m = ensureModal()
   m.title.textContent = '分享卡片'
-  m.foot.classList.remove('is-grid')
-  m.link.hidden = true
+  // 微博也出「复制链接」：卡片带 id="wb-<id>"，锚点直达那一条（分页外的老微博会落到列表顶部）
+  m.link.hidden = false
   setTip(m, false)
   m.body.innerHTML = '<div class="sc-spin" aria-hidden="true"></div>'
   m.save.disabled = true
   m.save.textContent = '生成中…'
-  m.share.hidden = true
   m.copy.hidden = true
   if (state) {
     URL.revokeObjectURL(state.url)
@@ -635,7 +624,8 @@ export async function openShareCard(card) {
       const name = 'weibo-card-' + (d.id || Date.now()) + '.png'
       const file = new File([blob], name, { type: 'image/png' })
       const url = URL.createObjectURL(blob)
-      state = { url: url, file: file, site: d.site, text: d.text.slice(0, 100) }
+      const link = d.id ? location.origin + '/weibo#wb-' + encodeURIComponent(d.id) : location.origin + '/weibo'
+      state = { url: url, file: file, site: d.site, text: d.text.slice(0, 100), link: link }
       m.body.innerHTML = ''
       const img = document.createElement('img')
       img.src = url
@@ -644,7 +634,6 @@ export async function openShareCard(card) {
       m.save.disabled = false
       // 手机端且能带文件分享 → 按钮改走系统分享面板进相册，文案如实改为「保存到相册」
       m.save.textContent = isMobile() && CAN_SHARE_FILES ? '保存到相册' : '保存图片'
-      m.share.hidden = !(navigator.canShare && navigator.canShare({ files: [file] }))
       m.copy.hidden = !(navigator.clipboard && window.ClipboardItem)
       resolve()
     }, 'image/png')
@@ -884,13 +873,11 @@ export async function openArticleShare(btn) {
   const d = collectArticle(btn)
   const m = ensureModal()
   m.title.textContent = '分享文章'
-  m.foot.classList.add('is-grid')
   m.link.hidden = false
   setTip(m, true)
   m.body.innerHTML = '<div class="sc-spin" aria-hidden="true"></div>'
   m.save.disabled = true
   m.save.textContent = '生成中…'
-  m.share.hidden = true
   m.copy.hidden = true
   if (state) {
     URL.revokeObjectURL(state.url)
@@ -920,7 +907,6 @@ export async function openArticleShare(btn) {
       m.save.disabled = false
       // 与微博卡片同口径：手机端且能带文件分享 → 系统分享面板进相册
       m.save.textContent = isMobile() && CAN_SHARE_FILES ? '保存到相册' : '保存图片'
-      m.share.hidden = !navigator.share
       m.copy.hidden = !(navigator.clipboard && window.ClipboardItem)
       resolve()
     }, 'image/png')
